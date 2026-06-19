@@ -103,6 +103,11 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(result.valid)
         self.assertIn("OPENAI_API_KEY is required when BFA_OPENAI_ENABLED=true", result.errors)
 
+    def test_loader_ignores_unknown_environment_keys(self):
+        config = load_config(base_env(UNRELATED_PUBLIC_PATH="do-not-print-me"))
+
+        self.assertNotIn("UNRELATED_PUBLIC_PATH", config.values)
+
     def test_redacted_summary_excludes_sensitive_inputs(self):
         config = load_config(
             base_env(

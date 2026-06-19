@@ -30,6 +30,13 @@ DEFAULTS = {
     "BFA_DB_PATH": "/opt/binance-futures-agent/data/agent.sqlite",
     "BFA_LOG_DIR": "/opt/binance-futures-agent/logs",
     "BFA_RUNTIME_DIR": "/opt/binance-futures-agent/runtime",
+    "SQUARE_COLLECTOR_MODE": "manual",
+    "SQUARE_COOKIE_FILE": "",
+    "SQUARE_EXPORT_DIR": "/opt/binance-futures-agent/runtime/square_exports",
+    "RSS_FEED_URLS": "",
+    "X_BEARER_TOKEN": "",
+    "TELEGRAM_BOT_TOKEN": "",
+    "TELEGRAM_CHANNELS": "",
     "BINANCE_API_KEY": "",
     "BINANCE_API_SECRET": "",
     "BINANCE_FUTURES_BASE_URL": "https://fapi.binance.com",
@@ -75,8 +82,8 @@ def load_config(
 
     values = dict(DEFAULTS)
     if env_file is not None:
-        values.update(_read_env_file(Path(env_file)))
-    values.update(dict(os.environ if env is None else env))
+        values.update(_known_config_values(_read_env_file(Path(env_file))))
+    values.update(_known_config_values(os.environ if env is None else env))
     return AppConfig(values={key: str(value) for key, value in values.items()})
 
 
@@ -165,6 +172,10 @@ def _read_env_file(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         values[key.strip()] = _strip_quotes(value.strip())
     return values
+
+
+def _known_config_values(values: Mapping[str, str]) -> dict[str, str]:
+    return {key: str(values[key]) for key in DEFAULTS if key in values}
 
 
 def _strip_quotes(value: str) -> str:

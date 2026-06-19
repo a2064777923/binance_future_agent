@@ -9,11 +9,11 @@ from bfa.cli import main
 
 
 class CliTests(unittest.TestCase):
-    def invoke(self, *args):
+    def invoke(self, *args, env=None):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            code = main(list(args), env={})
+            code = main(list(args), env={} if env is None else env)
         return code, stdout.getvalue(), stderr.getvalue()
 
     def test_config_check_dry_run_example_exits_zero(self):
@@ -69,6 +69,16 @@ class CliTests(unittest.TestCase):
         self.assertNotIn(synthetic_secret, combined)
         self.assertNotIn(synthetic_openai, combined)
         self.assertIn("redacted", payload)
+
+    def test_config_check_does_not_print_unrelated_environment_values(self):
+        code, stdout, stderr = self.invoke(
+            "config-check",
+            env={"BFA_MODE": "dry_run", "UNRELATED_PUBLIC_PATH": "do-not-print-me"},
+        )
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("UNRELATED_PUBLIC_PATH", stdout + stderr)
+        self.assertNotIn("do-not-print-me", stdout + stderr)
 
 
 if __name__ == "__main__":
