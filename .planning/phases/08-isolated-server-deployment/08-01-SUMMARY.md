@@ -29,12 +29,14 @@ metrics:
 | Commit | Description |
 |--------|-------------|
 | 08f8b75 | Added isolated server env example, systemd unit, remote bootstrap script, and static deployment asset tests. |
+| 20bf19e | Normalized server env line endings during bootstrap to keep Linux env files clean. |
 
 ## Delivered
 
 - Added server env example with dry-run defaults and empty secret values.
 - Added dedicated systemd unit for the isolated app root, env file, venv, and health-check command.
 - Added remote bootstrap script with allowlisted server paths and no automatic service enable/start.
+- Hardened bootstrap env-file installation to strip Windows carriage returns.
 - Added static tests for secret hygiene, forbidden paths, systemd paths, and bootstrap isolation.
 
 ## Deviations

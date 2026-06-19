@@ -27,6 +27,7 @@ metrics:
 | Commit | Description |
 |--------|-------------|
 | 4c5183d | Added secret-safe operations health checks and CLI `ops health-check`. |
+| 86ed2f2 | Added `risk_state` schema verification to deployment health checks. |
 
 ## Delivered
 
@@ -35,6 +36,8 @@ metrics:
   optional OpenAI connectivity.
 - Added CLI `ops health-check` with JSON output and network checks disabled by
   default.
+- Added `risk_state` table verification so server health covers risk-state
+  readiness, not only generic DB access.
 - Added fake-client tests for Binance/OpenAI health paths.
 - Added CLI tests proving secret-safe JSON output and nonzero exit on invalid
   live config.
