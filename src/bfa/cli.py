@@ -11,12 +11,15 @@ from typing import TextIO
 from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.report import generate_review_report
+from bfa.event_store.store import EventStore
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.market.snapshot_writer import write_jsonl_snapshots
 from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
+from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.store import persist_candidates
 
 
 def main(
@@ -51,6 +54,8 @@ def main(
         )
     if args.command == "event-store":
         return _run_event_store(args, env=env, stdout=stdout)
+    if args.command == "strategy":
+        return _run_strategy(args, env=env, stdout=stdout)
 
     parser.print_help(file=stderr)
     return 2
@@ -142,6 +147,25 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     event_report.add_argument("--env-file", help="optional env file to load before environment overrides")
     event_report.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+
+    strategy = subparsers.add_parser(
+        "strategy",
+        help="strategy smoke commands",
+    )
+    strategy_subparsers = strategy.add_subparsers(dest="strategy_command", required=True)
+    candidates = strategy_subparsers.add_parser(
+        "candidates",
+        help="rank hot-coin candidates from a replay packet JSON file",
+    )
+    candidates.add_argument("--env-file", help="optional env file to load before environment overrides")
+    candidates.add_argument("--replay", required=True, help="replay packet JSON file")
+    candidates.add_argument("--db", help="optional SQLite DB path for persisting candidates")
+    candidates.add_argument("--top-n", type=int, default=5, help="maximum candidates to return")
+    candidates.add_argument(
+        "--generated-at",
+        required=True,
+        help="deterministic generation timestamp to stamp candidate records",
+    )
     return parser
 
 
@@ -275,6 +299,38 @@ def _run_event_store(
             return 0
     finally:
         connection.close()
+    return 2
+
+
+def _run_strategy(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    if args.strategy_command == "candidates":
+        replay_packet = json.loads(Path(args.replay).read_text(encoding="utf-8"))
+        result = generate_candidates(
+            replay_packet,
+            StrategyConfig(
+                allowed_symbols=market_symbols(config),
+                generated_at=args.generated_at,
+                top_n=args.top_n,
+            ),
+        )
+        persisted = 0
+        if args.db:
+            connection = connect(args.db)
+            try:
+                store = EventStore(connection)
+                persisted = len(persist_candidates(store, result.candidates))
+            finally:
+                connection.close()
+        payload = result.to_dict()
+        payload["persisted"] = persisted
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
     return 2
 
 

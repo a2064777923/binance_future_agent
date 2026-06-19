@@ -241,6 +241,50 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["report"]["trade_count"], 0)
         self.assertEqual(payload["report"]["reason_codes"], {})
 
+    def test_strategy_candidates_prints_ranked_candidates(self):
+        replay_path = Path("tests") / "fixtures" / "strategy" / "replay_packet.json"
+        code, stdout, stderr = self.invoke(
+            "strategy",
+            "candidates",
+            "--env-file",
+            ".env.example",
+            "--replay",
+            str(replay_path),
+            "--generated-at",
+            "2026-06-19T09:30:00Z",
+        )
+
+        payload = json.loads(stdout)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["candidates"][0]["symbol"], "BTCUSDT")
+        self.assertGreaterEqual(len(payload["rejected"]), 1)
+        self.assertEqual(payload["persisted"], 0)
+
+    def test_strategy_candidates_can_persist_to_db(self):
+        replay_path = Path("tests") / "fixtures" / "strategy" / "replay_packet.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agent.sqlite"
+            code, stdout, stderr = self.invoke(
+                "strategy",
+                "candidates",
+                "--env-file",
+                ".env.example",
+                "--replay",
+                str(replay_path),
+                "--generated-at",
+                "2026-06-19T09:30:00Z",
+                "--db",
+                str(db_path),
+            )
+
+        payload = json.loads(stdout)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["persisted"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
