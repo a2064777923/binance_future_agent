@@ -16,6 +16,10 @@ from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, va
 from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.report import generate_review_report
 from bfa.event_store.store import EventStore
+from bfa.execution.binance_client import BinanceFuturesSignedClient
+from bfa.execution.executor import ExecutionEngine
+from bfa.execution.filters import SymbolExecutionFilters
+from bfa.execution.models import RiskState
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.market.snapshot_writer import write_jsonl_snapshots
@@ -36,6 +40,7 @@ def main(
     collector_factory=None,
     narrative_runner_factory=None,
     ai_client_factory=None,
+    signed_client_factory=None,
 ) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -67,6 +72,13 @@ def main(
             env=env,
             stdout=stdout,
             ai_client_factory=ai_client_factory,
+        )
+    if args.command == "execution":
+        return _run_execution(
+            args,
+            env=env,
+            stdout=stdout,
+            signed_client_factory=signed_client_factory,
         )
 
     parser.print_help(file=stderr)
@@ -193,6 +205,22 @@ def _build_parser() -> argparse.ArgumentParser:
     decide.add_argument("--decided-at", required=True, help="deterministic decision timestamp")
     decide.add_argument("--journal", help="optional JSONL journal path for redacted request/response records")
     decide.add_argument("--db", help="optional SQLite DB path for persisting AI decisions")
+
+    execution = subparsers.add_parser(
+        "execution",
+        help="risk-gated execution smoke commands",
+    )
+    execution_subparsers = execution.add_subparsers(dest="execution_command", required=True)
+    run_execution = execution_subparsers.add_parser(
+        "run",
+        help="turn an accepted AI decision into a dry-run or live order intent",
+    )
+    run_execution.add_argument("--env-file", help="optional env file to load before environment overrides")
+    run_execution.add_argument("--decision", required=True, help="AI decision JSON file")
+    run_execution.add_argument("--symbol", required=True, help="symbol to execute, e.g. BTCUSDT")
+    run_execution.add_argument("--decided-at", required=True, help="deterministic decision timestamp")
+    run_execution.add_argument("--exchange-info", help="optional exchangeInfo JSON file for symbol filters")
+    run_execution.add_argument("--db", help="optional SQLite DB path for persisting execution artifacts")
     return parser
 
 
@@ -424,6 +452,97 @@ def _build_ai_client(config: AppConfig, ai_client_factory):
         api_key=config.get("OPENAI_API_KEY"),
         model=config.get("OPENAI_MODEL"),
     )
+
+
+def _run_execution(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+    signed_client_factory,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    validation = _decision_validation_from_json(Path(args.decision), config, args.symbol, args.decided_at)
+    filters = _execution_filters_from_file(args.exchange_info, args.symbol) if args.exchange_info else None
+    connection = connect(args.db) if args.db else None
+    try:
+        store = EventStore(connection) if connection is not None else None
+        signed_client = _build_signed_client(config, signed_client_factory)
+        result = ExecutionEngine(
+            config=config,
+            signed_client=signed_client,
+            store=store,
+        ).run(
+            symbol=args.symbol,
+            validation=validation,
+            decided_at=args.decided_at,
+            risk_state=RiskState(),
+            filters=filters,
+            now=args.decided_at,
+        )
+    finally:
+        if connection is not None:
+            connection.close()
+    print(json.dumps(result.to_dict(), indent=2, sort_keys=True), file=stdout)
+    return 0 if result.status in {"dry_run", "submitted", "test_order_checked"} else 1
+
+
+def _build_signed_client(config: AppConfig, signed_client_factory):
+    if signed_client_factory is not None:
+        return signed_client_factory(config)
+    if config.get("BFA_MODE") not in {"live", "testnet"}:
+        return None
+    return BinanceFuturesSignedClient(
+        base_url=config.get("BINANCE_FUTURES_BASE_URL"),
+        api_key=config.get("BINANCE_API_KEY"),
+        api_secret=config.get("BINANCE_API_SECRET"),
+    )
+
+
+def _execution_filters_from_file(path: str, symbol: str) -> SymbolExecutionFilters:
+    return SymbolExecutionFilters.from_exchange_info(
+        json.loads(Path(path).read_text(encoding="utf-8")),
+        symbol,
+    )
+
+
+def _decision_validation_from_json(
+    path: Path,
+    config: AppConfig,
+    symbol: str,
+    decided_at: str,
+) -> DecisionValidationResult:
+    from bfa.ai.decision import validate_decision_payload
+    from bfa.ai.schema import AiTradeDecision, DecisionValidationResult, context_from_candidate
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("decision file must contain a JSON object")
+    if isinstance(payload.get("decision"), dict):
+        decision_payload = payload["decision"]
+        decision = AiTradeDecision(
+            decision=str(decision_payload.get("decision", "")),
+            side=str(decision_payload.get("side", "")),
+            confidence=float(decision_payload.get("confidence", 0.0)),
+            entry_price=decision_payload.get("entry_price"),
+            stop_price=decision_payload.get("stop_price"),
+            target_price=decision_payload.get("target_price"),
+            notional_usdt=decision_payload.get("notional_usdt"),
+            hold_time_minutes=decision_payload.get("hold_time_minutes"),
+            reasons=[str(item) for item in decision_payload.get("reasons", [])],
+        )
+        return DecisionValidationResult(
+            accepted=bool(payload.get("accepted")),
+            decision=decision,
+            validation_errors=[str(item) for item in payload.get("validation_errors", [])],
+            validation_warnings=[str(item) for item in payload.get("validation_warnings", [])],
+        )
+    context = context_from_candidate(
+        {"symbol": symbol.upper()},
+        risk_limits=RiskLimits.from_config(config),
+        decided_at=decided_at,
+    )
+    return validate_decision_payload(payload, context)
 
 
 def _candidate_payload_from_json(path: Path) -> dict[str, object]:

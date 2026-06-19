@@ -20,6 +20,7 @@ class CliTests(unittest.TestCase):
         collector_factory=None,
         narrative_runner_factory=None,
         ai_client_factory=None,
+        signed_client_factory=None,
     ):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -31,6 +32,7 @@ class CliTests(unittest.TestCase):
                 collector_factory=collector_factory,
                 narrative_runner_factory=narrative_runner_factory,
                 ai_client_factory=ai_client_factory,
+                signed_client_factory=signed_client_factory,
             )
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -375,6 +377,107 @@ class CliTests(unittest.TestCase):
         self.assertTrue(payload["journaled"])
         self.assertEqual(payload["persisted"], 1)
         self.assertNotIn(secret, stdout + stderr + journal_text)
+
+    def test_execution_run_dry_run_persists_intent_without_signed_client_calls(self):
+        class FakeSignedClient:
+            def __init__(self):
+                self.calls = []
+
+            def new_order(self, **kwargs):
+                self.calls.append(("new_order", kwargs))
+                return {"orderId": 1}
+
+        fake_client = FakeSignedClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            decision_path = tmp_path / "decision.json"
+            db_path = tmp_path / "agent.sqlite"
+            decision_path.write_text(
+                json.dumps(
+                    {
+                        "accepted": True,
+                        "decision": {
+                            "decision": "trade",
+                            "side": "long",
+                            "confidence": 0.7,
+                            "entry_price": 100.0,
+                            "stop_price": 96.0,
+                            "target_price": 108.0,
+                            "notional_usdt": 20.0,
+                            "hold_time_minutes": 30,
+                            "reasons": ["narrative and market confirmation"],
+                        },
+                        "validation_errors": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "execution",
+                "run",
+                "--decision",
+                str(decision_path),
+                "--symbol",
+                "BTCUSDT",
+                "--decided-at",
+                "2026-06-20T10:00:00Z",
+                "--exchange-info",
+                str(Path("tests") / "fixtures" / "binance_market" / "exchange_info.json"),
+                "--db",
+                str(db_path),
+                signed_client_factory=lambda _config: fake_client,
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertFalse(payload["submitted"])
+        self.assertEqual(payload["persisted"]["order_intent"], 1)
+        self.assertEqual(fake_client.calls, [])
+
+    def test_execution_run_live_missing_credentials_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            decision_path = Path(tmp) / "decision.json"
+            decision_path.write_text(
+                json.dumps(
+                    {
+                        "accepted": True,
+                        "decision": {
+                            "decision": "trade",
+                            "side": "long",
+                            "confidence": 0.7,
+                            "entry_price": 100.0,
+                            "stop_price": 96.0,
+                            "target_price": 108.0,
+                            "notional_usdt": 20.0,
+                            "hold_time_minutes": 30,
+                            "reasons": ["narrative and market confirmation"],
+                        },
+                        "validation_errors": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "execution",
+                "run",
+                "--decision",
+                str(decision_path),
+                "--symbol",
+                "BTCUSDT",
+                "--decided-at",
+                "2026-06-20T10:00:00Z",
+                env={"BFA_MODE": "live"},
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "rejected")
+        self.assertIn("missing_binance_credentials", payload["risk"]["reason_codes"])
 
 
 if __name__ == "__main__":
