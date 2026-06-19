@@ -21,7 +21,7 @@
 
 - [x] **MKT-01**: User can fetch Binance USD-M exchange metadata and symbol filters.
 - [x] **MKT-02**: User can fetch ticker, kline, funding, open interest, long/short, and taker buy/sell data for candidate symbols.
-- [ ] **MKT-03**: User can subscribe to relevant WebSocket streams for live candidate monitoring.
+- [x] **MKT-03**: User can subscribe to relevant WebSocket streams for live candidate monitoring.
 - [ ] **MKT-04**: The system stores normalized market snapshots with timestamps and source metadata.
 
 ### Narrative Collection
@@ -102,7 +102,7 @@
 | CFG-03 | Phase 1 | Complete |
 | MKT-01 | Phase 2 | Complete |
 | MKT-02 | Phase 2 | Complete |
-| MKT-03 | Phase 2 | Pending |
+| MKT-03 | Phase 2 | Complete |
 | MKT-04 | Phase 2 | Pending |
 | NAR-01 | Phase 3 | Pending |
 | NAR-02 | Phase 3 | Pending |
