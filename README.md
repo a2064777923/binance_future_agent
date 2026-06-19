@@ -30,6 +30,27 @@ loss limits, and the server kill switch are all configured.
 
 GSD project artifacts live in `.planning/`.
 
+## Local Development
+
+Work from this repository only:
+
+```bash
+cd F:\binance_futures_agent
+python -m venv .venv
+.venv\Scripts\python -m pip install -e .
+.venv\Scripts\python -m unittest discover -s tests
+git diff --check
+```
+
+The package uses a `src/bfa` layout so application imports come from this
+repository, not from adjacent projects. Do not import from `F:\stock`.
+
+Local secrets belong in `.env`, which is ignored by git. `.env.example` documents
+variable names only.
+
+Phase 1 does not implement Binance order placement, OpenAI calls, strategy
+logic, or server deployment.
+
 Next step:
 
 ```bash
