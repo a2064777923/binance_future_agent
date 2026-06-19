@@ -73,6 +73,27 @@ class BinanceSignedClientTests(unittest.TestCase):
         self.assertEqual(urlparse(transport.calls[1]["url"]).path, "/fapi/v1/leverage")
         self.assertIn("leverage=3", transport.calls[1]["url"])
 
+    def test_cancel_order_uses_delete_order_endpoint(self):
+        transport = FakeSignedTransport(response=(200, {"status": "CANCELED"}, {}))
+        client = self.client(transport)
+
+        response = client.cancel_order(symbol="BTCUSDT", orig_client_order_id="bfa-test-1")
+
+        call = transport.calls[0]
+        parsed = urlparse(call["url"])
+        query = parse_qs(parsed.query)
+        self.assertEqual(response["status"], "CANCELED")
+        self.assertEqual(call["method"], "DELETE")
+        self.assertEqual(parsed.path, "/fapi/v1/order")
+        self.assertEqual(query["origClientOrderId"], ["bfa-test-1"])
+        self.assertIn("signature", query)
+
+    def test_cancel_order_requires_order_identifier(self):
+        client = self.client(FakeSignedTransport())
+
+        with self.assertRaises(ValueError):
+            client.cancel_order(symbol="BTCUSDT")
+
     def test_account_open_orders_and_position_risk_are_fakeable(self):
         transport = FakeSignedTransport(response=(200, [], {}))
         client = self.client(transport)

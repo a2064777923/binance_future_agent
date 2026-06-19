@@ -122,6 +122,22 @@ class BinanceFuturesSignedClient:
             params["newClientOrderId"] = new_client_order_id
         return self._signed_request("POST", "/fapi/v1/order", params)
 
+    def cancel_order(
+        self,
+        *,
+        symbol: str,
+        order_id: int | str | None = None,
+        orig_client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        if order_id is None and not orig_client_order_id:
+            raise ValueError("order_id or orig_client_order_id is required")
+        params = {"symbol": _symbol(symbol)}
+        if order_id is not None:
+            params["orderId"] = str(order_id)
+        if orig_client_order_id:
+            params["origClientOrderId"] = orig_client_order_id
+        return self._signed_request("DELETE", "/fapi/v1/order", params)
+
     def test_order(
         self,
         *,
