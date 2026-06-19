@@ -58,6 +58,10 @@ control of downside.
   JSON decision parsing, deterministic local risk validation, redacted
   request/response journaling, `ai_decisions` persistence, and AI CLI smoke
   commands with fake transports.
+- Phase 7 validated dry-run order intents, Binance symbol-filter quantization,
+  deterministic risk gates, signed Binance USD-M Futures order helpers,
+  explicit live execution gating, event-store execution artifacts, CLI
+  execution smoke commands, and read-only exchange reconciliation.
 
 ### Active
 
@@ -70,7 +74,7 @@ control of downside.
   interest change, taker flow, funding state, and volatility.
 - [x] Use OpenAI to produce structured trade decisions with entry, invalidation,
   stop, target, time limit, and confidence.
-- [ ] Implement risk-capped Binance live execution for a 100 USDT pilot account.
+- [x] Implement risk-capped Binance live execution for a 100 USDT pilot account.
 - [ ] Deploy on server `64.83.34.222` under a project-isolated directory and
   systemd unit without modifying existing services.
 
@@ -105,8 +109,8 @@ The user's chosen direction:
 - First strategy focus: hot coins, especially Binance Square narratives.
 - AI provider: OpenAI.
 - Data-source preference: as many useful and allowed sources as possible.
-- Binance API key file exists locally at `F:\币安API密鈅.txt`; contents must be
-  handled as secrets and never committed.
+- Binance API credentials are provided out of band; contents must be handled as
+  secrets and never committed.
 
 ## Constraints
 
@@ -135,13 +139,15 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 6 are complete and verified. The project is installable as an
+Phases 1 through 7 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
 foundations, hot-coin candidate scoring, OpenAI structured decision validation,
-redacted AI journaling, CLI smoke commands, and 111 passing unit tests. Phase 7
-should add dry-run/live risk-gated execution on top of validated AI decisions.
+redacted AI journaling, dry-run/live risk-gated execution, signed Binance
+execution helpers, reconciliation reports, CLI smoke commands, and 135 passing
+unit tests. Phase 8 should deploy the agent under a server-isolated directory
+and dry-run-first service contract.
 
 ## Key Decisions
 
@@ -154,8 +160,9 @@ should add dry-run/live risk-gated execution on top of validated AI decisions.
 | Use local event store before strategy assembly | Replayability and auditability are required before candidate scoring and live trading. | Phase 4 event store complete |
 | Generate candidates before AI decisions | Deterministic scoring should filter and explain candidates before model evaluation. | Phase 5 candidate strategy complete |
 | Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | Phase 6 complete |
+| Keep deterministic risk/execution code in final control | Live mode must be explicit, risk-capped, persisted, and reconcilable before touching Binance. | Phase 7 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | - Pending |
 
 ---
-*Last updated: 2026-06-19 after Phase 6 verification.*
+*Last updated: 2026-06-20 after Phase 7 verification.*

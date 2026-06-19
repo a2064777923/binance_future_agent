@@ -53,11 +53,11 @@
 
 ### Risk And Execution
 
-- [ ] **EXE-01**: User can run the system in dry-run mode without placing exchange orders.
-- [ ] **EXE-02**: User can enable live mode explicitly for Binance USD-M futures.
-- [ ] **EXE-03**: Live mode enforces isolated margin, leverage cap, position notional cap, per-trade risk cap, daily loss cap, max open positions, cooldown, and kill switch checks.
-- [ ] **EXE-04**: The executor can place, inspect, and cancel Binance futures orders while respecting symbol filters.
-- [ ] **EXE-05**: The executor reconciles local state against Binance account/order state after startup and after stream interruptions.
+- [x] **EXE-01**: User can run the system in dry-run mode without placing exchange orders.
+- [x] **EXE-02**: User can enable live mode explicitly for Binance USD-M futures.
+- [x] **EXE-03**: Live mode enforces isolated margin, leverage cap, position notional cap, per-trade risk cap, daily loss cap, max open positions, cooldown, and kill switch checks.
+- [x] **EXE-04**: The executor can place, inspect, and cancel Binance futures orders while respecting symbol filters.
+- [x] **EXE-05**: The executor reconciles local state against Binance account/order state after startup and after stream interruptions.
 
 ### Server Deployment
 
@@ -119,11 +119,11 @@
 | AI-02 | Phase 6 | Complete |
 | AI-03 | Phase 6 | Complete |
 | AI-04 | Phase 6 | Complete |
-| EXE-01 | Phase 7 | Pending |
-| EXE-02 | Phase 7 | Pending |
-| EXE-03 | Phase 7 | Pending |
-| EXE-04 | Phase 7 | Pending |
-| EXE-05 | Phase 7 | Pending |
+| EXE-01 | Phase 7 | Complete |
+| EXE-02 | Phase 7 | Complete |
+| EXE-03 | Phase 7 | Complete |
+| EXE-04 | Phase 7 | Complete |
+| EXE-05 | Phase 7 | Complete |
 | DEP-01 | Phase 8 | Pending |
 | DEP-02 | Phase 8 | Pending |
 | DEP-03 | Phase 8 | Pending |
