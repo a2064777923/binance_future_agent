@@ -58,10 +58,31 @@ class AiClientTests(unittest.TestCase):
         call = transport.calls[0]
         self.assertEqual(call["url"], "https://api.openai.com/v1/responses")
         self.assertEqual(call["headers"]["Authorization"], "Bearer synthetic-openai-key-abcdef")
+        self.assertEqual(call["timeout"], 30.0)
         self.assertEqual(call["payload"]["model"], "gpt-5.4")
         self.assertEqual(call["payload"]["text"]["format"]["name"], "bfa_trade_decision")
         self.assertEqual(response.response_id, "resp_1")
         self.assertEqual(json.loads(response.output_text)["decision"], "pass")
+
+    def test_create_decision_honors_short_timeout_and_token_cap(self):
+        transport = FakeTransport((200, {"id": "resp_1", "output_text": '{"decision":"pass"}'}, {}))
+        client = OpenAIResponsesClient(
+            api_key="synthetic-openai-key-abcdef",
+            model="gpt-5.4",
+            transport=transport,
+            timeout=5.0,
+            max_output_tokens=400,
+        )
+
+        client.create_decision(
+            {"candidate": {"symbol": "BTCUSDT"}},
+            instructions=DECISION_INSTRUCTIONS,
+            schema=decision_json_schema(),
+        )
+
+        call = transport.calls[0]
+        self.assertEqual(call["timeout"], 5.0)
+        self.assertEqual(call["payload"]["max_output_tokens"], 400)
 
     def test_extract_response_text_supports_nested_output_content(self):
         payload = {

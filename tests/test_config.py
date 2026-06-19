@@ -135,6 +135,19 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BFA_MAX_LEVERAGE must be a positive number", result.errors)
         self.assertIn("BFA_MAX_OPEN_POSITIONS must be a positive integer", result.errors)
 
+    def test_invalid_openai_latency_controls_fail(self):
+        config = load_config(
+            base_env(
+                OPENAI_TIMEOUT_SECONDS="0",
+                OPENAI_MAX_OUTPUT_TOKENS="0",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("OPENAI_TIMEOUT_SECONDS must be a positive number", result.errors)
+        self.assertIn("OPENAI_MAX_OUTPUT_TOKENS must be a positive integer", result.errors)
+
     def test_openai_enabled_requires_openai_key(self):
         config = load_config(base_env(BFA_OPENAI_ENABLED="true"))
         result = validate_config(config)

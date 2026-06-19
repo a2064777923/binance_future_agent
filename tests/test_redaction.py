@@ -21,6 +21,8 @@ class RedactionTests(unittest.TestCase):
 
         self.assertFalse(is_sensitive_key("BFA_MODE"))
         self.assertFalse(is_sensitive_key("max_position_notional"))
+        self.assertFalse(is_sensitive_key("OPENAI_MAX_OUTPUT_TOKENS"))
+        self.assertFalse(is_sensitive_key("max_tokens"))
 
     def test_scalar_redaction_preserves_empty_values(self):
         self.assertEqual(redact_value(""), "")

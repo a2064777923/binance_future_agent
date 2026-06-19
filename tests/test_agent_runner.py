@@ -1,10 +1,11 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from bfa.agent import run_agent_once
-from bfa.ai.client import OpenAIResponse
+from bfa.ai.client import OpenAIAPIError, OpenAIResponse
 from bfa.config import load_config
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
@@ -145,6 +146,52 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(result.persisted["candidates"], 1)
         self.assertEqual(result.persisted["ai_decisions"], 1)
         self.assertGreaterEqual(result.persisted["order_intent"], 1)
+
+    def test_run_once_stops_before_execution_when_openai_errors(self):
+        class FailingAiClient:
+            def create_decision(self, context, *, instructions, schema):
+                raise OpenAIAPIError(
+                    status_code=None,
+                    message="timed out",
+                    payload={},
+                    headers={},
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FailingAiClient(),
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                order_intents = connection.execute(
+                    "SELECT COUNT(*) FROM order_intents"
+                ).fetchone()[0]
+            finally:
+                connection.close()
+
+        self.assertEqual(result.status, "ai_error")
+        self.assertFalse(result.submitted)
+        self.assertEqual(order_intents, 0)
+        self.assertIn("openai_error:none:timed out", result.validation_errors)
 
 
 if __name__ == "__main__":

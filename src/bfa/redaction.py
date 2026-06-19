@@ -16,12 +16,19 @@ _SENSITIVE_PARTS = (
     "authorization",
     "private_key",
 )
+_NON_SENSITIVE_KEYS = {
+    "max_tokens",
+    "max_output_tokens",
+    "openai_max_output_tokens",
+}
 
 
 def is_sensitive_key(key: str) -> bool:
     """Return true when a config or diagnostic key is likely secret-bearing."""
 
     normalized = str(key).lower().replace("-", "_")
+    if normalized in _NON_SENSITIVE_KEYS or normalized.endswith("_max_output_tokens"):
+        return False
     return any(part in normalized for part in _SENSITIVE_PARTS)
 
 

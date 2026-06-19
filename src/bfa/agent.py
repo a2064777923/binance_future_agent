@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from bfa.ai.client import OpenAIResponsesClient
+from bfa.ai.client import OpenAIAPIError, OpenAIResponsesClient
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
 from bfa.ai.schema import RiskLimits, context_from_candidate
@@ -106,6 +106,8 @@ def run_agent_once(
     ai_client = ai_client or OpenAIResponsesClient(
         api_key=config.get("OPENAI_API_KEY"),
         model=config.get("OPENAI_MODEL"),
+        timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
+        max_output_tokens=int(config.get("OPENAI_MAX_OUTPUT_TOKENS")),
     )
     signed_client = signed_client or _build_signed_client(config, mode)
 
@@ -150,16 +152,30 @@ def run_agent_once(
             )
 
         candidate = candidates.candidates[0]
-        ai_run = run_ai_decision(
-            client=ai_client,
-            context=context_from_candidate(
-                candidate,
-                risk_limits=RiskLimits.from_config(config),
-                decided_at=started_at,
-            ),
-            journal=AiDecisionJournal(journal_path) if journal_path else None,
-            store=store,
-        )
+        try:
+            ai_run = run_ai_decision(
+                client=ai_client,
+                context=context_from_candidate(
+                    candidate,
+                    risk_limits=RiskLimits.from_config(config),
+                    decided_at=started_at,
+                ),
+                journal=AiDecisionJournal(journal_path) if journal_path else None,
+                store=store,
+            )
+        except Exception as exc:
+            return AgentRunResult(
+                status="ai_error",
+                mode=mode.value,
+                started_at=started_at,
+                market_snapshot_count=len(market_snapshots),
+                narrative_record_count=len(narrative_records),
+                candidate_count=len(candidates.candidates),
+                rejected_count=len(candidates.rejected),
+                selected_symbol=candidate.symbol,
+                validation_errors=[_safe_ai_error(exc)],
+                persisted={"candidates": persisted_candidate_count},
+            )
         if not ai_run.validation.accepted:
             status = "ai_pass" if ai_run.validation.decision and ai_run.validation.decision.decision == "pass" else "ai_rejected"
             return AgentRunResult(
@@ -306,6 +322,13 @@ def _narrative_records(event_ids, records) -> list[dict[str, Any]]:
 
 def _truthy(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _safe_ai_error(exc: Exception) -> str:
+    if isinstance(exc, OpenAIAPIError):
+        status = "none" if exc.status_code is None else str(exc.status_code)
+        return f"openai_error:{status}:{exc.message}"
+    return f"openai_error:{exc.__class__.__name__}"
 
 
 def _now_iso() -> str:

@@ -58,6 +58,8 @@ and OpenAI credentials, then set:
 BFA_MODE=live
 BFA_OPENAI_ENABLED=true
 BFA_REQUIRE_PROTECTIVE_ORDERS=true
+OPENAI_TIMEOUT_SECONDS=5
+OPENAI_MAX_OUTPUT_TOKENS=400
 ```
 
 Keep the kill-switch path configured. Creating that file stops future live
@@ -120,3 +122,8 @@ Stop automated trading:
 systemctl disable --now binance-futures-agent-live.timer
 touch /opt/binance-futures-agent/runtime/KILL_SWITCH
 ```
+
+The LLM is intentionally a slow-path filter. The runner uses
+`OPENAI_TIMEOUT_SECONDS` to fail closed: if OpenAI is slow, unavailable, or
+returns invalid output, the cycle stops before execution and the exchange-side
+protection logic remains deterministic.

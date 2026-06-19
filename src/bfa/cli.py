@@ -502,6 +502,8 @@ def _build_ai_client(config: AppConfig, ai_client_factory):
     return OpenAIResponsesClient(
         api_key=config.get("OPENAI_API_KEY"),
         model=config.get("OPENAI_MODEL"),
+        timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
+        max_output_tokens=int(config.get("OPENAI_MAX_OUTPUT_TOKENS")),
     )
 
 
