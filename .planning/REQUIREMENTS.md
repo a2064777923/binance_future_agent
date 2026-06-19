@@ -33,10 +33,10 @@
 
 ### Candidate Strategy
 
-- [ ] **STR-01**: User can generate ranked hot-coin candidates from narrative heat and futures-market features.
-- [ ] **STR-02**: Each candidate includes explicit reason codes and data-quality notes.
-- [ ] **STR-03**: The system can reject candidates that fail liquidity, volatility, min-notional, or data-freshness filters.
-- [ ] **STR-04**: Candidate generation is deterministic and replayable from stored inputs.
+- [x] **STR-01**: User can generate ranked hot-coin candidates from narrative heat and futures-market features.
+- [x] **STR-02**: Each candidate includes explicit reason codes and data-quality notes.
+- [x] **STR-03**: The system can reject candidates that fail liquidity, volatility, min-notional, or data-freshness filters.
+- [x] **STR-04**: Candidate generation is deterministic and replayable from stored inputs.
 
 ### OpenAI Decision Layer
 
@@ -111,10 +111,10 @@
 | EVT-01 | Phase 4 | Complete |
 | EVT-02 | Phase 4 | Complete |
 | EVT-03 | Phase 4 | Complete |
-| STR-01 | Phase 5 | Pending |
-| STR-02 | Phase 5 | Pending |
-| STR-03 | Phase 5 | Pending |
-| STR-04 | Phase 5 | Pending |
+| STR-01 | Phase 5 | Complete |
+| STR-02 | Phase 5 | Complete |
+| STR-03 | Phase 5 | Complete |
+| STR-04 | Phase 5 | Complete |
 | AI-01 | Phase 6 | Pending |
 | AI-02 | Phase 6 | Pending |
 | AI-03 | Phase 6 | Pending |
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-06-19*
-*Last updated: 2026-06-19 after Phase 4 verification*
+*Last updated: 2026-06-19 after Phase 5 verification*

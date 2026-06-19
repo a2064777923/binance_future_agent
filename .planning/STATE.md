@@ -2,23 +2,23 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 5 — Hot-Coin Candidate Strategy
-status: executing
-stopped_at: Phase 4 verified and completed
-last_updated: "2026-06-19T16:08:53.824Z"
+current_phase: 6 — OpenAI Decision Layer
+status: planning
+stopped_at: Phase 5 verified and completed
+last_updated: "2026-06-19T16:14:50.301Z"
 progress:
   total_phases: 8
-  completed_phases: 4
-  total_plans: 15
-  completed_plans: 15
-  percent: 50
+  completed_phases: 5
+  total_plans: 17
+  completed_plans: 17
+  percent: 63
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 5 — Hot-Coin Candidate Strategy
-**Status:** Ready to execute
+**Current phase:** 6 — OpenAI Decision Layer
+**Status:** Ready to plan
 **Last planned:** 2026-06-19
 **Plan count:** 0
 
@@ -61,11 +61,11 @@ projects or losing control of downside.
 ## Next Command
 
 ```bash
-$gsd-discuss-phase 5
+$gsd-discuss-phase 6
 ```
 
 ## Session
 
 **Last session:** 2026-06-19T15:56:54.417Z
-**Stopped at:** Phase 4 verified and completed
-**Resume file:** .planning/phases/04-event-store-and-replay-foundation/04-VERIFICATION.md
+**Stopped at:** Phase 5 verified and completed
+**Resume file:** .planning/phases/05-hot-coin-candidate-strategy/05-VERIFICATION.md
