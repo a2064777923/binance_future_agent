@@ -26,6 +26,7 @@ from bfa.market.snapshot_writer import write_jsonl_snapshots
 from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
+from bfa.ops.health import run_health_checks
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
 
@@ -79,6 +80,14 @@ def main(
             env=env,
             stdout=stdout,
             signed_client_factory=signed_client_factory,
+        )
+    if args.command == "ops":
+        return _run_ops(
+            args,
+            env=env,
+            stdout=stdout,
+            client_factory=client_factory,
+            ai_client_factory=ai_client_factory,
         )
 
     parser.print_help(file=stderr)
@@ -221,6 +230,22 @@ def _build_parser() -> argparse.ArgumentParser:
     run_execution.add_argument("--decided-at", required=True, help="deterministic decision timestamp")
     run_execution.add_argument("--exchange-info", help="optional exchangeInfo JSON file for symbol filters")
     run_execution.add_argument("--db", help="optional SQLite DB path for persisting execution artifacts")
+
+    ops = subparsers.add_parser(
+        "ops",
+        help="server deployment and operations smoke commands",
+    )
+    ops_subparsers = ops.add_subparsers(dest="ops_command", required=True)
+    health = ops_subparsers.add_parser(
+        "health-check",
+        help="run secret-safe server health checks",
+    )
+    health.add_argument("--env-file", help="optional env file to load before environment overrides")
+    health.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    health.add_argument("--create-dirs", action="store_true", help="create missing runtime directories")
+    health.add_argument("--check-binance", action="store_true", help="check public Binance exchangeInfo")
+    health.add_argument("--check-openai", action="store_true", help="check OpenAI Responses API when enabled")
+    health.add_argument("--skip-network", action="store_true", help="disable all network health checks")
     return parser
 
 
@@ -497,6 +522,34 @@ def _build_signed_client(config: AppConfig, signed_client_factory):
         api_key=config.get("BINANCE_API_KEY"),
         api_secret=config.get("BINANCE_API_SECRET"),
     )
+
+
+def _run_ops(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+    client_factory,
+    ai_client_factory,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    if args.ops_command == "health-check":
+        check_binance = bool(args.check_binance and not args.skip_network)
+        check_openai = bool(args.check_openai and not args.skip_network)
+        market_client = _build_client(config, client_factory) if check_binance else None
+        ai_client = _build_ai_client(config, ai_client_factory) if check_openai else None
+        report = run_health_checks(
+            config,
+            db_path=args.db,
+            create_dirs=args.create_dirs,
+            check_binance=check_binance,
+            check_openai=check_openai,
+            market_client=market_client,
+            ai_client=ai_client,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.ok else 1
+    return 2
 
 
 def _execution_filters_from_file(path: str, symbol: str) -> SymbolExecutionFilters:

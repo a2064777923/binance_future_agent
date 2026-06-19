@@ -479,6 +479,56 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "rejected")
         self.assertIn("missing_binance_credentials", payload["risk"]["reason_codes"])
 
+    def test_ops_health_check_prints_secret_safe_json(self):
+        secret = "synthetic-openai-key-abcdef"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "health-check",
+                "--create-dirs",
+                env={
+                    "BFA_MODE": "dry_run",
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "BFA_LOG_DIR": str(root / "logs"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                    "BFA_DB_PATH": str(root / "data" / "agent.sqlite"),
+                    "BFA_KILL_SWITCH_FILE": str(root / "runtime" / "KILL_SWITCH"),
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": secret,
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertTrue(payload["ok"])
+        self.assertNotIn(secret, stdout)
+        self.assertNotEqual(payload["redacted_config"]["OPENAI_API_KEY"], secret)
+
+    def test_ops_health_check_invalid_live_config_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "health-check",
+                "--create-dirs",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "BFA_LOG_DIR": str(root / "logs"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                    "BFA_DB_PATH": str(root / "data" / "agent.sqlite"),
+                    "BFA_KILL_SWITCH_FILE": str(root / "runtime" / "KILL_SWITCH"),
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertFalse(payload["ok"])
+        self.assertIn("BINANCE_API_KEY is required for live mode", payload["checks"][0]["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()
