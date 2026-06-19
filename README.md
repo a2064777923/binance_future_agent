@@ -48,8 +48,10 @@ repository, not from adjacent projects. Do not import from `F:\stock`.
 Local secrets belong in `.env`, which is ignored by git. `.env.example` documents
 variable names only.
 
-Phase 1 does not implement Binance order placement, OpenAI calls, strategy
-logic, or server deployment.
+Phases 1-6 implement the isolated project foundation, public market data,
+narrative ingestion, event-store replay, hot-coin candidate scoring, and
+OpenAI-structured decision validation. Binance order placement and server
+deployment are still deferred to later phases.
 
 ## OpenAI Decision Smoke Command
 
@@ -69,5 +71,5 @@ python -m bfa.cli ai decide ^
 Next step:
 
 ```bash
-$gsd-plan-phase 1
+$gsd-discuss-phase 7
 ```

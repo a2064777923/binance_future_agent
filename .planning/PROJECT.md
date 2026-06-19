@@ -54,6 +54,10 @@ control of downside.
   packets, narrative/market feature extraction, conservative rejection gates,
   reason codes, data-quality notes, candidate persistence, and CLI smoke
   commands.
+- Phase 6 validated compact OpenAI decision context packets, strict structured
+  JSON decision parsing, deterministic local risk validation, redacted
+  request/response journaling, `ai_decisions` persistence, and AI CLI smoke
+  commands with fake transports.
 
 ### Active
 
@@ -64,7 +68,7 @@ control of downside.
   fill, and outcome in a replayable local event store.
 - [x] Rank candidate symbols by narrative heat, liquidity, price momentum, open
   interest change, taker flow, funding state, and volatility.
-- [ ] Use OpenAI to produce structured trade decisions with entry, invalidation,
+- [x] Use OpenAI to produce structured trade decisions with entry, invalidation,
   stop, target, time limit, and confidence.
 - [ ] Implement risk-capped Binance live execution for a 100 USDT pilot account.
 - [ ] Deploy on server `64.83.34.222` under a project-isolated directory and
@@ -131,13 +135,13 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 5 are complete and verified. The project is installable as an
+Phases 1 through 6 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
-foundations, hot-coin candidate scoring, CLI smoke commands, and 96 passing unit
-tests. Phase 6 should build the OpenAI decision layer on top of candidate
-records while deterministic risk/execution remains deferred.
+foundations, hot-coin candidate scoring, OpenAI structured decision validation,
+redacted AI journaling, CLI smoke commands, and 111 passing unit tests. Phase 7
+should add dry-run/live risk-gated execution on top of validated AI decisions.
 
 ## Key Decisions
 
@@ -149,9 +153,9 @@ records while deterministic risk/execution remains deferred.
 | Start with hot-coin strategy | The user wants a controlled imitation of the Square/narrative-driven approach. | Phase 3 narrative collection complete |
 | Use local event store before strategy assembly | Replayability and auditability are required before candidate scoring and live trading. | Phase 4 event store complete |
 | Generate candidates before AI decisions | Deterministic scoring should filter and explain candidates before model evaluation. | Phase 5 candidate strategy complete |
-| Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | - Pending |
+| Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | Phase 6 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | - Pending |
 
 ---
-*Last updated: 2026-06-19 after Phase 5 verification.*
+*Last updated: 2026-06-19 after Phase 6 verification.*

@@ -40,10 +40,10 @@
 
 ### OpenAI Decision Layer
 
-- [ ] **AI-01**: User can send a compact candidate context packet to an OpenAI model.
-- [ ] **AI-02**: The model response is parsed as structured JSON with side, decision, confidence, entry, stop, target, hold time, and reasons.
-- [ ] **AI-03**: Invalid, incomplete, or risk-inconsistent model responses are rejected before execution.
-- [ ] **AI-04**: Every model request and redacted response is journaled for later review.
+- [x] **AI-01**: User can send a compact candidate context packet to an OpenAI model.
+- [x] **AI-02**: The model response is parsed as structured JSON with side, decision, confidence, entry, stop, target, hold time, and reasons.
+- [x] **AI-03**: Invalid, incomplete, or risk-inconsistent model responses are rejected before execution.
+- [x] **AI-04**: Every model request and redacted response is journaled for later review.
 
 ### Event Store And Replay
 
@@ -115,10 +115,10 @@
 | STR-02 | Phase 5 | Complete |
 | STR-03 | Phase 5 | Complete |
 | STR-04 | Phase 5 | Complete |
-| AI-01 | Phase 6 | Pending |
-| AI-02 | Phase 6 | Pending |
-| AI-03 | Phase 6 | Pending |
-| AI-04 | Phase 6 | Pending |
+| AI-01 | Phase 6 | Complete |
+| AI-02 | Phase 6 | Complete |
+| AI-03 | Phase 6 | Complete |
+| AI-04 | Phase 6 | Complete |
 | EXE-01 | Phase 7 | Pending |
 | EXE-02 | Phase 7 | Pending |
 | EXE-03 | Phase 7 | Pending |
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-06-19*
-*Last updated: 2026-06-19 after Phase 5 verification*
+*Last updated: 2026-06-19 after Phase 6 verification*

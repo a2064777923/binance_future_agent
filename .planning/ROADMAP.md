@@ -149,5 +149,5 @@ collector adapters.
 Run:
 
 ```bash
-$gsd-discuss-phase 6
+$gsd-discuss-phase 7
 ```
