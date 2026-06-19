@@ -47,9 +47,9 @@
 
 ### Event Store And Replay
 
-- [ ] **EVT-01**: The system stores narratives, market snapshots, candidates, AI decisions, order intents, exchange responses, fills, and outcomes in a local event store.
-- [ ] **EVT-02**: User can replay a historical window to regenerate candidates and compare decisions against outcomes.
-- [ ] **EVT-03**: User can generate a review report with win rate, expectancy, drawdown, fee/slippage impact, and reason-code performance.
+- [x] **EVT-01**: The system stores narratives, market snapshots, candidates, AI decisions, order intents, exchange responses, fills, and outcomes in a local event store.
+- [x] **EVT-02**: User can replay a historical window to regenerate candidates and compare decisions against outcomes.
+- [x] **EVT-03**: User can generate a review report with win rate, expectancy, drawdown, fee/slippage impact, and reason-code performance.
 
 ### Risk And Execution
 
@@ -108,9 +108,9 @@
 | NAR-02 | Phase 3 | Complete |
 | NAR-03 | Phase 3 | Complete |
 | NAR-04 | Phase 3 | Complete |
-| EVT-01 | Phase 4 | Pending |
-| EVT-02 | Phase 4 | Pending |
-| EVT-03 | Phase 4 | Pending |
+| EVT-01 | Phase 4 | Complete |
+| EVT-02 | Phase 4 | Complete |
+| EVT-03 | Phase 4 | Complete |
 | STR-01 | Phase 5 | Pending |
 | STR-02 | Phase 5 | Pending |
 | STR-03 | Phase 5 | Pending |
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-06-19*
-*Last updated: 2026-06-19 after Phase 3 verification*
+*Last updated: 2026-06-19 after Phase 4 verification*

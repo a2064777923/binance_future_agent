@@ -46,18 +46,22 @@ control of downside.
   RSS/Atom fallback ingestion, normalized narrative records, conservative symbol
   extraction, deterministic deduplication, JSONL output, and narrative CLI
   smoke commands.
+- Phase 4 validated the SQLite event-store schema, append-only replay events,
+  typed narrative and market snapshot persistence, generic future artifact
+  persistence, deterministic replay packets, review metrics, and event-store
+  CLI smoke commands.
 
 ### Active
 
 - [x] Collect Binance USD-M futures market data needed for hot-coin filtering.
 - [x] Collect narrative and hotness signals from Binance Square plus fallback
   social/news sources where access is allowed.
+- [x] Record every candidate, AI decision, order intent, exchange response,
+  fill, and outcome in a replayable local event store.
 - [ ] Rank candidate symbols by narrative heat, liquidity, price momentum, open
   interest change, taker flow, funding state, and volatility.
 - [ ] Use OpenAI to produce structured trade decisions with entry, invalidation,
   stop, target, time limit, and confidence.
-- [ ] Record every candidate, AI decision, order intent, exchange response, fill,
-  and outcome in a replayable local event store.
 - [ ] Implement risk-capped Binance live execution for a 100 USDT pilot account.
 - [ ] Deploy on server `64.83.34.222` under a project-isolated directory and
   systemd unit without modifying existing services.
@@ -123,11 +127,13 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 3 are complete and verified. The project is installable as an
+Phases 1 through 4 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
-evidence output, CLI smoke commands, and 76 passing unit tests. Phase 4 should
-build the local SQLite event store and deterministic replay foundation.
+evidence output, a local SQLite event store, deterministic replay/report
+foundations, CLI smoke commands, and 88 passing unit tests. Phase 5 should build
+the hot-coin candidate scoring strategy on top of stored narrative and market
+inputs.
 
 ## Key Decisions
 
@@ -137,9 +143,10 @@ build the local SQLite event store and deterministic replay foundation.
 | Use Python first | Binance/OpenAI clients, data processing, CLI tooling, and tests are straightforward in Python. | Phase 1 scaffold complete |
 | Use Binance USD-M futures official APIs | The pilot trades USDT-margined contracts and needs supported market/order endpoints. | Phase 2 public market data complete |
 | Start with hot-coin strategy | The user wants a controlled imitation of the Square/narrative-driven approach. | Phase 3 narrative collection complete |
+| Use local event store before strategy assembly | Replayability and auditability are required before candidate scoring and live trading. | Phase 4 event store complete |
 | Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | - Pending |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | - Pending |
 
 ---
-*Last updated: 2026-06-19 after Phase 3 verification.*
+*Last updated: 2026-06-19 after Phase 4 verification.*
