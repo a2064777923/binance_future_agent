@@ -40,8 +40,13 @@ install_source_archive() {
 
 install_env_placeholder() {
   if [ ! -f "$ETC_DIR/env" ]; then
-    install -m 0600 "$APP_ROOT/app/deploy/server-env.example" "$ETC_DIR/env"
+    tr -d '\r' < "$APP_ROOT/app/deploy/server-env.example" > "$ETC_DIR/env"
+    chmod 0600 "$ETC_DIR/env"
   else
+    tmp_env="$(mktemp)"
+    tr -d '\r' < "$ETC_DIR/env" > "$tmp_env"
+    cat "$tmp_env" > "$ETC_DIR/env"
+    rm -f "$tmp_env"
     chmod 0600 "$ETC_DIR/env"
   fi
 }

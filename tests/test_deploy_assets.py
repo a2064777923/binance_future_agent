@@ -80,6 +80,7 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn('UNIT_PATH="/etc/systemd/system/binance-futures-agent.service"', script)
         self.assertIn('refusing non-isolated APP_ROOT', script)
         self.assertIn('refusing non-isolated ETC_DIR', script)
+        self.assertIn("tr -d '\\r'", script)
         self.assertNotRegex(script, re.compile(r"systemctl\s+(enable|start|restart)\b"))
 
 
