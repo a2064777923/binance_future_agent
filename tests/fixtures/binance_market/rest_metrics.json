@@ -1,0 +1,66 @@
+{
+  "ticker_24hr": {
+    "symbol": "BTCUSDT",
+    "priceChange": "100.00",
+    "priceChangePercent": "1.25",
+    "lastPrice": "70100.00",
+    "volume": "12345.678",
+    "quoteVolume": "865000000.00",
+    "openTime": 1700000000000,
+    "closeTime": 1700003600000
+  },
+  "klines": [
+    [
+      1700000000000,
+      "70000.00",
+      "70200.00",
+      "69900.00",
+      "70100.00",
+      "123.456",
+      1700000299999,
+      "8650000.00",
+      1000,
+      "70.000",
+      "4900000.00",
+      "0"
+    ]
+  ],
+  "funding_rate": [
+    {
+      "symbol": "BTCUSDT",
+      "fundingRate": "0.00010000",
+      "fundingTime": 1700000000000,
+      "markPrice": "70100.00"
+    }
+  ],
+  "open_interest": {
+    "openInterest": "10659.509",
+    "symbol": "BTCUSDT",
+    "time": 1700000000000
+  },
+  "open_interest_hist": [
+    {
+      "symbol": "BTCUSDT",
+      "sumOpenInterest": "20403.63700000",
+      "sumOpenInterestValue": "150570784.07809979",
+      "timestamp": "1700000000000"
+    }
+  ],
+  "top_long_short_position_ratio": [
+    {
+      "symbol": "BTCUSDT",
+      "longShortRatio": "1.4342",
+      "longAccount": "0.5891",
+      "shortAccount": "0.4108",
+      "timestamp": "1700000000000"
+    }
+  ],
+  "taker_buy_sell_volume": [
+    {
+      "buySellRatio": "1.5586",
+      "buyVol": "387.3300",
+      "sellVol": "248.5030",
+      "timestamp": "1700000000000"
+    }
+  ]
+}

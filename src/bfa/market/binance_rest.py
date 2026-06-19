@@ -83,6 +83,37 @@ class BinanceFuturesRestClient:
     def exchange_info(self) -> MarketDataResponse:
         return self._get("/fapi/v1/exchangeInfo")
 
+    def ticker_24hr(self, symbol: str) -> MarketDataResponse:
+        return self._get(
+            "/fapi/v1/ticker/24hr",
+            {"symbol": _normalize_symbol(symbol)},
+        )
+
+    def klines(self, symbol: str, *, interval: str, limit: int = 30) -> MarketDataResponse:
+        return self._get(
+            "/fapi/v1/klines",
+            {
+                "symbol": _normalize_symbol(symbol),
+                "interval": _require_text("interval", interval),
+                "limit": str(_validate_limit(limit)),
+            },
+        )
+
+    def funding_rate(self, symbol: str, *, limit: int = 20) -> MarketDataResponse:
+        return self._get(
+            "/fapi/v1/fundingRate",
+            {
+                "symbol": _normalize_symbol(symbol),
+                "limit": str(_validate_limit(limit)),
+            },
+        )
+
+    def open_interest(self, symbol: str) -> MarketDataResponse:
+        return self._get(
+            "/fapi/v1/openInterest",
+            {"symbol": _normalize_symbol(symbol)},
+        )
+
     def _get(self, endpoint: str, params: dict[str, str] | None = None) -> MarketDataResponse:
         request_params = {} if params is None else dict(params)
         self._pace()
@@ -116,6 +147,23 @@ class BinanceFuturesRestClient:
             if remaining > 0:
                 time.sleep(remaining)
         self._last_request_at = time.monotonic()
+
+
+def _normalize_symbol(symbol: str) -> str:
+    return _require_text("symbol", symbol).upper()
+
+
+def _require_text(name: str, value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError(f"{name} is required")
+    return cleaned
+
+
+def _validate_limit(limit: int) -> int:
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    return limit
 
 
 def _error_from_payload(
