@@ -13,6 +13,7 @@ _SENSITIVE_PARTS = (
     "token",
     "password",
     "cookie",
+    "authorization",
     "private_key",
 )
 
