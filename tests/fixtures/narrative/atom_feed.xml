@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Crypto</title>
+  <entry>
+    <id>atom-001</id>
+    <title>ESPORTSUSDT narrative spike</title>
+    <summary>ESPORTSUSDT appeared in multiple Square discussions.</summary>
+    <link href="https://news.example.test/esports" />
+    <updated>2026-06-19T10:00:00Z</updated>
+    <author>
+      <name>atomdesk</name>
+    </author>
+  </entry>
+</feed>
+
