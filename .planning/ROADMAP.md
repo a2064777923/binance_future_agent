@@ -36,8 +36,9 @@ protective-order, or isolation guarantees.
 
 **Requirements:** LVA-01, LVA-02, LVA-03, LVA-04, LVA-05, LVA-06
 
-**Status:** Waiting on out-of-band `OPENAI_API_KEY`; Binance credentials are
-configured on the server and the live timer remains disabled.
+**Status:** OpenAI key and Binance credentials are configured out of band; the
+live timer is enabled/active after a no-candidate smoke. Remaining work is to
+produce candidate-bearing cycles and capture OpenAI/execution evidence.
 
 **Success Criteria:**
 
@@ -72,7 +73,7 @@ configured on the server and the live timer remains disabled.
 | 6 | v1.0 | 3/3 | Complete | 2026-06-19 |
 | 7 | v1.0 | 4/4 | Complete | 2026-06-19 |
 | 8 | v1.0 | 4/4 | Complete | 2026-06-19 |
-| 9 | v1.1 | 0/1 | Waiting on OpenAI key | - |
+| 9 | v1.1 | 0/1 | Candidate source in progress | - |
 
 ## Requirement Coverage
 
@@ -82,8 +83,9 @@ configured on the server and the live timer remains disabled.
 
 ## Next Step
 
-Provide `OPENAI_API_KEY` out of band, then run:
+Add an automatic hot-market fallback source, then observe a candidate-driven
+live cycle:
 
 ```bash
-$gsd-plan-phase 9
+$gsd-execute-phase 9
 ```

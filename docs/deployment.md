@@ -62,6 +62,7 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_TIMEOUT_SECONDS=5
 OPENAI_MAX_OUTPUT_TOKENS=400
 OPENAI_RETRY_AFTER_SECONDS=300
+BFA_MARKET_HEAT_NARRATIVE_ENABLED=true
 ```
 
 Keep the kill-switch path configured. Creating that file stops future live
@@ -132,3 +133,9 @@ protection logic remains deterministic. When the OpenAI-compatible endpoint is
 down, the runner writes `/opt/binance-futures-agent/runtime/openai_backoff.json`
 and returns `openai_backoff` until `OPENAI_RETRY_AFTER_SECONDS` has elapsed;
 the next timer cycle then checks the API again.
+
+When Square exports and RSS feeds are empty, the live runner can derive a
+clearly labelled `market_heat` fallback narrative from Binance USD-M public
+metrics. This is controlled by `BFA_MARKET_HEAT_NARRATIVE_ENABLED` and the
+`BFA_MARKET_HEAT_*` thresholds in the env file; it does not replace the OpenAI
+decision gate or deterministic execution risk checks.

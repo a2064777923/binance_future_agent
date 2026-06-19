@@ -24,6 +24,7 @@ from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
+from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
@@ -140,6 +141,8 @@ def run_agent_once(
         market_snapshots = collector.collect_rest_snapshots()
         market_event_ids = [store.insert_market_snapshot(snapshot) for snapshot in market_snapshots]
         narrative_records = narrative_runner.collect()
+        if not narrative_records and _truthy(config.get("BFA_MARKET_HEAT_NARRATIVE_ENABLED")):
+            narrative_records = _collect_market_heat_narratives(config, market_snapshots, started_at)
         narrative_event_ids = [store.insert_narrative(record) for record in narrative_records]
 
         replay_packet = {
@@ -285,6 +288,20 @@ def _build_narrative_runner(config: AppConfig, *, collected_at: str) -> Narrativ
     if feeds:
         collectors.append(RssFeedCollector(feeds, known_symbols=symbols, collected_at=collected_at))
     return NarrativeCollectionRunner(collectors)
+
+
+def _collect_market_heat_narratives(config: AppConfig, market_snapshots, collected_at: str):
+    return MarketHeatNarrativeCollector(
+        market_snapshots,
+        known_symbols=market_symbols(config),
+        collected_at=collected_at,
+        min_quote_volume=float(config.get("BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT")),
+        min_price_change_percent=float(config.get("BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT")),
+        min_taker_buy_sell_ratio=float(config.get("BFA_MARKET_HEAT_MIN_TAKER_BUY_SELL_RATIO")),
+        min_open_interest_value=float(config.get("BFA_MARKET_HEAT_MIN_OPEN_INTEREST_VALUE_USDT")),
+        max_kline_range_percent=float(config.get("BFA_MARKET_HEAT_MAX_KLINE_RANGE_PERCENT")),
+        max_records=int(config.get("BFA_MARKET_HEAT_MAX_RECORDS")),
+    ).collect()
 
 
 def _build_signed_client(config: AppConfig, mode: RuntimeMode):

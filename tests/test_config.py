@@ -18,6 +18,13 @@ def base_env(**overrides):
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
         "BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT,SOLUSDT",
+        "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "true",
+        "BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT": "5000000",
+        "BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT": "0.3",
+        "BFA_MARKET_HEAT_MIN_TAKER_BUY_SELL_RATIO": "1.05",
+        "BFA_MARKET_HEAT_MIN_OPEN_INTEREST_VALUE_USDT": "1000000",
+        "BFA_MARKET_HEAT_MAX_KLINE_RANGE_PERCENT": "15",
+        "BFA_MARKET_HEAT_MAX_RECORDS": "3",
         "BINANCE_API_KEY": "",
         "BINANCE_API_SECRET": "",
         "BINANCE_FUTURES_BASE_URL": "https://fapi.binance.com",
@@ -128,6 +135,8 @@ class ConfigTests(unittest.TestCase):
                 BFA_ACCOUNT_CAPITAL_USDT="lots",
                 BFA_MAX_LEVERAGE="-3",
                 BFA_MAX_OPEN_POSITIONS="0",
+                BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT="0",
+                BFA_MARKET_HEAT_MAX_RECORDS="0",
             )
         )
         result = validate_config(config)
@@ -136,6 +145,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BFA_ACCOUNT_CAPITAL_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MAX_LEVERAGE must be a positive number", result.errors)
         self.assertIn("BFA_MAX_OPEN_POSITIONS must be a positive integer", result.errors)
+        self.assertIn("BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT must be a positive number", result.errors)
+        self.assertIn("BFA_MARKET_HEAT_MAX_RECORDS must be a positive integer", result.errors)
 
     def test_invalid_openai_latency_controls_fail(self):
         config = load_config(
