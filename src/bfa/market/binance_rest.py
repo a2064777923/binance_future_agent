@@ -114,6 +114,42 @@ class BinanceFuturesRestClient:
             {"symbol": _normalize_symbol(symbol)},
         )
 
+    def open_interest_hist(
+        self,
+        symbol: str,
+        *,
+        period: str,
+        limit: int = 30,
+    ) -> MarketDataResponse:
+        return self._get(
+            "/futures/data/openInterestHist",
+            _historical_metric_params(symbol=symbol, period=period, limit=limit),
+        )
+
+    def top_long_short_position_ratio(
+        self,
+        symbol: str,
+        *,
+        period: str,
+        limit: int = 30,
+    ) -> MarketDataResponse:
+        return self._get(
+            "/futures/data/topLongShortPositionRatio",
+            _historical_metric_params(symbol=symbol, period=period, limit=limit),
+        )
+
+    def taker_buy_sell_volume(
+        self,
+        symbol: str,
+        *,
+        period: str,
+        limit: int = 30,
+    ) -> MarketDataResponse:
+        return self._get(
+            "/futures/data/takerlongshortRatio",
+            _historical_metric_params(symbol=symbol, period=period, limit=limit),
+        )
+
     def _get(self, endpoint: str, params: dict[str, str] | None = None) -> MarketDataResponse:
         request_params = {} if params is None else dict(params)
         self._pace()
@@ -164,6 +200,21 @@ def _validate_limit(limit: int) -> int:
     if limit <= 0:
         raise ValueError("limit must be positive")
     return limit
+
+
+def _validate_historical_limit(limit: int) -> int:
+    validated = _validate_limit(limit)
+    if validated > 500:
+        raise ValueError("limit must be at most 500")
+    return validated
+
+
+def _historical_metric_params(*, symbol: str, period: str, limit: int) -> dict[str, str]:
+    return {
+        "symbol": _normalize_symbol(symbol),
+        "period": _require_text("period", period),
+        "limit": str(_validate_historical_limit(limit)),
+    }
 
 
 def _error_from_payload(
