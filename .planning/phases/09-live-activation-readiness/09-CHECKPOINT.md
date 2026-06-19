@@ -64,6 +64,13 @@ No secret values were written to this checkpoint.
   - `validation_errors=["openai_error:TimeoutError"]`
   - `runtime/openai_backoff.json` retry after
     `2026-06-19T18:37:42Z`
+- Timer-driven live cycle during the backoff window returned:
+  - `mode=live`
+  - `status=openai_backoff`
+  - `submitted=false`
+  - `market_snapshot_count=0`
+  - `candidate_count=0`
+  - `validation_errors=["openai_retry_after:2026-06-19T18:37:42Z"]`
 
 ## Current Interpretation
 
@@ -72,7 +79,9 @@ input. The first candidate-driven live cycle reached OpenAI and resulted in an
 AI pass/no-trade decision, so no order was submitted. A later direct dry-run
 observed the configured OpenAI endpoint timing out; the runner wrote
 `runtime/openai_backoff.json`, skipped execution, and will retry after
-`OPENAI_RETRY_AFTER_SECONDS`.
+`OPENAI_RETRY_AFTER_SECONDS`. The next timer cycle inside that backoff window
+returned `openai_backoff` before collecting market data or creating order
+intents.
 
 ## Remaining Work
 
