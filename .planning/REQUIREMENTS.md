@@ -9,7 +9,7 @@
 
 - [ ] **ISO-01**: The project exists in `F:\binance_futures_agent` as an independent git repository.
 - [ ] **ISO-02**: The project includes gitignore rules that exclude secrets, runtime data, logs, local databases, and raw exports.
-- [ ] **ISO-03**: The project documents server deployment paths that do not overlap existing projects.
+- [x] **ISO-03**: The project documents server deployment paths that do not overlap existing projects.
 
 ### Configuration And Secrets
 
@@ -96,7 +96,7 @@
 |-------------|-------|--------|
 | ISO-01 | Phase 1 | Pending |
 | ISO-02 | Phase 1 | Pending |
-| ISO-03 | Phase 1 | Pending |
+| ISO-03 | Phase 1 | Complete |
 | CFG-01 | Phase 1 | Complete |
 | CFG-02 | Phase 1 | Complete |
 | CFG-03 | Phase 1 | Complete |
