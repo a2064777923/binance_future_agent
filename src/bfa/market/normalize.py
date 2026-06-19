@@ -167,11 +167,12 @@ def normalize_top_long_short_position(
 def normalize_taker_buy_sell_volume(
     payload: Mapping[str, Any],
     *,
+    symbol: str | None = None,
     received_at: int | str,
 ) -> NormalizedMarketSnapshot:
     return _snapshot(
         event_type="taker_buy_sell_volume",
-        symbol=_symbol(payload),
+        symbol=symbol or _symbol(payload),
         event_time=payload.get("timestamp"),
         received_at=received_at,
         payload={

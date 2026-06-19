@@ -95,6 +95,16 @@ class RestNormalizationTests(unittest.TestCase):
         self.assertEqual(open_interest_hist.payload["sum_open_interest"], "20403.63700000")
         self.assertEqual(taker_flow.payload["buy_volume"], "387.3300")
 
+    def test_taker_buy_sell_volume_allows_symbol_from_request_context(self):
+        payloads = load_payloads()
+        payload = dict(payloads["taker_buy_sell_volume"])
+        payload.pop("symbol", None)
+
+        snapshot = normalize_taker_buy_sell_volume(payload, symbol="btcusdt", received_at="now")
+
+        self.assertEqual(snapshot.symbol, "BTCUSDT")
+        self.assertEqual(snapshot.event_type, "taker_buy_sell_volume")
+
 
 class SnapshotWriterTests(unittest.TestCase):
     def make_snapshot(self, symbol="BTCUSDT"):

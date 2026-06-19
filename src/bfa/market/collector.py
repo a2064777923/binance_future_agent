@@ -106,7 +106,7 @@ class MarketDataCollector:
             period=self.period,
             limit=self.historical_limit,
         ).payload:
-            snapshots.append(normalize_taker_buy_sell_volume(item, received_at=self.received_at))
+            snapshots.append(normalize_taker_buy_sell_volume(item, symbol=symbol, received_at=self.received_at))
         return snapshots
 
 
