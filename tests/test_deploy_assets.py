@@ -5,6 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
+SCRIPTS = ROOT / "scripts"
+DOCS = ROOT / "docs"
 
 
 class DeployAssetTests(unittest.TestCase):
@@ -34,11 +36,32 @@ class DeployAssetTests(unittest.TestCase):
             "AB2064",
             "sshpass",
         ]
-        for path in DEPLOY.rglob("*"):
-            if path.is_file():
-                text = path.read_text(encoding="utf-8")
-                for value in forbidden:
-                    self.assertNotIn(value, text, f"{value} found in {path}")
+        for base in (DEPLOY, SCRIPTS, DOCS):
+            for path in base.rglob("*"):
+                if path.is_file():
+                    text = path.read_text(encoding="utf-8")
+                    for value in forbidden:
+                        self.assertNotIn(value, text, f"{value} found in {path}")
+
+    def test_deploy_script_defaults_to_preview_and_requires_apply(self):
+        script = (SCRIPTS / "deploy-server.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("[switch]$Apply", script)
+        self.assertIn("Preview only. Re-run with -Apply", script)
+        self.assertIn('if ($Apply)', script)
+        self.assertIn('"/opt/binance-futures-agent"', script)
+        self.assertIn('"/etc/binance-futures-agent"', script)
+        self.assertNotIn("-pw", script.lower())
+        self.assertNotIn("sshpass", script.lower())
+
+    def test_deployment_docs_preserve_dry_run_first_posture(self):
+        docs = (DOCS / "deployment.md").read_text(encoding="utf-8")
+
+        self.assertIn("BFA_MODE=dry_run", docs)
+        self.assertIn("Preview mode", docs)
+        self.assertIn("Live activation is a separate", docs)
+        self.assertNotIn("BFA_MODE=live", docs)
+        self.assertNotIn("ssh root@", docs)
 
     def test_systemd_unit_uses_project_isolated_paths(self):
         unit = self.read("systemd", "binance-futures-agent.service")
