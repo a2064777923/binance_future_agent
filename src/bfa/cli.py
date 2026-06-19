@@ -8,6 +8,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TextIO
 
+from bfa.ai.client import OpenAIResponsesClient
+from bfa.ai.decision import run_ai_decision
+from bfa.ai.journal import AiDecisionJournal
+from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.report import generate_review_report
@@ -31,6 +35,7 @@ def main(
     client_factory=None,
     collector_factory=None,
     narrative_runner_factory=None,
+    ai_client_factory=None,
 ) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -56,6 +61,13 @@ def main(
         return _run_event_store(args, env=env, stdout=stdout)
     if args.command == "strategy":
         return _run_strategy(args, env=env, stdout=stdout)
+    if args.command == "ai":
+        return _run_ai(
+            args,
+            env=env,
+            stdout=stdout,
+            ai_client_factory=ai_client_factory,
+        )
 
     parser.print_help(file=stderr)
     return 2
@@ -166,6 +178,21 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="deterministic generation timestamp to stamp candidate records",
     )
+
+    ai = subparsers.add_parser(
+        "ai",
+        help="OpenAI structured decision-layer smoke commands",
+    )
+    ai_subparsers = ai.add_subparsers(dest="ai_command", required=True)
+    decide = ai_subparsers.add_parser(
+        "decide",
+        help="ask OpenAI for a structured decision for one candidate JSON payload",
+    )
+    decide.add_argument("--env-file", help="optional env file to load before environment overrides")
+    decide.add_argument("--candidate", required=True, help="candidate JSON file")
+    decide.add_argument("--decided-at", required=True, help="deterministic decision timestamp")
+    decide.add_argument("--journal", help="optional JSONL journal path for redacted request/response records")
+    decide.add_argument("--db", help="optional SQLite DB path for persisting AI decisions")
     return parser
 
 
@@ -332,6 +359,89 @@ def _run_strategy(
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return 0
     return 2
+
+
+def _run_ai(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+    ai_client_factory,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    if args.ai_command == "decide":
+        if not _truthy(config.get("BFA_OPENAI_ENABLED")):
+            payload = {
+                "accepted": False,
+                "decision": None,
+                "validation_errors": ["BFA_OPENAI_ENABLED must be true for ai decide"],
+                "journaled": False,
+                "persisted": 0,
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+            return 1
+        config_result = validate_config(config)
+        if not config_result.valid:
+            payload = {
+                "accepted": False,
+                "decision": None,
+                "validation_errors": config_result.errors,
+                "journaled": False,
+                "persisted": 0,
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+            return 1
+
+        candidate = _candidate_payload_from_json(Path(args.candidate))
+        context = context_from_candidate(
+            candidate,
+            risk_limits=RiskLimits.from_config(config),
+            decided_at=args.decided_at,
+        )
+        client = _build_ai_client(config, ai_client_factory)
+        journal = AiDecisionJournal(args.journal) if args.journal else None
+        connection = connect(args.db) if args.db else None
+        try:
+            store = EventStore(connection) if connection is not None else None
+            result = run_ai_decision(
+                client=client,
+                context=context,
+                journal=journal,
+                store=store,
+            )
+        finally:
+            if connection is not None:
+                connection.close()
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if result.validation.accepted else 1
+    return 2
+
+
+def _build_ai_client(config: AppConfig, ai_client_factory):
+    if ai_client_factory is not None:
+        return ai_client_factory(config)
+    return OpenAIResponsesClient(
+        api_key=config.get("OPENAI_API_KEY"),
+        model=config.get("OPENAI_MODEL"),
+    )
+
+
+def _candidate_payload_from_json(path: Path) -> dict[str, object]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict) and isinstance(payload.get("candidates"), list):
+        candidates = payload["candidates"]
+        if not candidates:
+            raise ValueError("candidate file contains no candidates")
+        first = candidates[0]
+        if isinstance(first, dict):
+            return first
+    if isinstance(payload, dict):
+        return payload
+    raise ValueError("candidate file must contain a JSON object")
+
+
+def _truthy(value: str) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 if __name__ == "__main__":

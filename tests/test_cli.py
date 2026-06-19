@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from bfa.ai.client import OpenAIResponse
 from bfa.cli import main
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
@@ -18,6 +19,7 @@ class CliTests(unittest.TestCase):
         client_factory=None,
         collector_factory=None,
         narrative_runner_factory=None,
+        ai_client_factory=None,
     ):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -28,6 +30,7 @@ class CliTests(unittest.TestCase):
                 client_factory=client_factory,
                 collector_factory=collector_factory,
                 narrative_runner_factory=narrative_runner_factory,
+                ai_client_factory=ai_client_factory,
             )
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -284,6 +287,94 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(payload["persisted"], 1)
+
+    def test_ai_decide_uses_injected_fake_client_and_persists(self):
+        class FakeAiClient:
+            def create_decision(self, context, *, instructions, schema):
+                return OpenAIResponse(
+                    response_id="resp_1",
+                    request_payload={"model": "fake", "context": context, "schema": schema},
+                    raw_response={
+                        "id": "resp_1",
+                        "output_text": json.dumps(
+                            {
+                                "decision": "trade",
+                                "side": "long",
+                                "confidence": 0.7,
+                                "entry_price": 100.0,
+                                "stop_price": 96.0,
+                                "target_price": 108.0,
+                                "notional_usdt": 20.0,
+                                "hold_time_minutes": 30,
+                                "reasons": ["narrative and market confirmation"],
+                            }
+                        ),
+                    },
+                    output_text=json.dumps(
+                        {
+                            "decision": "trade",
+                            "side": "long",
+                            "confidence": 0.7,
+                            "entry_price": 100.0,
+                            "stop_price": 96.0,
+                            "target_price": 108.0,
+                            "notional_usdt": 20.0,
+                            "hold_time_minutes": 30,
+                            "reasons": ["narrative and market confirmation"],
+                        }
+                    ),
+                    response_headers={},
+                )
+
+        secret = "synthetic-openai-key-abcdef"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            candidate_path = tmp_path / "candidate.json"
+            journal_path = tmp_path / "ai.jsonl"
+            db_path = tmp_path / "agent.sqlite"
+            candidate_path.write_text(
+                json.dumps(
+                    {
+                        "symbol": "BTCUSDT",
+                        "score": 42,
+                        "reason_codes": ["narrative_heat", "price_momentum"],
+                        "source_event_ids": [1],
+                        "market_event_ids": [2],
+                        "features": {"quote_volume": 5_000_000},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ai",
+                "decide",
+                "--candidate",
+                str(candidate_path),
+                "--decided-at",
+                "2026-06-19T10:00:00Z",
+                "--journal",
+                str(journal_path),
+                "--db",
+                str(db_path),
+                env={
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": secret,
+                    "OPENAI_MODEL": "gpt-5.4",
+                },
+                ai_client_factory=lambda _config: FakeAiClient(),
+            )
+
+            journal_text = journal_path.read_text(encoding="utf-8")
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["decision"]["side"], "long")
+        self.assertTrue(payload["journaled"])
+        self.assertEqual(payload["persisted"], 1)
+        self.assertNotIn(secret, stdout + stderr + journal_text)
 
 
 if __name__ == "__main__":

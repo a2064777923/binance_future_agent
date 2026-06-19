@@ -51,6 +51,21 @@ variable names only.
 Phase 1 does not implement Binance order placement, OpenAI calls, strategy
 logic, or server deployment.
 
+## OpenAI Decision Smoke Command
+
+Phase 6 adds a structured OpenAI decision layer. It validates the model's JSON
+locally, journals redacted request/response records, and can persist the result
+to `ai_decisions`. It still does not place Binance orders.
+
+```bash
+python -m bfa.cli ai decide ^
+  --env-file .env ^
+  --candidate runtime/candidate.json ^
+  --decided-at 2026-06-19T10:00:00Z ^
+  --journal runtime/ai-decisions.jsonl ^
+  --db runtime/agent.sqlite
+```
+
 Next step:
 
 ```bash
