@@ -89,7 +89,11 @@ class FakeNarrativeRunner:
 
 
 class FakeAiClient:
+    def __init__(self):
+        self.calls = 0
+
     def create_decision(self, context, *, instructions, schema):
+        self.calls += 1
         payload = {
             "decision": "trade",
             "side": "long",
@@ -149,7 +153,11 @@ class AgentRunnerTests(unittest.TestCase):
 
     def test_run_once_stops_before_execution_when_openai_errors(self):
         class FailingAiClient:
+            def __init__(self):
+                self.calls = 0
+
             def create_decision(self, context, *, instructions, schema):
+                self.calls += 1
                 raise OpenAIAPIError(
                     status_code=None,
                     message="timed out",
@@ -172,13 +180,23 @@ class AgentRunnerTests(unittest.TestCase):
                 }
             )
 
+            failing_ai = FailingAiClient()
             result = run_agent_once(
                 config=config,
                 db_path=str(db_path),
                 market_client=FakeMarketClient(),
                 collector=FakeCollector(),
                 narrative_runner=FakeNarrativeRunner(),
-                ai_client=FailingAiClient(),
+                ai_client=failing_ai,
+            )
+            recovered_ai = FakeAiClient()
+            backoff_result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=recovered_ai,
             )
             connection = sqlite3.connect(db_path)
             try:
@@ -190,6 +208,9 @@ class AgentRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ai_error")
         self.assertFalse(result.submitted)
+        self.assertEqual(failing_ai.calls, 1)
+        self.assertEqual(backoff_result.status, "openai_backoff")
+        self.assertEqual(recovered_ai.calls, 0)
         self.assertEqual(order_intents, 0)
         self.assertIn("openai_error:none:timed out", result.validation_errors)
 

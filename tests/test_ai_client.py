@@ -69,6 +69,7 @@ class AiClientTests(unittest.TestCase):
         client = OpenAIResponsesClient(
             api_key="synthetic-openai-key-abcdef",
             model="gpt-5.4",
+            base_url="https://proxy.example.test/v1",
             transport=transport,
             timeout=5.0,
             max_output_tokens=400,
@@ -81,6 +82,7 @@ class AiClientTests(unittest.TestCase):
         )
 
         call = transport.calls[0]
+        self.assertEqual(call["url"], "https://proxy.example.test/v1/responses")
         self.assertEqual(call["timeout"], 5.0)
         self.assertEqual(call["payload"]["max_output_tokens"], 400)
 

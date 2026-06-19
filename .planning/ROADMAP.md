@@ -4,150 +4,86 @@
 **Mode:** standard
 **Structure:** Horizontal layers
 
-## Overview
+## Milestones
 
-This roadmap builds the trading system layer by layer: isolation and config,
-official exchange data, narrative ingestion, event store/replay, strategy, AI
-decisions, execution, and server deployment.
+- ✅ **v1.0 Dry-Run Binance Futures Agent** — Phases 1-8, shipped 2026-06-19
+  ([archive](milestones/v1.0-ROADMAP.md)).
+- 🚧 **v1.1 Live Activation** — Phase 9, in progress.
 
 ## Phases
 
-### Phase 1: Isolated Project Foundation
+<details>
+<summary>✅ v1.0 Dry-Run Binance Futures Agent (Phases 1-8) — SHIPPED 2026-06-19</summary>
 
-**Goal:** Establish the independent repository, config contract, secret hygiene,
-and developer workflow.
+- [x] Phase 1: Isolated Project Foundation (4/4 plans)
+- [x] Phase 2: Binance Futures Market Data Layer (5/5 plans)
+- [x] Phase 3: Narrative And Hot-Coin Collection Layer (3/3 plans)
+- [x] Phase 4: Event Store And Replay Foundation (3/3 plans)
+- [x] Phase 5: Hot-Coin Candidate Strategy (2/2 plans)
+- [x] Phase 6: OpenAI Decision Layer (3/3 plans)
+- [x] Phase 7: Risk-Gated Binance Execution (4/4 plans)
+- [x] Phase 8: Isolated Server Deployment (4/4 plans)
 
-**Requirements:** ISO-01, ISO-02, ISO-03, CFG-01, CFG-02, CFG-03
+Full details are archived in `.planning/milestones/v1.0-ROADMAP.md`.
 
-**Success Criteria:**
+</details>
 
-1. The repo is initialized at `F:\binance_futures_agent` with no dependency on
-   `F:\stock`.
+### Phase 9: Live Activation Readiness
 
-2. `.env.example` documents all required settings without secret values.
-3. Config validation can distinguish dry-run, testnet, and live requirements.
-4. Secret-redaction behavior is covered by tests.
+**Goal:** Turn the deployed dry-run/live-capable system into a controlled
+small-capital live automated trading pilot without losing the kill-switch,
+protective-order, or isolation guarantees.
 
-### Phase 2: Binance Futures Market Data Layer
+**Requirements:** LVA-01, LVA-02, LVA-03, LVA-04, LVA-05, LVA-06
 
-**Goal:** Build official Binance USD-M futures data access and normalization.
-
-**Requirements:** MKT-01, MKT-02, MKT-03, MKT-04
-
-**Success Criteria:**
-
-1. The CLI can fetch exchange metadata and symbol filters.
-2. The collector can fetch required REST market metrics for selected symbols.
-3. WebSocket stream handling can receive and normalize live market events.
-4. Market snapshots are stored with source, timestamp, and symbol metadata.
-
-### Phase 3: Narrative And Hot-Coin Collection Layer
-
-**Goal:** Ingest Binance Square and fallback narrative sources behind pluggable
-collector adapters.
-
-**Requirements:** NAR-01, NAR-02, NAR-03, NAR-04
+**Status:** Waiting on out-of-band `OPENAI_API_KEY`; Binance credentials are
+configured on the server and the live timer remains disabled.
 
 **Success Criteria:**
 
-1. At least one Binance Square ingestion path works without hardcoding secrets.
-2. Manual/export ingestion works as a fallback for Square or social data.
-3. Narrative records normalize symbol mentions, engagement, source, and time.
-4. Duplicate narrative events are collapsed before scoring.
+1. Server env contains Binance and OpenAI credentials with mode set to `live`,
+   `BFA_OPENAI_ENABLED=true`, `BFA_REQUIRE_PROTECTIVE_ORDERS=true`,
+   provider `OPENAI_BASE_URL`, `OPENAI_TIMEOUT_SECONDS=5`,
+   `OPENAI_MAX_OUTPUT_TOKENS=400`, `OPENAI_RETRY_AFTER_SECONDS=300`, and no
+   secret leakage to git or logs.
+2. Server health checks pass for config, Binance, OpenAI, database, runtime
+   paths, risk state, and kill switch.
+3. One operator-approved live cycle runs through
+   `binance-futures-agent-live.service` with at most one risk-gated order
+   attempt and deterministic fail-closed/backoff behavior on AI timeout/error.
+4. If an entry order is submitted, stop-loss and take-profit protective algo
+   orders are submitted in the same execution path, or kill switch plus
+   emergency reduce-only close behavior is observed.
+5. The live timer is enabled only after the one-cycle result is reviewed, and it
+   can be disabled with `systemctl disable --now binance-futures-agent-live.timer`
+   plus the kill-switch file.
+6. The first live activation evidence is captured in GSD verification notes
+   without printing or committing secret values.
 
-### Phase 4: Event Store And Replay Foundation
+## Progress
 
-**Goal:** Persist all input and decision events in a replayable local store.
-
-**Requirements:** EVT-01, EVT-02, EVT-03
-
-**Success Criteria:**
-
-1. SQLite migrations create tables for narratives, market snapshots,
-   candidates, AI decisions, orders, fills, risk state, and outcomes.
-
-2. Stored historical windows can be replayed through deterministic candidate
-   generation.
-
-3. Review reports compute win rate, expectancy, drawdown, fees/slippage, and
-   reason-code performance.
-
-### Phase 5: Hot-Coin Candidate Strategy
-
-**Goal:** Rank hot futures candidates from narrative heat plus market anomalies.
-
-**Requirements:** STR-01, STR-02, STR-03, STR-04
-
-**Success Criteria:**
-
-1. Candidate scoring combines narrative heat, liquidity, price momentum, volume
-   spike, OI change, taker flow, funding, and volatility.
-
-2. Each candidate includes reason codes and data-quality notes.
-3. Untradeable or stale candidates are rejected before AI evaluation.
-4. Candidate generation is deterministic under replay.
-
-### Phase 6: OpenAI Decision Layer
-
-**Goal:** Convert candidates into validated AI trade decisions.
-
-**Requirements:** AI-01, AI-02, AI-03, AI-04
-
-**Success Criteria:**
-
-1. The AI context packet is compact, redacted, and reproducible.
-2. OpenAI responses conform to a JSON schema with entry, stop, target,
-   confidence, hold time, and reasons.
-
-3. Invalid or risk-inconsistent AI responses are rejected.
-4. Requests and responses are journaled with secret-safe redaction.
-
-### Phase 7: Risk-Gated Binance Execution
-
-**Goal:** Add dry-run and explicit live order execution for the 100 USDT pilot.
-
-**Requirements:** EXE-01, EXE-02, EXE-03, EXE-04, EXE-05
-
-**Success Criteria:**
-
-1. Dry-run mode creates order intents without submitting exchange orders.
-2. Live mode requires explicit config and refuses to run with missing risk
-   limits or active kill switch.
-
-3. Execution enforces isolated margin, max 3x leverage, max 20 USDT notional,
-   max 1 USDT risk per trade, max 3 USDT daily loss, max two open positions,
-   and cooldown.
-
-4. Orders respect Binance symbol filters and are reconciled against account
-   state after startup and stream interruptions.
-
-### Phase 8: Isolated Server Deployment
-
-**Goal:** Deploy the agent to `64.83.34.222` without affecting existing projects.
-
-**Requirements:** DEP-01, DEP-02, DEP-03, DEP-04
-
-**Success Criteria:**
-
-1. Deployment uses `/opt/binance-futures-agent`, `/etc/binance-futures-agent/env`,
-   and a dedicated `binance-futures-agent.service`.
-
-2. Existing server directories, services, cron jobs, databases, and stock
-   project files are not modified.
-
-3. Health checks verify config, Binance, OpenAI, DB, risk state, and kill switch.
-4. The service can run one dry-run cycle before live mode is enabled.
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1 | v1.0 | 4/4 | Complete | 2026-06-19 |
+| 2 | v1.0 | 5/5 | Complete | 2026-06-19 |
+| 3 | v1.0 | 3/3 | Complete | 2026-06-19 |
+| 4 | v1.0 | 3/3 | Complete | 2026-06-19 |
+| 5 | v1.0 | 2/2 | Complete | 2026-06-19 |
+| 6 | v1.0 | 3/3 | Complete | 2026-06-19 |
+| 7 | v1.0 | 4/4 | Complete | 2026-06-19 |
+| 8 | v1.0 | 4/4 | Complete | 2026-06-19 |
+| 9 | v1.1 | 0/1 | Waiting on OpenAI key | - |
 
 ## Requirement Coverage
 
-- v1 requirements: 34
-- Mapped: 34
+- v1.1 requirements: 6
+- Mapped: 6
 - Unmapped: 0
 
 ## Next Step
 
-Run:
+Provide `OPENAI_API_KEY` out of band, then run:
 
 ```bash
-$gsd-complete-milestone
+$gsd-plan-phase 9
 ```

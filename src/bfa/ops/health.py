@@ -185,6 +185,7 @@ def _openai_check(
     client = ai_client or OpenAIResponsesClient(
         api_key=config.get("OPENAI_API_KEY"),
         model=config.get("OPENAI_MODEL"),
+        base_url=config.get("OPENAI_BASE_URL"),
         timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
         max_output_tokens=20,
     )

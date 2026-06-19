@@ -26,8 +26,10 @@ class DeployAssetTests(unittest.TestCase):
             self.assertRegex(text, rf"(?m)^{key}=$")
         self.assertIn("BFA_MODE=dry_run", text)
         self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS=true", text)
+        self.assertIn("OPENAI_BASE_URL=https://api.openai.com/v1", text)
         self.assertIn("OPENAI_TIMEOUT_SECONDS=5", text)
         self.assertIn("OPENAI_MAX_OUTPUT_TOKENS=400", text)
+        self.assertIn("OPENAI_RETRY_AFTER_SECONDS=300", text)
         self.assertIn("BFA_DB_PATH=/opt/binance-futures-agent/data/agent.sqlite", text)
 
     def test_deploy_assets_do_not_reference_forbidden_paths_or_secrets(self):
@@ -65,7 +67,9 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn("BFA_MODE=live", docs)
         self.assertIn("binance-futures-agent-live.timer", docs)
         self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS=true", docs)
+        self.assertIn("OPENAI_BASE_URL=https://api.openai.com/v1", docs)
         self.assertIn("OPENAI_TIMEOUT_SECONDS=5", docs)
+        self.assertIn("openai_backoff.json", docs)
         self.assertIn("fail closed", docs)
         self.assertNotIn("ssh root@", docs)
 

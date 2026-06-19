@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
+import time
 from typing import Any
 
 from bfa.ai.client import OpenAIAPIError, OpenAIResponsesClient
@@ -45,7 +48,17 @@ class AgentRunResult:
 
     @property
     def ok(self) -> bool:
-        return self.status in {"submitted", "dry_run", "test_order_checked", "no_candidate", "ai_pass", "rejected"}
+        return self.status in {
+            "submitted",
+            "dry_run",
+            "test_order_checked",
+            "no_candidate",
+            "ai_pass",
+            "ai_rejected",
+            "ai_error",
+            "openai_backoff",
+            "rejected",
+        }
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -96,6 +109,15 @@ def run_agent_once(
         )
 
     mode = RuntimeMode(config.get("BFA_MODE"))
+    backoff = _openai_backoff(config)
+    if backoff.active:
+        return AgentRunResult(
+            status="openai_backoff",
+            mode=mode.value,
+            started_at=started_at,
+            validation_errors=[f"openai_retry_after:{backoff.retry_after_iso}"],
+        )
+
     market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
     collector = collector or MarketDataCollector(
         client=market,
@@ -106,6 +128,7 @@ def run_agent_once(
     ai_client = ai_client or OpenAIResponsesClient(
         api_key=config.get("OPENAI_API_KEY"),
         model=config.get("OPENAI_MODEL"),
+        base_url=config.get("OPENAI_BASE_URL"),
         timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
         max_output_tokens=int(config.get("OPENAI_MAX_OUTPUT_TOKENS")),
     )
@@ -164,6 +187,7 @@ def run_agent_once(
                 store=store,
             )
         except Exception as exc:
+            _record_openai_backoff(config, exc)
             return AgentRunResult(
                 status="ai_error",
                 mode=mode.value,
@@ -176,6 +200,7 @@ def run_agent_once(
                 validation_errors=[_safe_ai_error(exc)],
                 persisted={"candidates": persisted_candidate_count},
             )
+        _clear_openai_backoff(config)
         if not ai_run.validation.accepted:
             status = "ai_pass" if ai_run.validation.decision and ai_run.validation.decision.decision == "pass" else "ai_rejected"
             return AgentRunResult(
@@ -329,6 +354,54 @@ def _safe_ai_error(exc: Exception) -> str:
         status = "none" if exc.status_code is None else str(exc.status_code)
         return f"openai_error:{status}:{exc.message}"
     return f"openai_error:{exc.__class__.__name__}"
+
+
+@dataclass(frozen=True)
+class _OpenAiBackoff:
+    active: bool
+    retry_after_iso: str | None = None
+
+
+def _openai_backoff(config: AppConfig) -> _OpenAiBackoff:
+    path = _openai_backoff_path(config)
+    if not path.exists():
+        return _OpenAiBackoff(False)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        retry_after_epoch = float(payload.get("retry_after_epoch", 0))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return _OpenAiBackoff(False)
+    if time.time() >= retry_after_epoch:
+        return _OpenAiBackoff(False)
+    return _OpenAiBackoff(True, _epoch_to_iso(retry_after_epoch))
+
+
+def _record_openai_backoff(config: AppConfig, exc: Exception) -> None:
+    retry_after = time.time() + float(config.get("OPENAI_RETRY_AFTER_SECONDS"))
+    path = _openai_backoff_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "retry_after_epoch": retry_after,
+        "retry_after": _epoch_to_iso(retry_after),
+        "reason": _safe_ai_error(exc),
+    }
+    path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+
+
+def _clear_openai_backoff(config: AppConfig) -> None:
+    path = _openai_backoff_path(config)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _openai_backoff_path(config: AppConfig) -> Path:
+    return Path(config.get("BFA_RUNTIME_DIR")) / "openai_backoff.json"
+
+
+def _epoch_to_iso(value: float) -> str:
+    return datetime.fromtimestamp(value, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _now_iso() -> str:

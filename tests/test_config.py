@@ -24,7 +24,9 @@ def base_env(**overrides):
         "BINANCE_FUTURES_WS_BASE_URL": "wss://fstream.binance.com",
         "BINANCE_USE_TESTNET": "false",
         "OPENAI_API_KEY": "",
+        "OPENAI_BASE_URL": "https://api.openai.com/v1",
         "OPENAI_MODEL": "gpt-5.4",
+        "OPENAI_RETRY_AFTER_SECONDS": "300",
     }
     env.update(overrides)
     return env
@@ -140,6 +142,7 @@ class ConfigTests(unittest.TestCase):
             base_env(
                 OPENAI_TIMEOUT_SECONDS="0",
                 OPENAI_MAX_OUTPUT_TOKENS="0",
+                OPENAI_RETRY_AFTER_SECONDS="0",
             )
         )
         result = validate_config(config)
@@ -147,6 +150,7 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(result.valid)
         self.assertIn("OPENAI_TIMEOUT_SECONDS must be a positive number", result.errors)
         self.assertIn("OPENAI_MAX_OUTPUT_TOKENS must be a positive integer", result.errors)
+        self.assertIn("OPENAI_RETRY_AFTER_SECONDS must be a positive number", result.errors)
 
     def test_openai_enabled_requires_openai_key(self):
         config = load_config(base_env(BFA_OPENAI_ENABLED="true"))
