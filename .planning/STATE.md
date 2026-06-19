@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 8 — Isolated Server Deployment
-status: executing
-stopped_at: Phase 7 verified and completed
+status: checkpoint
+stopped_at: Phase 8 deployment blocked on SSH human-action checkpoint
 last_updated: "2026-06-19T17:09:09.494Z"
 progress:
   total_phases: 8
@@ -18,7 +18,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** 8 — Isolated Server Deployment
-**Status:** Ready to execute
+**Status:** Checkpoint - server deployment auth required
 **Last planned:** 2026-06-20
 **Plan count:** 4
 
@@ -67,5 +67,5 @@ $gsd-execute-phase 8
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 8 planned and ready to execute
-**Resume file:** .planning/phases/08-isolated-server-deployment/08-01-PLAN.md
+**Stopped at:** Phase 8 deployment blocked on SSH human-action checkpoint
+**Resume file:** .planning/phases/08-isolated-server-deployment/08-CHECKPOINT.md

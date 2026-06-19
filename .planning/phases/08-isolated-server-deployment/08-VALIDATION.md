@@ -30,10 +30,10 @@ created: 2026-06-20
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 08-01-T1 | 08-01 | 1 | DEP-01, DEP-02, DEP-03 | static | `python -m unittest tests.test_deploy_assets` | planned | pending |
-| 08-02-T1 | 08-02 | 2 | DEP-04 | unit/CLI | `python -m unittest tests.test_ops_health tests.test_cli` | planned | pending |
-| 08-03-T1 | 08-03 | 3 | DEP-01, DEP-02, DEP-03 | static | `python -m unittest tests.test_deploy_assets` | planned | pending |
-| 08-04-T1 | 08-04 | 4 | DEP-01, DEP-04 | manual/server | `python -m unittest discover -s tests` plus server smoke | planned | pending |
+| 08-01-T1 | 08-01 | 1 | DEP-01, DEP-02, DEP-03 | static | `python -m unittest tests.test_deploy_assets` | present | passed |
+| 08-02-T1 | 08-02 | 2 | DEP-04 | unit/CLI | `python -m unittest tests.test_ops_health tests.test_cli` | present | passed |
+| 08-03-T1 | 08-03 | 3 | DEP-01, DEP-02, DEP-03 | static | `python -m unittest tests.test_deploy_assets` | present | passed |
+| 08-04-T1 | 08-04 | 4 | DEP-01, DEP-04 | manual/server | `python -m unittest discover -s tests` plus server smoke | pending auth | checkpoint |
 
 ## Manual-Only Verifications
 

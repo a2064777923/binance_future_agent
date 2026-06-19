@@ -33,7 +33,7 @@ class DeployAssetTests(unittest.TestCase):
             "/opt/stock",
             "stock.service",
             "crontab",
-            "AB2064",
+            "server-password",
             "sshpass",
         ]
         for base in (DEPLOY, SCRIPTS, DOCS):
