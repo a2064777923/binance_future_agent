@@ -1,12 +1,14 @@
 import contextlib
 import io
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from bfa.ai.client import OpenAIResponse
 from bfa.cli import main
+from bfa.event_store.store import EventStore
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
 
@@ -656,6 +658,42 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertFalse(payload["ok"])
         self.assertIn("BINANCE_API_KEY is required for live mode", payload["checks"][0]["detail"])
+
+    def test_ops_live_status_prints_event_store_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            store.insert_artifact(
+                "candidates",
+                occurred_at="2026-06-20T10:00:00Z",
+                source="test",
+                symbol="SOLUSDT",
+                ref_id="candidate-1",
+                payload={"symbol": "SOLUSDT"},
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-status",
+                "--db",
+                str(db_path),
+                env={
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BFA_DB_PATH": str(db_path),
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["counts"]["candidates"], 1)
+        self.assertEqual(payload["latest"]["candidate"]["symbol"], "SOLUSDT")
+        self.assertFalse(payload["lva05_complete"])
 
 
 if __name__ == "__main__":

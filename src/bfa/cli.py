@@ -28,6 +28,7 @@ from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
+from bfa.ops.live_status import build_live_status_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
 
@@ -258,6 +259,13 @@ def _build_parser() -> argparse.ArgumentParser:
     health.add_argument("--check-binance", action="store_true", help="check public Binance exchangeInfo")
     health.add_argument("--check-openai", action="store_true", help="check OpenAI Responses API when enabled")
     health.add_argument("--skip-network", action="store_true", help="disable all network health checks")
+
+    live_status = ops_subparsers.add_parser(
+        "live-status",
+        help="summarize live activation evidence from the local event store",
+    )
+    live_status.add_argument("--env-file", help="optional env file to load before environment overrides")
+    live_status.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
 
     agent = subparsers.add_parser(
         "agent",
@@ -578,6 +586,10 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1
+    if args.ops_command == "live-status":
+        report = build_live_status_report(config, db_path=args.db)
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
     return 2
 
 
