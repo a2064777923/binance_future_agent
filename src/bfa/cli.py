@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TextIO
 
 from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, validate_config
+from bfa.event_store.migrations import connect, migrate
+from bfa.event_store.report import generate_review_report
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.market.snapshot_writer import write_jsonl_snapshots
@@ -47,6 +49,8 @@ def main(
             stdout=stdout,
             runner_factory=narrative_runner_factory,
         )
+    if args.command == "event-store":
+        return _run_event_store(args, env=env, stdout=stdout)
 
     parser.print_help(file=stderr)
     return 2
@@ -118,6 +122,26 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="append to the output JSONL file instead of overwriting it",
     )
+
+    event_store = subparsers.add_parser(
+        "event-store",
+        help="local SQLite event-store smoke commands",
+    )
+    event_store_subparsers = event_store.add_subparsers(dest="event_store_command", required=True)
+
+    event_init = event_store_subparsers.add_parser(
+        "init",
+        help="initialize the SQLite event-store schema",
+    )
+    event_init.add_argument("--env-file", help="optional env file to load before environment overrides")
+    event_init.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+
+    event_report = event_store_subparsers.add_parser(
+        "report",
+        help="print event-store review metrics",
+    )
+    event_report.add_argument("--env-file", help="optional env file to load before environment overrides")
+    event_report.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     return parser
 
 
@@ -228,6 +252,30 @@ def _build_narrative_runner(config: AppConfig, runner_factory):
     if feeds:
         collectors.append(RssFeedCollector(feeds, known_symbols=known_symbols))
     return NarrativeCollectionRunner(collectors)
+
+
+def _run_event_store(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    db_path = args.db or config.get("BFA_DB_PATH")
+    connection = connect(db_path)
+    try:
+        migrate(connection)
+        if args.event_store_command == "init":
+            payload = {"db": str(db_path), "initialized": True}
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+            return 0
+        if args.event_store_command == "report":
+            payload = {"db": str(db_path), "report": generate_review_report(connection).to_dict()}
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+            return 0
+    finally:
+        connection.close()
+    return 2
 
 
 if __name__ == "__main__":

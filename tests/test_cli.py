@@ -203,6 +203,44 @@ class CliTests(unittest.TestCase):
         self.assertEqual(len(lines), 1)
         self.assertNotIn("SQUARE_COOKIE_FILE", stdout)
 
+    def test_event_store_init_creates_schema(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agent.sqlite"
+            code, stdout, stderr = self.invoke(
+                "event-store",
+                "init",
+                "--env-file",
+                ".env.example",
+                "--db",
+                str(db_path),
+            )
+
+            payload = json.loads(stdout)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertTrue(payload["initialized"])
+        self.assertEqual(payload["db"], str(db_path))
+
+    def test_event_store_report_prints_empty_metrics(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agent.sqlite"
+            code, stdout, stderr = self.invoke(
+                "event-store",
+                "report",
+                "--env-file",
+                ".env.example",
+                "--db",
+                str(db_path),
+            )
+
+            payload = json.loads(stdout)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["report"]["trade_count"], 0)
+        self.assertEqual(payload["report"]["reason_codes"], {})
+
 
 if __name__ == "__main__":
     unittest.main()
