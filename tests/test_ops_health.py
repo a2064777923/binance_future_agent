@@ -55,6 +55,7 @@ class OpsHealthTests(unittest.TestCase):
         self.assertEqual(statuses["config"], "passed")
         self.assertEqual(statuses["runtime_dir"], "passed")
         self.assertEqual(statuses["database"], "passed")
+        self.assertEqual(statuses["risk_state"], "passed")
         self.assertEqual(statuses["binance_public"], "skipped")
         self.assertEqual(statuses["openai"], "skipped")
 
@@ -68,6 +69,7 @@ class OpsHealthTests(unittest.TestCase):
         failed = [check.name for check in report.checks if check.status == "failed"]
         self.assertIn("runtime_dir", failed)
         self.assertIn("database", failed)
+        self.assertIn("risk_state", failed)
 
     def test_invalid_live_config_fails_without_printing_secret_values(self):
         with tempfile.TemporaryDirectory() as tmp:

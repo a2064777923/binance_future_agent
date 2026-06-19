@@ -70,7 +70,9 @@ def run_health_checks(
 
     checks.extend(_directory_checks(config, create_dirs=create_dirs))
     checks.append(_kill_switch_check(config))
-    checks.append(_database_check(db_path or config.get("BFA_DB_PATH"), create_dirs=create_dirs))
+    resolved_db_path = db_path or config.get("BFA_DB_PATH")
+    checks.append(_database_check(resolved_db_path, create_dirs=create_dirs))
+    checks.append(_risk_state_check(resolved_db_path))
     checks.append(_binance_check(config, check_binance=check_binance, market_client=market_client))
     checks.append(_openai_check(config, check_openai=check_openai, ai_client=ai_client))
 
@@ -133,6 +135,25 @@ def _database_check(raw_path: str, *, create_dirs: bool) -> HealthCheck:
     except sqlite3.Error as exc:
         return HealthCheck("database", "failed", str(exc))
     return HealthCheck("database", "passed", str(path))
+
+
+def _risk_state_check(raw_path: str) -> HealthCheck:
+    path = Path(raw_path)
+    if not path.exists():
+        return HealthCheck("risk_state", "failed", f"database missing: {path}")
+    try:
+        connection = connect(path)
+        try:
+            row = connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'risk_state'"
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        return HealthCheck("risk_state", "failed", str(exc))
+    if row is None:
+        return HealthCheck("risk_state", "failed", "risk_state table missing")
+    return HealthCheck("risk_state", "passed", "risk_state table ready")
 
 
 def _binance_check(
