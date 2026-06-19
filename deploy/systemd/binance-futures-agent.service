@@ -1,0 +1,21 @@
+[Unit]
+Description=Binance Futures Agent isolated dry-run health service
+Documentation=file:/opt/binance-futures-agent/app/docs/deployment.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/binance-futures-agent/app
+EnvironmentFile=/etc/binance-futures-agent/env
+ExecStart=/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops health-check --env-file /etc/binance-futures-agent/env --db /opt/binance-futures-agent/data/agent.sqlite --skip-network
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/binance-futures-agent /etc/binance-futures-agent
+
+[Install]
+WantedBy=multi-user.target

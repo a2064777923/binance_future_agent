@@ -20,9 +20,10 @@ after dry-run verification.
 
 ### Isolation
 
-- D-01: Server files are limited to `/opt/binance-futures-agent` and
-  `/etc/binance-futures-agent`; deployment scripts must reject any other target
-  root.
+- D-01: Server files are limited to `/opt/binance-futures-agent`,
+  `/etc/binance-futures-agent`, and the dedicated
+  `/etc/systemd/system/binance-futures-agent.service` unit; deployment scripts
+  must reject any other target root.
 - D-02: Deployment must not modify existing project directories, cron jobs,
   databases, or unrelated systemd units.
 - D-03: Runtime data, logs, raw exports, SQLite DB, and kill-switch files live
