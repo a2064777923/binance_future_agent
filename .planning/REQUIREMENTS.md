@@ -61,10 +61,10 @@
 
 ### Server Deployment
 
-- [ ] **DEP-01**: User can deploy the project to server `64.83.34.222` under `/opt/binance-futures-agent`.
-- [ ] **DEP-02**: Deployment creates or documents a dedicated env file, virtualenv, data directory, log directory, runtime directory, and systemd unit.
-- [ ] **DEP-03**: Deployment does not modify existing project directories, services, cron jobs, or databases on the server.
-- [ ] **DEP-04**: User can run server-side health checks for config, Binance connectivity, OpenAI connectivity, database access, risk state, and kill switch.
+- [x] **DEP-01**: User can deploy the project to server `64.83.34.222` under `/opt/binance-futures-agent`.
+- [x] **DEP-02**: Deployment creates or documents a dedicated env file, virtualenv, data directory, log directory, runtime directory, and systemd unit.
+- [x] **DEP-03**: Deployment does not modify existing project directories, services, cron jobs, or databases on the server.
+- [x] **DEP-04**: User can run server-side health checks for config, Binance connectivity, OpenAI connectivity, database access, risk state, and kill switch.
 
 ## v2 Requirements
 
@@ -124,10 +124,10 @@
 | EXE-03 | Phase 7 | Complete |
 | EXE-04 | Phase 7 | Complete |
 | EXE-05 | Phase 7 | Complete |
-| DEP-01 | Phase 8 | Pending |
-| DEP-02 | Phase 8 | Pending |
-| DEP-03 | Phase 8 | Pending |
-| DEP-04 | Phase 8 | Pending |
+| DEP-01 | Phase 8 | Complete |
+| DEP-02 | Phase 8 | Complete |
+| DEP-03 | Phase 8 | Complete |
+| DEP-04 | Phase 8 | Complete |
 
 **Coverage:**
 
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-06-19*
-*Last updated: 2026-06-19 after Phase 6 verification*
+*Last updated: 2026-06-20 after Phase 8 verification*

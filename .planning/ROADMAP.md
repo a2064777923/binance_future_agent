@@ -149,5 +149,5 @@ collector adapters.
 Run:
 
 ```bash
-$gsd-discuss-phase 8
+$gsd-complete-milestone
 ```

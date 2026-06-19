@@ -48,10 +48,10 @@ repository, not from adjacent projects. Do not import from `F:\stock`.
 Local secrets belong in `.env`, which is ignored by git. `.env.example` documents
 variable names only.
 
-Phases 1-6 implement the isolated project foundation, public market data,
-narrative ingestion, event-store replay, hot-coin candidate scoring, and
-OpenAI-structured decision validation. Binance order placement and server
-deployment are still deferred to later phases.
+Phases 1-8 implement the isolated project foundation, public market data,
+narrative ingestion, event-store replay, hot-coin candidate scoring,
+OpenAI-structured decision validation, risk-gated Binance execution, and
+dry-run-first server deployment.
 
 ## OpenAI Decision Smoke Command
 
@@ -68,8 +68,12 @@ python -m bfa.cli ai decide ^
   --db runtime/agent.sqlite
 ```
 
-Next step:
+Deployment health check:
 
 ```bash
-$gsd-discuss-phase 7
+python -m bfa.cli ops health-check --env-file .env --db runtime/agent.sqlite --skip-network
 ```
+
+The server deployment lives under `/opt/binance-futures-agent` with env at
+`/etc/binance-futures-agent/env` and a dedicated
+`binance-futures-agent.service` oneshot health-check unit.
