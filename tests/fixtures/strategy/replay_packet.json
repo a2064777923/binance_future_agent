@@ -1,0 +1,130 @@
+{
+  "start": "2026-06-19T00:00:00Z",
+  "end": "2026-06-20T00:00:00Z",
+  "symbol": null,
+  "event_count": 8,
+  "symbols": ["BTCUSDT", "ETHUSDT", "DOGEUSDT"],
+  "records": [
+    {
+      "id": 1,
+      "event_type": "narrative",
+      "occurred_at": "2026-06-19T09:00:00Z",
+      "source": "binance_square",
+      "symbol": "BTCUSDT",
+      "ref_id": "n-btc-1",
+      "payload": {
+        "source": "binance_square",
+        "source_id": "n-btc-1",
+        "author": "poster-a",
+        "symbol_mentions": ["BTCUSDT"],
+        "text": "BTCUSDT hot",
+        "published_at": "2026-06-19T09:00:00Z",
+        "engagement": {"likes": 50, "comments": 10, "shares": 2},
+        "quality_flags": []
+      }
+    },
+    {
+      "id": 2,
+      "event_type": "narrative",
+      "occurred_at": "2026-06-19T09:05:00Z",
+      "source": "rss:news.example",
+      "symbol": "BTCUSDT",
+      "ref_id": "n-btc-2",
+      "payload": {
+        "source": "rss:news.example",
+        "source_id": "n-btc-2",
+        "author": "newsdesk",
+        "symbol_mentions": ["BTCUSDT"],
+        "text": "BTCUSDT news",
+        "published_at": "2026-06-19T09:05:00Z",
+        "engagement": {},
+        "quality_flags": []
+      }
+    },
+    {
+      "id": 3,
+      "event_type": "market_snapshot",
+      "occurred_at": "2026-06-19T09:06:00Z",
+      "source": "binance_usdm",
+      "symbol": "BTCUSDT",
+      "ref_id": "ticker_24h:BTCUSDT",
+      "payload": {
+        "event_type": "ticker_24h",
+        "symbol": "BTCUSDT",
+        "payload": {"price_change_percent": "6.5", "quote_volume": "5000000"}
+      }
+    },
+    {
+      "id": 4,
+      "event_type": "market_snapshot",
+      "occurred_at": "2026-06-19T09:07:00Z",
+      "source": "binance_usdm",
+      "symbol": "BTCUSDT",
+      "ref_id": "taker_buy_sell_volume:BTCUSDT",
+      "payload": {
+        "event_type": "taker_buy_sell_volume",
+        "symbol": "BTCUSDT",
+        "payload": {"buy_sell_ratio": "1.2"}
+      }
+    },
+    {
+      "id": 5,
+      "event_type": "market_snapshot",
+      "occurred_at": "2026-06-19T09:08:00Z",
+      "source": "binance_usdm",
+      "symbol": "BTCUSDT",
+      "ref_id": "kline:BTCUSDT",
+      "payload": {
+        "event_type": "kline",
+        "symbol": "BTCUSDT",
+        "payload": {"high": "106", "low": "100", "close": "104"}
+      }
+    },
+    {
+      "id": 6,
+      "event_type": "narrative",
+      "occurred_at": "2026-06-19T09:10:00Z",
+      "source": "manual",
+      "symbol": "ETHUSDT",
+      "ref_id": "n-eth-1",
+      "payload": {
+        "source": "manual",
+        "source_id": "n-eth-1",
+        "author": "poster-b",
+        "symbol_mentions": ["ETHUSDT"],
+        "text": "ETHUSDT mention",
+        "quality_flags": ["missing_published_at"]
+      }
+    },
+    {
+      "id": 7,
+      "event_type": "market_snapshot",
+      "occurred_at": "2026-06-19T09:11:00Z",
+      "source": "binance_usdm",
+      "symbol": "ETHUSDT",
+      "ref_id": "ticker_24h:ETHUSDT",
+      "payload": {
+        "event_type": "ticker_24h",
+        "symbol": "ETHUSDT",
+        "payload": {"price_change_percent": "1.0", "quote_volume": "50000"}
+      }
+    },
+    {
+      "id": 8,
+      "event_type": "narrative",
+      "occurred_at": "2026-06-19T09:12:00Z",
+      "source": "manual",
+      "symbol": "DOGEUSDT",
+      "ref_id": "n-doge-1",
+      "payload": {
+        "source": "manual",
+        "source_id": "n-doge-1",
+        "author": "poster-c",
+        "symbol_mentions": ["DOGEUSDT"],
+        "text": "DOGEUSDT mention",
+        "quality_flags": []
+      }
+    }
+  ]
+}
+
