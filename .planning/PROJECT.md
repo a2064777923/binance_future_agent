@@ -39,11 +39,18 @@ control of downside.
   and `python -m bfa.cli config-check` diagnostics.
 - Phase 1 documented future server isolation under `/opt/binance-futures-agent`,
   `/etc/binance-futures-agent/env`, and `binance-futures-agent.service`.
+- Phase 2 validated official Binance USD-M futures public market metadata,
+  REST metrics, WebSocket message parsing, normalized market snapshots, JSONL
+  output, selected-symbol collection, and market-data CLI smoke commands.
+- Phase 3 validated manual/export Binance Square-style narrative ingestion,
+  RSS/Atom fallback ingestion, normalized narrative records, conservative symbol
+  extraction, deterministic deduplication, JSONL output, and narrative CLI
+  smoke commands.
 
 ### Active
 
-- [ ] Collect Binance USD-M futures market data needed for hot-coin filtering.
-- [ ] Collect narrative and hotness signals from Binance Square plus fallback
+- [x] Collect Binance USD-M futures market data needed for hot-coin filtering.
+- [x] Collect narrative and hotness signals from Binance Square plus fallback
   social/news sources where access is allowed.
 - [ ] Rank candidate symbols by narrative heat, liquidity, price momentum, open
   interest change, taker flow, funding state, and volatility.
@@ -116,10 +123,11 @@ The user's chosen direction:
 
 ## Current State
 
-Phase 1 is complete and verified. The project is installable as an isolated
-Python package, has a safe environment contract, redacted config diagnostics,
-CLI config validation, deployment isolation notes, and 19 passing unit tests.
-Phase 2 should build the official Binance USD-M futures market data layer.
+Phases 1 through 3 are complete and verified. The project is installable as an
+isolated Python package, has a safe environment contract, official Binance USD-M
+public market-data access, narrative/manual/RSS ingestion, normalized JSONL
+evidence output, CLI smoke commands, and 76 passing unit tests. Phase 4 should
+build the local SQLite event store and deterministic replay foundation.
 
 ## Key Decisions
 
@@ -127,11 +135,11 @@ Phase 2 should build the official Binance USD-M futures market data layer.
 |----------|-----------|---------|
 | Create `F:\binance_futures_agent` | Keeps crypto futures work separate from the stock system. | Phase 1 complete |
 | Use Python first | Binance/OpenAI clients, data processing, CLI tooling, and tests are straightforward in Python. | Phase 1 scaffold complete |
-| Use Binance USD-M futures official APIs | The pilot trades USDT-margined contracts and needs supported market/order endpoints. | - Pending |
-| Start with hot-coin strategy | The user wants a controlled imitation of the Square/narrative-driven approach. | - Pending |
+| Use Binance USD-M futures official APIs | The pilot trades USDT-margined contracts and needs supported market/order endpoints. | Phase 2 public market data complete |
+| Start with hot-coin strategy | The user wants a controlled imitation of the Square/narrative-driven approach. | Phase 3 narrative collection complete |
 | Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | - Pending |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | - Pending |
 
 ---
-*Last updated: 2026-06-19 after Phase 1 verification.*
+*Last updated: 2026-06-19 after Phase 3 verification.*

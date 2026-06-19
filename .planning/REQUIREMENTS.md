@@ -26,10 +26,10 @@
 
 ### Narrative Collection
 
-- [ ] **NAR-01**: User can ingest Binance Square hot-coin data through at least one supported collector path.
-- [ ] **NAR-02**: User can ingest fallback narrative sources such as manual exports, RSS/news, X, or Telegram when configured.
-- [ ] **NAR-03**: The system can normalize narrative records into symbols, text, source, engagement, and timestamp fields.
-- [ ] **NAR-04**: The system can deduplicate repeated posts or duplicate symbol mentions before scoring.
+- [x] **NAR-01**: User can ingest Binance Square hot-coin data through at least one supported collector path.
+- [x] **NAR-02**: User can ingest fallback narrative sources such as manual exports, RSS/news, X, or Telegram when configured.
+- [x] **NAR-03**: The system can normalize narrative records into symbols, text, source, engagement, and timestamp fields.
+- [x] **NAR-04**: The system can deduplicate repeated posts or duplicate symbol mentions before scoring.
 
 ### Candidate Strategy
 
@@ -104,10 +104,10 @@
 | MKT-02 | Phase 2 | Complete |
 | MKT-03 | Phase 2 | Complete |
 | MKT-04 | Phase 2 | Complete |
-| NAR-01 | Phase 3 | Pending |
-| NAR-02 | Phase 3 | Pending |
-| NAR-03 | Phase 3 | Pending |
-| NAR-04 | Phase 3 | Pending |
+| NAR-01 | Phase 3 | Complete |
+| NAR-02 | Phase 3 | Complete |
+| NAR-03 | Phase 3 | Complete |
+| NAR-04 | Phase 3 | Complete |
 | EVT-01 | Phase 4 | Pending |
 | EVT-02 | Phase 4 | Pending |
 | EVT-03 | Phase 4 | Pending |
@@ -137,4 +137,4 @@
 
 ---
 *Requirements defined: 2026-06-19*
-*Last updated: 2026-06-19 after initial definition*
+*Last updated: 2026-06-19 after Phase 3 verification*
