@@ -29,11 +29,11 @@ created: 2026-06-20
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|-----------|-------------------|-------------|--------|
-| 07-01-T1 | 07-01 | 1 | EXE-01, EXE-03 | unit | `python -m unittest tests.test_execution_risk` | planned | pending |
-| 07-01-T2 | 07-01 | 1 | EXE-04 | unit | `python -m unittest tests.test_execution_filters` | planned | pending |
-| 07-02-T1 | 07-02 | 2 | EXE-02, EXE-04 | unit | `python -m unittest tests.test_execution_binance_client` | planned | pending |
-| 07-03-T1 | 07-03 | 3 | EXE-01, EXE-02, EXE-03, EXE-04 | unit/CLI | `python -m unittest tests.test_execution_executor tests.test_cli` | planned | pending |
-| 07-04-T1 | 07-04 | 4 | EXE-05 | unit | `python -m unittest tests.test_execution_reconcile` | planned | pending |
+| 07-01-T1 | 07-01 | 1 | EXE-01, EXE-03 | unit | `python -m unittest tests.test_execution_risk` | present | passed |
+| 07-01-T2 | 07-01 | 1 | EXE-04 | unit | `python -m unittest tests.test_execution_filters` | present | passed |
+| 07-02-T1 | 07-02 | 2 | EXE-02, EXE-04 | unit | `python -m unittest tests.test_execution_binance_client` | present | passed |
+| 07-03-T1 | 07-03 | 3 | EXE-01, EXE-02, EXE-03, EXE-04 | unit/CLI | `python -m unittest tests.test_execution_executor tests.test_cli` | present | passed |
+| 07-04-T1 | 07-04 | 4 | EXE-05 | unit | `python -m unittest tests.test_execution_reconcile` | present | passed |
 
 ## Manual-Only Verifications
 
