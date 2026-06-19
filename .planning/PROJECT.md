@@ -32,11 +32,16 @@ control of downside.
 
 ### Validated
 
-(None yet - build, replay, and pilot to validate.)
+- Phase 1 validated the isolated repository at `F:\binance_futures_agent`.
+- Phase 1 validated git hygiene for env files, credentials, runtime data, logs,
+  local databases, and raw exports.
+- Phase 1 validated the dry-run/testnet/live config contract, secret redaction,
+  and `python -m bfa.cli config-check` diagnostics.
+- Phase 1 documented future server isolation under `/opt/binance-futures-agent`,
+  `/etc/binance-futures-agent/env`, and `binance-futures-agent.service`.
 
 ### Active
 
-- [ ] Build an isolated repository at `F:\binance_futures_agent`.
 - [ ] Collect Binance USD-M futures market data needed for hot-coin filtering.
 - [ ] Collect narrative and hotness signals from Binance Square plus fallback
   social/news sources where access is allowed.
@@ -109,12 +114,19 @@ The user's chosen direction:
   `/opt/binance-futures-agent`, a dedicated systemd unit, and gitignored runtime
   data under that directory.
 
+## Current State
+
+Phase 1 is complete and verified. The project is installable as an isolated
+Python package, has a safe environment contract, redacted config diagnostics,
+CLI config validation, deployment isolation notes, and 19 passing unit tests.
+Phase 2 should build the official Binance USD-M futures market data layer.
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Create `F:\binance_futures_agent` | Keeps crypto futures work separate from the stock system. | - Pending |
-| Use Python first | Binance/OpenAI clients, data processing, CLI tooling, and tests are straightforward in Python. | - Pending |
+| Create `F:\binance_futures_agent` | Keeps crypto futures work separate from the stock system. | Phase 1 complete |
+| Use Python first | Binance/OpenAI clients, data processing, CLI tooling, and tests are straightforward in Python. | Phase 1 scaffold complete |
 | Use Binance USD-M futures official APIs | The pilot trades USDT-margined contracts and needs supported market/order endpoints. | - Pending |
 | Start with hot-coin strategy | The user wants a controlled imitation of the Square/narrative-driven approach. | - Pending |
 | Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | - Pending |
@@ -122,4 +134,4 @@ The user's chosen direction:
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | - Pending |
 
 ---
-*Last updated: 2026-06-19 after project initialization.*
+*Last updated: 2026-06-19 after Phase 1 verification.*
