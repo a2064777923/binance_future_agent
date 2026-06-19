@@ -266,6 +266,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     live_status.add_argument("--env-file", help="optional env file to load before environment overrides")
     live_status.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    live_status.add_argument("--check-binance", action="store_true", help="also fetch read-only signed Binance account evidence")
 
     agent = subparsers.add_parser(
         "agent",
@@ -587,7 +588,7 @@ def _run_ops(
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1
     if args.ops_command == "live-status":
-        report = build_live_status_report(config, db_path=args.db)
+        report = build_live_status_report(config, db_path=args.db, check_binance=args.check_binance)
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0
     return 2

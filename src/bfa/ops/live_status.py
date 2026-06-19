@@ -11,6 +11,7 @@ from typing import Any
 
 from bfa.config import AppConfig
 from bfa.event_store.migrations import connect, migrate
+from bfa.execution.binance_client import BinanceFuturesSignedClient
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class LiveStatusReport:
     openai_backoff: OpenAiBackoffStatus
     protective_evidence: ProtectiveEvidence
     lva05_complete: bool
+    exchange_evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,6 +88,7 @@ class LiveStatusReport:
             },
             "openai_backoff": self.openai_backoff.to_dict(),
             "protective_evidence": self.protective_evidence.to_dict(),
+            "exchange_evidence": dict(self.exchange_evidence),
             "lva05_complete": self.lva05_complete,
         }
 
@@ -95,6 +98,7 @@ def build_live_status_report(
     *,
     db_path: str | None = None,
     now_epoch: float | None = None,
+    check_binance: bool = False,
 ) -> LiveStatusReport:
     resolved_db_path = db_path or config.get("BFA_DB_PATH")
     runtime_dir = config.get("BFA_RUNTIME_DIR")
@@ -119,6 +123,9 @@ def build_live_status_report(
         connection.close()
 
     backoff = _openai_backoff_status(Path(runtime_dir), now_epoch=now_epoch)
+    exchange_evidence = _read_exchange_evidence(config) if check_binance else {}
+    if exchange_evidence:
+        protective = _merge_protective_evidence(protective, exchange_evidence)
     return LiveStatusReport(
         db_path=str(resolved_db_path),
         runtime_dir=str(runtime_dir),
@@ -126,6 +133,7 @@ def build_live_status_report(
         latest=latest,
         openai_backoff=backoff,
         protective_evidence=protective,
+        exchange_evidence=exchange_evidence,
         lva05_complete=protective.complete,
     )
 
@@ -184,6 +192,51 @@ def _protective_evidence(connection: sqlite3.Connection) -> ProtectiveEvidence:
     return ProtectiveEvidence(complete=False)
 
 
+def _read_exchange_evidence(config: AppConfig) -> dict[str, Any]:
+    client = BinanceFuturesSignedClient(
+        base_url=config.get("BINANCE_FUTURES_BASE_URL"),
+        api_key=config.get("BINANCE_API_KEY"),
+        api_secret=config.get("BINANCE_API_SECRET"),
+    )
+    account = client.account()
+    positions = client.position_risk()
+    open_orders = client.open_orders()
+    return {
+        "account": {
+            "can_trade": account.get("canTrade"),
+            "total_wallet_balance": account.get("totalWalletBalance"),
+            "available_balance": account.get("availableBalance"),
+        },
+        "positions": [p for p in positions if _float(p.get("positionAmt")) != 0.0],
+        "open_orders": open_orders,
+    }
+
+
+def _merge_protective_evidence(
+    evidence: ProtectiveEvidence,
+    exchange_evidence: dict[str, Any],
+) -> ProtectiveEvidence:
+    positions = exchange_evidence.get("positions") or []
+    open_orders = exchange_evidence.get("open_orders") or []
+    if not positions and not open_orders:
+        return evidence
+    details = dict(evidence.details)
+    details.update(
+        {
+            "exchange_positions": len(positions),
+            "exchange_open_orders": len(open_orders),
+        }
+    )
+    return ProtectiveEvidence(
+        complete=evidence.complete,
+        event_id=evidence.event_id,
+        symbol=evidence.symbol,
+        occurred_at=evidence.occurred_at,
+        status=evidence.status,
+        details=details,
+    )
+
+
 def _has_entry_and_protective_orders(response: dict[str, Any]) -> bool:
     return all(
         isinstance(response.get(key), dict)
@@ -231,3 +284,10 @@ def _count_order_intents_by_status(connection: sqlite3.Connection, status: str) 
         if payload.get("status") == status:
             count += 1
     return count
+
+
+def _float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
