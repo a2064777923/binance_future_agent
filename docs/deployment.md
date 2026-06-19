@@ -98,6 +98,19 @@ Optional network check after credentials are configured:
   --check-binance --check-openai
 ```
 
+Live activation evidence can be summarized without placing orders:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops live-status \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+```
+
+`lva05_complete=true` means a submitted entry has corresponding stop-loss and
+take-profit evidence, or a protective-order failure triggered the kill-switch
+and emergency close path. `lva05_complete=false` means no such live-entry
+evidence exists yet.
+
 ## Systemd Smoke
 
 The unit runs the health check as a oneshot service. Start it manually:

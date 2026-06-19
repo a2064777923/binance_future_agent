@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 9 - Live Activation Readiness
-**Status:** v1.1 live timer active; candidate-driven live cycle observed; OpenAI timeout backoff verified
+**Status:** v1.1 live timer active; candidate-driven live cycle observed; OpenAI timeout backoff verified; live-status monitor deployed
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -79,7 +79,7 @@ Monitor live timer evidence before changing risk limits.
 Phase: Phase 9 - Live Activation Readiness
 Plan: 09-01
 Status: Timer active; candidate-driven live cycle passed with no submission
-Last activity: 2026-06-20 — market-heat fallback deployed and live candidate cycle observed
+Last activity: 2026-06-20 — live-status monitor deployed; LVA-05 remains untriggered
 
 ## Operator Next Steps
 
@@ -87,4 +87,4 @@ Last activity: 2026-06-20 — market-heat fallback deployed and live candidate c
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.
 - If a future entry is submitted, verify protective stop-loss and take-profit
-  exchange orders before changing risk limits.
+  exchange orders with `ops live-status` before changing risk limits.

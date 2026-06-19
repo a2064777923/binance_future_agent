@@ -6,7 +6,7 @@ endpoint is intermittent and correctly enters backoff on timeout.
 
 ## Server State
 
-- Deployed commit: `ba8d9fa`
+- Deployed commit: `f6e613c`
 - App root: `/opt/binance-futures-agent`
 - Env file: `/etc/binance-futures-agent/env`
 - Env file permissions: managed as `600 root:root`
@@ -83,6 +83,17 @@ No secret values were written to this checkpoint.
 - Follow-up deployment clarified that `notional_usdt` is contract notional, not
   initial margin. The AI context now includes `max_position_margin_usdt`, and
   order intent payloads include `estimated_initial_margin_usdt`.
+- `ops live-status` was deployed as a read-only live activation evidence
+  command. Server run returned:
+  - `candidates=13`
+  - `ai_decisions=2`
+  - `order_intents=1`
+  - `submitted_order_intents=0`
+  - `exchange_responses=0`
+  - `latest_candidate_symbol=SOLUSDT`
+  - `latest_order_intent_status=rejected`
+  - `openai_backoff.active=true`
+  - `lva05_complete=false`
 
 ## Current Interpretation
 
@@ -105,3 +116,5 @@ intents.
 - If changing toward 1 USDT-per-trade margin, make it an explicit leverage and
   notional-cap configuration change instead of treating `notional_usdt` as
   margin.
+- Use `python -m bfa.cli ops live-status --env-file ... --db ...` to check
+  whether a future submitted entry has protective-order evidence.
