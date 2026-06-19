@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: Dry-Run Binance Futures Agent
 current_phase: Phase 9 - Live Activation Readiness
 status: in_progress
-stopped_at: waiting for live OpenAI endpoint verification
+stopped_at: live timer enabled; waiting for candidate-driven OpenAI/execution evidence
 last_updated: "2026-06-19T17:34:23.945Z"
 last_activity: 2026-06-19
 last_activity_desc: Milestone v1.0 completed and archived
@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 9 - Live Activation Readiness
-**Status:** v1.1 live activation in progress
+**Status:** v1.1 live timer active; OpenAI endpoint degraded under 5s timeout
 **Last planned:** 2026-06-20
 **Plan count:** 4
 
@@ -60,9 +60,9 @@ projects or losing control of downside.
 - Secrets were provided out-of-band and must be rotated or handled carefully
   before production deployment.
 
-- OpenAI-compatible endpoint availability must be verified on the server. If it
-  is down, the agent should enter `openai_backoff` and skip trading until the
-  retry interval expires.
+- OpenAI-compatible endpoint is configured on the server but timed out under the
+  5 second health-check timeout. The agent should enter `openai_backoff` and
+  skip trading if this happens during a candidate-driven cycle.
 
 ## Next Command
 
@@ -80,11 +80,13 @@ $gsd-plan-phase 9
 
 Phase: Phase 9 - Live Activation Readiness
 Plan: Pending
-Status: Configure OpenAI-compatible endpoint, verify server health, then run one live cycle
-Last activity: 2026-06-20 — v1.1 live activation requirements drafted
+Status: Timer active; no-candidate live smoke passed; OpenAI endpoint degraded
+Last activity: 2026-06-20 — live timer enabled and service smoke passed
 
 ## Operator Next Steps
 
-- Configure OpenAI-compatible endpoint/key out of band on the server.
-- Verify `ops health-check --check-binance --check-openai`.
-- Run one manual `binance-futures-agent-live.service` cycle before enabling the timer.
+- Feed or automate narrative/hot-coin inputs so the live timer can produce
+  candidates.
+- Observe candidate-driven OpenAI behavior; if the endpoint is down, confirm
+  `openai_backoff` and no order intent.
+- Review the first candidate-driven cycle before changing risk limits.

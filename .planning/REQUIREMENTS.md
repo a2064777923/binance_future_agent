@@ -50,12 +50,12 @@ v1.0 requirements are archived at
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LVA-01 | Phase 9 | Planned |
-| LVA-02 | Phase 9 | Planned |
-| LVA-03 | Phase 9 | Planned |
-| LVA-04 | Phase 9 | Planned |
+| LVA-01 | Phase 9 | Complete |
+| LVA-02 | Phase 9 | Partial - OpenAI health timeout under 5 seconds |
+| LVA-03 | Phase 9 | Complete - no-candidate live smoke |
+| LVA-04 | Phase 9 | Implemented locally; server endpoint currently degraded |
 | LVA-05 | Phase 9 | Planned |
-| LVA-06 | Phase 9 | Planned |
+| LVA-06 | Phase 9 | Complete - timer enabled and active |
 
 **Coverage:**
 
