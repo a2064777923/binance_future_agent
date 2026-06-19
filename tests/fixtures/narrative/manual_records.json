@@ -1,0 +1,23 @@
+[
+  {
+    "source": "binance_square",
+    "source_id": "square-001",
+    "author": "manual-export",
+    "text": "ESPORTSUSDT is heating up after a Square thread. $SOL also mentioned.",
+    "url": "https://www.binance.com/en/square/post/example",
+    "published_at": "2026-06-19T09:00:00Z",
+    "engagement": {
+      "likes": 42,
+      "comments": 7,
+      "shares": 3
+    }
+  },
+  {
+    "source": "manual_note",
+    "source_id": "note-001",
+    "author": "researcher",
+    "text": "BTC/USDT and ETH-USDT both appeared in copied market notes.",
+    "published_at": "2026-06-19T10:00:00Z"
+  }
+]
+
