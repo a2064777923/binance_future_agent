@@ -14,7 +14,6 @@
   "plan_review": {
     "source_grounding": true
   },
-  "project_structure": "standard",
   "ship": {
     "pr_body_sections": [
       {
