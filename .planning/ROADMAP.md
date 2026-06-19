@@ -36,9 +36,9 @@ protective-order, or isolation guarantees.
 
 **Requirements:** LVA-01, LVA-02, LVA-03, LVA-04, LVA-05, LVA-06
 
-**Status:** OpenAI key and Binance credentials are configured out of band; the
-live timer is enabled/active after a no-candidate smoke. Remaining work is to
-produce candidate-bearing cycles and capture OpenAI/execution evidence.
+**Status:** Live timer is enabled/active; market-heat fallback now produces
+candidates without Square/RSS input; a candidate-driven live cycle reached
+OpenAI and resulted in pass/no submission. OpenAI timeouts enter backoff.
 
 **Success Criteria:**
 
@@ -73,7 +73,7 @@ produce candidate-bearing cycles and capture OpenAI/execution evidence.
 | 6 | v1.0 | 3/3 | Complete | 2026-06-19 |
 | 7 | v1.0 | 4/4 | Complete | 2026-06-19 |
 | 8 | v1.0 | 4/4 | Complete | 2026-06-19 |
-| 9 | v1.1 | 0/1 | Candidate source in progress | - |
+| 9 | v1.1 | 1/1 | Activation evidence captured | 2026-06-20 |
 
 ## Requirement Coverage
 
@@ -83,9 +83,6 @@ produce candidate-bearing cycles and capture OpenAI/execution evidence.
 
 ## Next Step
 
-Add an automatic hot-market fallback source, then observe a candidate-driven
-live cycle:
-
-```bash
-$gsd-execute-phase 9
-```
+Monitor the live timer under the 100 USDT risk caps. If a future entry is
+submitted, capture exchange-side stop-loss/take-profit evidence before raising
+limits.

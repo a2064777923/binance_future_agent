@@ -12,10 +12,10 @@ v1.0 requirements are archived at
 
 ### Live Credential Activation
 
-- [ ] **LVA-01**: Configure `OPENAI_API_KEY` on
+- [x] **LVA-01**: Configure `OPENAI_API_KEY` on
   `/etc/binance-futures-agent/env` out of band without writing it to git,
   planning docs, shell history, or command output.
-- [ ] **LVA-02**: Validate server live config with Binance credentials,
+- [x] **LVA-02**: Validate server live config with Binance credentials,
   `OPENAI_API_KEY`, `BFA_MODE=live`, `BFA_OPENAI_ENABLED=true`,
   `BFA_REQUIRE_PROTECTIVE_ORDERS=true`, `OPENAI_BASE_URL`,
   `OPENAI_TIMEOUT_SECONDS=5`, `OPENAI_MAX_OUTPUT_TOKENS=400`, and
@@ -23,9 +23,9 @@ v1.0 requirements are archived at
 
 ### One-Cycle Live Pilot
 
-- [ ] **LVA-03**: Run one operator-approved live cycle through
+- [x] **LVA-03**: Run one operator-approved live cycle through
   `binance-futures-agent-live.service` before enabling the timer.
-- [ ] **LVA-04**: Prove fail-closed behavior for AI timeout/error and prove that
+- [x] **LVA-04**: Prove fail-closed behavior for AI timeout/error and prove that
   no order intent is created when OpenAI is unavailable; API failures enter
   backoff and are retried after the configured recovery interval.
 - [ ] **LVA-05**: If a live entry order is submitted, prove protective
@@ -34,7 +34,7 @@ v1.0 requirements are archived at
 
 ### Timer And Evidence
 
-- [ ] **LVA-06**: Enable `binance-futures-agent-live.timer` only after manual
+- [x] **LVA-06**: Enable `binance-futures-agent-live.timer` only after manual
   review, and capture first live activation evidence without secrets.
 
 ## Out of Scope
@@ -51,10 +51,10 @@ v1.0 requirements are archived at
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | LVA-01 | Phase 9 | Complete |
-| LVA-02 | Phase 9 | Partial - OpenAI health timeout under 5 seconds |
-| LVA-03 | Phase 9 | Complete - no-candidate live smoke |
-| LVA-04 | Phase 9 | Implemented locally; server endpoint currently degraded |
-| LVA-05 | Phase 9 | Planned |
+| LVA-02 | Phase 9 | Complete - live config valid; OpenAI endpoint is intermittent |
+| LVA-03 | Phase 9 | Complete - candidate-driven live cycle observed |
+| LVA-04 | Phase 9 | Complete - timeout writes backoff and submits no order |
+| LVA-05 | Phase 9 | Not triggered - no live entry has been submitted yet |
 | LVA-06 | Phase 9 | Complete - timer enabled and active |
 
 **Coverage:**

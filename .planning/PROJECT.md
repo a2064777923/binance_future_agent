@@ -148,12 +148,13 @@ redacted AI journaling, dry-run/live risk-gated execution, signed Binance
 execution helpers, reconciliation reports, deployment health checks, CLI smoke
 commands, automated one-cycle trading runner, live systemd timer assets,
 exchange-side protective order submission, OpenAI-compatible base URL
-configuration, AI timeout/backoff behavior, and 154 passing unit tests. The v1
-dry-run deployment is installed on the server under
+configuration, AI timeout/backoff behavior, market-heat fallback narratives, and
+158 passing unit tests. The server deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
-credentials are configured on the server; live activation now depends on
-verifying the OpenAI-compatible endpoint/key, one manual live service cycle, and
-operator review before enabling the timer.
+and OpenAI credentials are configured out of band, the live timer is enabled and
+active, and a candidate-driven live cycle has reached OpenAI and returned
+pass/no submission. The OpenAI-compatible endpoint is intermittent under the
+5 second timeout; timeouts enter `openai_backoff` and skip execution.
 
 ## Key Decisions
 
@@ -168,9 +169,9 @@ operator review before enabling the timer.
 | Use OpenAI for structured decisions, not direct raw orders | Keeps AI reasoning auditable and lets deterministic risk code retain final control. | Phase 6 complete |
 | Keep deterministic risk/execution code in final control | Live mode must be explicit, risk-capped, persisted, and reconcilable before touching Binance. | Phase 7 complete |
 | Deploy dry-run-first | Server deployment should prove isolation and health before any live trading mode is enabled. | Phase 8 complete |
-| Keep LLM slow-path with backoff | API outages or slow responses should skip trading rather than block deterministic safety logic. | Phase 9 in progress |
+| Keep LLM slow-path with backoff | API outages or slow responses should skip trading rather than block deterministic safety logic. | Phase 9 complete for activation |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
-| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 in progress |
+| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
 *Last updated: 2026-06-20 during Phase 9 live activation.*

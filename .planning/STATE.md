@@ -1,18 +1,18 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: Dry-Run Binance Futures Agent
+milestone: v1.1
+milestone_name: Live Activation
 current_phase: Phase 9 - Live Activation Readiness
 status: in_progress
-stopped_at: live timer enabled; waiting for candidate-driven OpenAI/execution evidence
-last_updated: "2026-06-19T17:34:23.945Z"
-last_activity: 2026-06-19
-last_activity_desc: Milestone v1.0 completed and archived
+stopped_at: live timer active; candidate-driven live cycle observed with no submission
+last_updated: "2026-06-19T18:33:28.000Z"
+last_activity: 2026-06-20
+last_activity_desc: Market-heat fallback deployed; live candidate cycle observed
 progress:
-  total_phases: 8
-  completed_phases: 8
-  total_plans: 28
-  completed_plans: 28
+  total_phases: 9
+  completed_phases: 9
+  total_plans: 29
+  completed_plans: 29
   percent: 100
 ---
 
@@ -20,9 +20,9 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 9 - Live Activation Readiness
-**Status:** v1.1 live timer active; OpenAI endpoint degraded under 5s timeout
+**Status:** v1.1 live timer active; candidate-driven live cycle observed; OpenAI timeout backoff verified
 **Last planned:** 2026-06-20
-**Plan count:** 4
+**Plan count:** 5
 
 ## Project Reference
 
@@ -60,15 +60,13 @@ projects or losing control of downside.
 - Secrets were provided out-of-band and must be rotated or handled carefully
   before production deployment.
 
-- OpenAI-compatible endpoint is configured on the server but timed out under the
-  5 second health-check timeout. The agent should enter `openai_backoff` and
-  skip trading if this happens during a candidate-driven cycle.
+- OpenAI-compatible endpoint is configured on the server and is intermittent
+  under the 5 second timeout. Candidate-driven cycles either receive an AI
+  pass/no-trade decision or enter `openai_backoff` and skip trading.
 
 ## Next Command
 
-```bash
-$gsd-plan-phase 9
-```
+Monitor live timer evidence before changing risk limits.
 
 ## Session
 
@@ -79,14 +77,14 @@ $gsd-plan-phase 9
 ## Current Position
 
 Phase: Phase 9 - Live Activation Readiness
-Plan: Pending
-Status: Timer active; no-candidate live smoke passed; OpenAI endpoint degraded
-Last activity: 2026-06-20 — live timer enabled and service smoke passed
+Plan: 09-01
+Status: Timer active; candidate-driven live cycle passed with no submission
+Last activity: 2026-06-20 — market-heat fallback deployed and live candidate cycle observed
 
 ## Operator Next Steps
 
-- Feed or automate narrative/hot-coin inputs so the live timer can produce
-  candidates.
-- Observe candidate-driven OpenAI behavior; if the endpoint is down, confirm
+- Keep 100 USDT pilot caps unchanged.
+- Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.
-- Review the first candidate-driven cycle before changing risk limits.
+- If a future entry is submitted, verify protective stop-loss and take-profit
+  exchange orders before changing risk limits.
