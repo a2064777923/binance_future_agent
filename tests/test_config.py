@@ -1,6 +1,6 @@
 import unittest
 
-from bfa.config import RuntimeMode, load_config, validate_config
+from bfa.config import RuntimeMode, load_config, market_symbols, validate_config
 
 
 def base_env(**overrides):
@@ -17,6 +17,7 @@ def base_env(**overrides):
         "BFA_DB_PATH": "/tmp/binance-futures-agent/data/agent.sqlite",
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
+        "BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT,SOLUSDT",
         "BINANCE_API_KEY": "",
         "BINANCE_API_SECRET": "",
         "BINANCE_FUTURES_BASE_URL": "https://fapi.binance.com",
@@ -37,6 +38,16 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(result.valid)
         self.assertEqual(result.mode, RuntimeMode.DRY_RUN)
         self.assertEqual(result.errors, [])
+
+    def test_market_symbols_default_to_small_controlled_allowlist(self):
+        config = load_config({})
+
+        self.assertEqual(market_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+
+    def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
+        config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
+
+        self.assertEqual(market_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
 
     def test_testnet_requires_binance_credentials(self):
         config = load_config(base_env(BFA_MODE="testnet"))

@@ -27,6 +27,7 @@ DEFAULTS = {
     "BFA_MAX_DAILY_LOSS_USDT": "3",
     "BFA_MAX_OPEN_POSITIONS": "2",
     "BFA_KILL_SWITCH_FILE": "/opt/binance-futures-agent/runtime/KILL_SWITCH",
+    "BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT,SOLUSDT",
     "BFA_DB_PATH": "/opt/binance-futures-agent/data/agent.sqlite",
     "BFA_LOG_DIR": "/opt/binance-futures-agent/logs",
     "BFA_RUNTIME_DIR": "/opt/binance-futures-agent/runtime",
@@ -62,6 +63,9 @@ class AppConfig:
 
     def get(self, key: str, default: str = "") -> str:
         return self.values.get(key, default)
+
+    def get_list(self, key: str) -> list[str]:
+        return _split_csv_symbols(self.get(key))
 
 
 @dataclass(frozen=True)
@@ -120,6 +124,10 @@ def validate_config(config: AppConfig) -> ValidationResult:
         warnings=warnings,
         redacted=redacted,
     )
+
+
+def market_symbols(config: AppConfig) -> list[str]:
+    return config.get_list("BFA_MARKET_SYMBOLS")
 
 
 def _parse_mode(value: str, errors: list[str]) -> RuntimeMode | None:
@@ -182,3 +190,12 @@ def _strip_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def _split_csv_symbols(value: str) -> list[str]:
+    symbols: list[str] = []
+    for raw_symbol in value.split(","):
+        symbol = raw_symbol.strip().upper()
+        if symbol:
+            symbols.append(symbol)
+    return symbols
