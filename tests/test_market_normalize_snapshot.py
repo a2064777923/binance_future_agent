@@ -1,4 +1,5 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from bfa.market.normalize import (
     normalize_ticker_24h,
     normalize_top_long_short_position,
 )
+from bfa.market.snapshot_writer import write_jsonl_snapshots
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "binance_market"
@@ -92,6 +94,55 @@ class RestNormalizationTests(unittest.TestCase):
         self.assertEqual(open_interest_hist.event_time, "1700000000000")
         self.assertEqual(open_interest_hist.payload["sum_open_interest"], "20403.63700000")
         self.assertEqual(taker_flow.payload["buy_volume"], "387.3300")
+
+
+class SnapshotWriterTests(unittest.TestCase):
+    def make_snapshot(self, symbol="BTCUSDT"):
+        return NormalizedMarketSnapshot(
+            source="binance_usdm",
+            event_type="ticker_24h",
+            symbol=symbol,
+            event_time=1700000000000,
+            received_at="now",
+            payload={"last_price": "70100.00"},
+        )
+
+    def test_write_jsonl_snapshots_creates_parent_and_writes_lines(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "runtime" / "snapshots" / "market.jsonl"
+
+            count = write_jsonl_snapshots(output_path, [self.make_snapshot()])
+
+            self.assertEqual(count, 1)
+            lines = output_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), 1)
+            payload = json.loads(lines[0])
+            self.assertEqual(payload["source"], "binance_usdm")
+            self.assertEqual(payload["symbol"], "BTCUSDT")
+            self.assertEqual(payload["payload"]["last_price"], "70100.00")
+
+    def test_write_jsonl_snapshots_appends_serializable_dicts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "data" / "market.jsonl"
+
+            write_jsonl_snapshots(output_path, [self.make_snapshot("BTCUSDT")])
+            count = write_jsonl_snapshots(output_path, [self.make_snapshot("ETHUSDT")])
+
+            self.assertEqual(count, 1)
+            records = [
+                json.loads(line)
+                for line in output_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual([record["symbol"] for record in records], ["BTCUSDT", "ETHUSDT"])
+
+    def test_write_jsonl_snapshots_empty_list_returns_zero_without_content(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "runtime" / "empty.jsonl"
+
+            count = write_jsonl_snapshots(output_path, [])
+
+            self.assertEqual(count, 0)
+            self.assertFalse(output_path.exists())
 
 
 if __name__ == "__main__":
