@@ -122,8 +122,9 @@ The user's chosen direction:
 - **Execution**: Live mode is allowed, but default code paths must start in
   dry-run/test mode and require explicit environment configuration for live.
 - **Risk**: Initial intelligent defaults are max 3x leverage, max 20 USDT
-  notional per position, max 1 USDT risk per trade, max 3 USDT daily loss, and
-  max two concurrent positions.
+  contract notional per position, max 1 USDT risk per trade, max 3 USDT daily
+  loss, and max two concurrent positions. Contract notional is not the same as
+  initial margin; approximate margin is `notional / leverage`.
 - **Exchange API**: Use official Binance USD-M futures APIs for market data,
   account state, and order placement.
 - **Narrative APIs**: Binance Square reading may require browser automation,
@@ -170,6 +171,7 @@ pass/no submission. The OpenAI-compatible endpoint is intermittent under the
 | Keep deterministic risk/execution code in final control | Live mode must be explicit, risk-capped, persisted, and reconcilable before touching Binance. | Phase 7 complete |
 | Deploy dry-run-first | Server deployment should prove isolation and health before any live trading mode is enabled. | Phase 8 complete |
 | Keep LLM slow-path with backoff | API outages or slow responses should skip trading rather than block deterministic safety logic. | Phase 9 complete for activation |
+| Track margin vs notional explicitly | Futures UI can show small margin such as 1 USDT, while Binance order filters validate contract notional and quantity. | Phase 9 follow-up |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 

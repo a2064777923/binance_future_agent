@@ -9,6 +9,11 @@ The first live target is a 100 USDT pilot account. The project must default to
 dry-run/test modes until explicit live mode, API credentials, leverage limits,
 loss limits, and the server kill switch are all configured.
 
+In this project, `notional_usdt` means contract position notional, not the
+initial margin consumed by a futures position. Approximate initial margin is
+`notional_usdt / leverage`, before fees, funding, and exchange-specific margin
+rules.
+
 ## Scope
 
 - Exchange: Binance USD-M futures.

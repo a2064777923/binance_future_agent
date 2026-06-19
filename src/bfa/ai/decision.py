@@ -17,7 +17,9 @@ from bfa.ai.schema import (
 
 DECISION_INSTRUCTIONS = """You evaluate one Binance USD-M futures hot-coin candidate.
 Return only the requested structured JSON. You may choose pass when evidence is weak.
-Never claim that an order was placed. Keep notional within the provided risk limits."""
+Never claim that an order was placed. notional_usdt means contract position notional,
+not initial margin; approximate initial margin is notional_usdt divided by leverage.
+Keep notional within the provided risk limits."""
 
 
 @dataclass(frozen=True)

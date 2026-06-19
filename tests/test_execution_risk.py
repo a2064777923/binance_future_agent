@@ -88,6 +88,7 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertTrue(risk.accepted)
         self.assertEqual(intent.side, "BUY")
         self.assertAlmostEqual(intent.quantity, 0.2)
+        self.assertAlmostEqual(intent.estimated_initial_margin_usdt, 20 / 3)
 
     def test_ai_pass_creates_no_intent(self):
         validation = self.validation(

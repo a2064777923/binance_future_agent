@@ -23,12 +23,19 @@ class OrderIntent:
     reason_codes: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def estimated_initial_margin_usdt(self) -> float:
+        if self.leverage <= 0:
+            return self.notional_usdt
+        return self.notional_usdt / self.leverage
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "side": self.side,
             "quantity": self.quantity,
             "notional_usdt": self.notional_usdt,
+            "estimated_initial_margin_usdt": self.estimated_initial_margin_usdt,
             "entry_price": self.entry_price,
             "stop_price": self.stop_price,
             "target_price": self.target_price,

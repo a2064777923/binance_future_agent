@@ -65,6 +65,12 @@ OPENAI_RETRY_AFTER_SECONDS=300
 BFA_MARKET_HEAT_NARRATIVE_ENABLED=true
 ```
 
+`BFA_MAX_POSITION_NOTIONAL_USDT` is a contract notional cap, not the margin
+spent from the account. For example, 20 USDT notional at 20x leverage is roughly
+1 USDT initial margin before fees, funding, and exchange-specific margin rules.
+The live runner records `estimated_initial_margin_usdt` on order intents so the
+two numbers stay visible.
+
 Keep the kill-switch path configured. Creating that file stops future live
 orders:
 

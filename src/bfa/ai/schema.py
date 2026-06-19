@@ -46,6 +46,7 @@ class RiskLimits:
             "account_capital_usdt": self.account_capital_usdt,
             "max_leverage": self.max_leverage,
             "max_position_notional_usdt": self.max_position_notional_usdt,
+            "max_position_margin_usdt": round(self.max_position_notional_usdt / self.max_leverage, 8),
             "max_risk_per_trade_usdt": self.max_risk_per_trade_usdt,
             "max_daily_loss_usdt": self.max_daily_loss_usdt,
             "max_open_positions": self.max_open_positions,

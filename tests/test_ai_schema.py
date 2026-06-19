@@ -59,6 +59,7 @@ class AiSchemaTests(unittest.TestCase):
 
         self.assertEqual(payload["candidate"]["symbol"], "BTCUSDT")
         self.assertEqual(payload["risk_limits"]["max_position_notional_usdt"], 20)
+        self.assertAlmostEqual(payload["risk_limits"]["max_position_margin_usdt"], 20 / 3)
         self.assertNotIn("OPENAI_API_KEY", payload["candidate"])
         self.assertNotIn("ignored_extra", payload["candidate"]["features"])
 
