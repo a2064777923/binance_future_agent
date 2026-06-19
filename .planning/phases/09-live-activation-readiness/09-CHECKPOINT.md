@@ -6,7 +6,7 @@ endpoint is intermittent and correctly enters backoff on timeout.
 
 ## Server State
 
-- Deployed commit: `f683e57`
+- Deployed commit: `ba8d9fa`
 - App root: `/opt/binance-futures-agent`
 - Env file: `/etc/binance-futures-agent/env`
 - Env file permissions: managed as `600 root:root`
@@ -20,6 +20,8 @@ endpoint is intermittent and correctly enters backoff on timeout.
 - `BFA_MARKET_HEAT_NARRATIVE_ENABLED=true`
 - `BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT=0.3`
 - `binance-futures-agent-live.timer`: enabled and active
+- Order intents now expose `estimated_initial_margin_usdt` so futures margin is
+  not confused with contract `notional_usdt`.
 
 No secret values were written to this checkpoint.
 
@@ -71,6 +73,9 @@ No secret values were written to this checkpoint.
   - `market_snapshot_count=0`
   - `candidate_count=0`
   - `validation_errors=["openai_retry_after:2026-06-19T18:37:42Z"]`
+- Follow-up deployment clarified that `notional_usdt` is contract notional, not
+  initial margin. The AI context now includes `max_position_margin_usdt`, and
+  order intent payloads include `estimated_initial_margin_usdt`.
 
 ## Current Interpretation
 
@@ -90,3 +95,6 @@ intents.
   take-profit algo orders or emergency close behavior before changing limits.
 - Monitor the OpenAI-compatible endpoint; intermittent timeouts are currently
   handled by fail-closed backoff.
+- If changing toward 1 USDT-per-trade margin, make it an explicit leverage and
+  notional-cap configuration change instead of treating `notional_usdt` as
+  margin.
