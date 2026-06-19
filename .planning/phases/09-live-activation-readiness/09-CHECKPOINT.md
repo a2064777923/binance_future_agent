@@ -73,6 +73,13 @@ No secret values were written to this checkpoint.
   - `market_snapshot_count=0`
   - `candidate_count=0`
   - `validation_errors=["openai_retry_after:2026-06-19T18:37:42Z"]`
+- Later timer-driven live cycle selected `SOLUSDT` and reached the AI step, but
+  the OpenAI-compatible endpoint timed out:
+  - `mode=live`
+  - `status=ai_error`
+  - `submitted=false`
+  - `selected_symbol=SOLUSDT`
+  - `validation_errors=["openai_error:TimeoutError"]`
 - Follow-up deployment clarified that `notional_usdt` is contract notional, not
   initial margin. The AI context now includes `max_position_margin_usdt`, and
   order intent payloads include `estimated_initial_margin_usdt`.
