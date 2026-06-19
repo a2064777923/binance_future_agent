@@ -37,11 +37,7 @@ def redact_value(value: Any) -> Any:
 
     if value is None or value == "":
         return value
-    if not isinstance(value, str):
-        return REDACTION_MARKER
-    if len(value) <= 8:
-        return REDACTION_MARKER
-    return f"{value[:4]}...{value[-4:]}"
+    return REDACTION_MARKER
 
 
 def redact_object(value: Any) -> Any:

@@ -33,12 +33,7 @@ class RedactionTests(unittest.TestCase):
         long_secret = "synthetic-secret-value-123456"
 
         self.assertEqual(redact_value(short_secret), "<redacted>")
-        redacted_long = redact_value(long_secret)
-
-        self.assertNotEqual(redacted_long, long_secret)
-        self.assertNotIn(long_secret, redacted_long)
-        self.assertTrue(redacted_long.startswith("synt"))
-        self.assertTrue(redacted_long.endswith("3456"))
+        self.assertEqual(redact_value(long_secret), "<redacted>")
 
     def test_redact_object_preserves_non_sensitive_values(self):
         payload = {
