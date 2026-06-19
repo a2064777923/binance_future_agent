@@ -122,6 +122,36 @@ class BinanceFuturesSignedClient:
             params["newClientOrderId"] = new_client_order_id
         return self._signed_request("POST", "/fapi/v1/order", params)
 
+    def new_algo_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        order_type: str,
+        stop_price: float,
+        close_position: bool = True,
+        quantity: float | None = None,
+        client_algo_id: str | None = None,
+        working_type: str = "MARK_PRICE",
+    ) -> dict[str, Any]:
+        params = {
+            "symbol": _symbol(symbol),
+            "side": side.upper(),
+            "algoType": "CONDITIONAL",
+            "type": order_type.upper(),
+            "stopPrice": _number(stop_price),
+            "workingType": working_type.upper(),
+        }
+        if close_position:
+            params["closePosition"] = "true"
+        elif quantity is not None:
+            params["quantity"] = _number(quantity)
+        else:
+            raise ValueError("quantity is required when close_position is false")
+        if client_algo_id:
+            params["clientAlgoId"] = client_algo_id
+        return self._signed_request("POST", "/fapi/v1/algoOrder", params)
+
     def cancel_order(
         self,
         *,

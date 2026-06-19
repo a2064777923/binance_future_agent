@@ -73,6 +73,33 @@ class BinanceSignedClientTests(unittest.TestCase):
         self.assertEqual(urlparse(transport.calls[1]["url"]).path, "/fapi/v1/leverage")
         self.assertIn("leverage=3", transport.calls[1]["url"])
 
+    def test_new_algo_order_uses_conditional_algo_endpoint(self):
+        transport = FakeSignedTransport(response=(200, {"algoId": 456}, {}))
+        client = self.client(transport)
+
+        response = client.new_algo_order(
+            symbol="btcusdt",
+            side="SELL",
+            order_type="STOP_MARKET",
+            stop_price=96.0,
+            client_algo_id="bfa-test-sl",
+        )
+
+        call = transport.calls[0]
+        parsed = urlparse(call["url"])
+        query = parse_qs(parsed.query)
+        self.assertEqual(response["algoId"], 456)
+        self.assertEqual(call["method"], "POST")
+        self.assertEqual(parsed.path, "/fapi/v1/algoOrder")
+        self.assertEqual(query["symbol"], ["BTCUSDT"])
+        self.assertEqual(query["side"], ["SELL"])
+        self.assertEqual(query["algoType"], ["CONDITIONAL"])
+        self.assertEqual(query["type"], ["STOP_MARKET"])
+        self.assertEqual(query["stopPrice"], ["96"])
+        self.assertEqual(query["closePosition"], ["true"])
+        self.assertEqual(query["clientAlgoId"], ["bfa-test-sl"])
+        self.assertIn("signature", query)
+
     def test_cancel_order_uses_delete_order_endpoint(self):
         transport = FakeSignedTransport(response=(200, {"status": "CANCELED"}, {}))
         client = self.client(transport)

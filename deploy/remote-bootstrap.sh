@@ -4,6 +4,8 @@ set -euo pipefail
 APP_ROOT="${BFA_DEPLOY_ROOT:-/opt/binance-futures-agent}"
 ETC_DIR="${BFA_ETC_DIR:-/etc/binance-futures-agent}"
 UNIT_PATH="/etc/systemd/system/binance-futures-agent.service"
+LIVE_UNIT_PATH="/etc/systemd/system/binance-futures-agent-live.service"
+LIVE_TIMER_PATH="/etc/systemd/system/binance-futures-agent-live.timer"
 ARCHIVE_PATH="${1:-}"
 
 die() {
@@ -15,6 +17,8 @@ require_isolated_paths() {
   [ "$APP_ROOT" = "/opt/binance-futures-agent" ] || die "refusing non-isolated APP_ROOT: $APP_ROOT"
   [ "$ETC_DIR" = "/etc/binance-futures-agent" ] || die "refusing non-isolated ETC_DIR: $ETC_DIR"
   [ "$UNIT_PATH" = "/etc/systemd/system/binance-futures-agent.service" ] || die "refusing unexpected unit path"
+  [ "$LIVE_UNIT_PATH" = "/etc/systemd/system/binance-futures-agent-live.service" ] || die "refusing unexpected live unit path"
+  [ "$LIVE_TIMER_PATH" = "/etc/systemd/system/binance-futures-agent-live.timer" ] || die "refusing unexpected live timer path"
 }
 
 prepare_directories() {
@@ -59,6 +63,8 @@ install_python_environment() {
 
 install_systemd_unit() {
   install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent.service" "$UNIT_PATH"
+  install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent-live.service" "$LIVE_UNIT_PATH"
+  install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent-live.timer" "$LIVE_TIMER_PATH"
   systemctl daemon-reload
 }
 

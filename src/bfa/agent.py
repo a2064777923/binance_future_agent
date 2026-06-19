@@ -1,0 +1,312 @@
+"""One-cycle automated trading runner."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+
+from bfa.ai.client import OpenAIResponsesClient
+from bfa.ai.decision import run_ai_decision
+from bfa.ai.journal import AiDecisionJournal
+from bfa.ai.schema import RiskLimits, context_from_candidate
+from bfa.config import AppConfig, RuntimeMode, market_symbols, rss_feed_urls, validate_config
+from bfa.event_store.migrations import connect
+from bfa.event_store.store import EventStore
+from bfa.execution.binance_client import BinanceFuturesSignedClient
+from bfa.execution.executor import ExecutionEngine
+from bfa.execution.filters import SymbolExecutionFilters
+from bfa.execution.models import RiskState
+from bfa.market.binance_rest import BinanceFuturesRestClient
+from bfa.market.collector import MarketDataCollector
+from bfa.narrative.collector import NarrativeCollectionRunner
+from bfa.narrative.manual import ManualExportCollector
+from bfa.narrative.rss import RssFeedCollector
+from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.store import persist_candidates
+
+
+@dataclass(frozen=True)
+class AgentRunResult:
+    status: str
+    mode: str
+    started_at: str
+    market_snapshot_count: int = 0
+    narrative_record_count: int = 0
+    candidate_count: int = 0
+    rejected_count: int = 0
+    selected_symbol: str | None = None
+    ai_accepted: bool = False
+    execution_status: str | None = None
+    submitted: bool = False
+    validation_errors: list[str] = field(default_factory=list)
+    risk_reasons: list[str] = field(default_factory=list)
+    persisted: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.status in {"submitted", "dry_run", "test_order_checked", "no_candidate", "ai_pass", "rejected"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "mode": self.mode,
+            "started_at": self.started_at,
+            "market_snapshot_count": self.market_snapshot_count,
+            "narrative_record_count": self.narrative_record_count,
+            "candidate_count": self.candidate_count,
+            "rejected_count": self.rejected_count,
+            "selected_symbol": self.selected_symbol,
+            "ai_accepted": self.ai_accepted,
+            "execution_status": self.execution_status,
+            "submitted": self.submitted,
+            "validation_errors": list(self.validation_errors),
+            "risk_reasons": list(self.risk_reasons),
+            "persisted": dict(self.persisted),
+        }
+
+
+def run_agent_once(
+    *,
+    config: AppConfig,
+    db_path: str | None = None,
+    journal_path: str | None = None,
+    top_n: int = 3,
+    market_client=None,
+    collector=None,
+    narrative_runner=None,
+    ai_client=None,
+    signed_client=None,
+) -> AgentRunResult:
+    started_at = _now_iso()
+    validation = validate_config(config)
+    if not validation.valid:
+        return AgentRunResult(
+            status="invalid_config",
+            mode=config.get("BFA_MODE"),
+            started_at=started_at,
+            validation_errors=list(validation.errors),
+        )
+    if not _truthy(config.get("BFA_OPENAI_ENABLED")):
+        return AgentRunResult(
+            status="openai_disabled",
+            mode=config.get("BFA_MODE"),
+            started_at=started_at,
+            validation_errors=["BFA_OPENAI_ENABLED must be true for automated trading"],
+        )
+
+    mode = RuntimeMode(config.get("BFA_MODE"))
+    market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
+    collector = collector or MarketDataCollector(
+        client=market,
+        symbols=market_symbols(config),
+        received_at=started_at,
+    )
+    narrative_runner = narrative_runner or _build_narrative_runner(config, collected_at=started_at)
+    ai_client = ai_client or OpenAIResponsesClient(
+        api_key=config.get("OPENAI_API_KEY"),
+        model=config.get("OPENAI_MODEL"),
+    )
+    signed_client = signed_client or _build_signed_client(config, mode)
+
+    connection = connect(db_path or config.get("BFA_DB_PATH"))
+    try:
+        store = EventStore(connection)
+        market_snapshots = collector.collect_rest_snapshots()
+        market_event_ids = [store.insert_market_snapshot(snapshot) for snapshot in market_snapshots]
+        narrative_records = narrative_runner.collect()
+        narrative_event_ids = [store.insert_narrative(record) for record in narrative_records]
+
+        replay_packet = {
+            "start": started_at,
+            "end": started_at,
+            "symbol": None,
+            "event_count": len(market_event_ids) + len(narrative_event_ids),
+            "symbols": market_symbols(config),
+            "records": [
+                *_market_records(market_event_ids, market_snapshots),
+                *_narrative_records(narrative_event_ids, narrative_records),
+            ],
+        }
+        candidates = generate_candidates(
+            replay_packet,
+            StrategyConfig(
+                allowed_symbols=market_symbols(config),
+                generated_at=started_at,
+                top_n=top_n,
+            ),
+        )
+        persisted_candidate_count = len(persist_candidates(store, candidates.candidates))
+        if not candidates.candidates:
+            return AgentRunResult(
+                status="no_candidate",
+                mode=mode.value,
+                started_at=started_at,
+                market_snapshot_count=len(market_snapshots),
+                narrative_record_count=len(narrative_records),
+                candidate_count=0,
+                rejected_count=len(candidates.rejected),
+                persisted={"candidates": persisted_candidate_count},
+            )
+
+        candidate = candidates.candidates[0]
+        ai_run = run_ai_decision(
+            client=ai_client,
+            context=context_from_candidate(
+                candidate,
+                risk_limits=RiskLimits.from_config(config),
+                decided_at=started_at,
+            ),
+            journal=AiDecisionJournal(journal_path) if journal_path else None,
+            store=store,
+        )
+        if not ai_run.validation.accepted:
+            status = "ai_pass" if ai_run.validation.decision and ai_run.validation.decision.decision == "pass" else "ai_rejected"
+            return AgentRunResult(
+                status=status,
+                mode=mode.value,
+                started_at=started_at,
+                market_snapshot_count=len(market_snapshots),
+                narrative_record_count=len(narrative_records),
+                candidate_count=len(candidates.candidates),
+                rejected_count=len(candidates.rejected),
+                selected_symbol=candidate.symbol,
+                ai_accepted=False,
+                validation_errors=list(ai_run.validation.validation_errors),
+                persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_run.persisted},
+            )
+
+        exchange_info = market.exchange_info().payload
+        filters = SymbolExecutionFilters.from_exchange_info(exchange_info, candidate.symbol)
+        risk_state = _risk_state_from_exchange(signed_client) if mode is RuntimeMode.LIVE else RiskState()
+        if risk_state is None:
+            return AgentRunResult(
+                status="position_risk_failed",
+                mode=mode.value,
+                started_at=started_at,
+                market_snapshot_count=len(market_snapshots),
+                narrative_record_count=len(narrative_records),
+                candidate_count=len(candidates.candidates),
+                rejected_count=len(candidates.rejected),
+                selected_symbol=candidate.symbol,
+                ai_accepted=True,
+                validation_errors=["unable to read live position risk"],
+                persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_run.persisted},
+            )
+
+        execution = ExecutionEngine(
+            config=config,
+            signed_client=signed_client,
+            store=store,
+        ).run(
+            symbol=candidate.symbol,
+            validation=ai_run.validation,
+            decided_at=started_at,
+            risk_state=risk_state,
+            filters=filters,
+            now=started_at,
+        )
+        return AgentRunResult(
+            status=execution.status,
+            mode=mode.value,
+            started_at=started_at,
+            market_snapshot_count=len(market_snapshots),
+            narrative_record_count=len(narrative_records),
+            candidate_count=len(candidates.candidates),
+            rejected_count=len(candidates.rejected),
+            selected_symbol=candidate.symbol,
+            ai_accepted=True,
+            execution_status=execution.status,
+            submitted=execution.submitted,
+            risk_reasons=list(execution.risk.reason_codes),
+            persisted={
+                "candidates": persisted_candidate_count,
+                "ai_decisions": ai_run.persisted,
+                **execution.persisted,
+            },
+        )
+    finally:
+        connection.close()
+
+
+def _build_narrative_runner(config: AppConfig, *, collected_at: str) -> NarrativeCollectionRunner:
+    symbols = market_symbols(config)
+    collectors = [
+        ManualExportCollector(
+            config.get("SQUARE_EXPORT_DIR"),
+            default_source="binance_square",
+            known_symbols=symbols,
+            collected_at=collected_at,
+            tolerant=True,
+        )
+    ]
+    feeds = rss_feed_urls(config)
+    if feeds:
+        collectors.append(RssFeedCollector(feeds, known_symbols=symbols, collected_at=collected_at))
+    return NarrativeCollectionRunner(collectors)
+
+
+def _build_signed_client(config: AppConfig, mode: RuntimeMode):
+    if mode not in {RuntimeMode.TESTNET, RuntimeMode.LIVE}:
+        return None
+    return BinanceFuturesSignedClient(
+        base_url=config.get("BINANCE_FUTURES_BASE_URL"),
+        api_key=config.get("BINANCE_API_KEY"),
+        api_secret=config.get("BINANCE_API_SECRET"),
+    )
+
+
+def _risk_state_from_exchange(signed_client) -> RiskState | None:
+    if signed_client is None:
+        return None
+    try:
+        positions = signed_client.position_risk()
+    except Exception:
+        return None
+    active_positions = 0
+    for position in positions:
+        try:
+            amount = abs(float(position.get("positionAmt", 0)))
+        except (TypeError, ValueError):
+            amount = 0.0
+        if amount > 0:
+            active_positions += 1
+    return RiskState(active_positions=active_positions)
+
+
+def _market_records(event_ids, snapshots) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": event_id,
+            "event_type": "market_snapshot",
+            "occurred_at": str(snapshot.event_time or snapshot.received_at),
+            "source": snapshot.source,
+            "symbol": snapshot.symbol,
+            "ref_id": f"{snapshot.event_type}:{snapshot.symbol}:{snapshot.event_time}",
+            "payload": snapshot.to_dict(),
+        }
+        for event_id, snapshot in zip(event_ids, snapshots, strict=False)
+    ]
+
+
+def _narrative_records(event_ids, records) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": event_id,
+            "event_type": "narrative",
+            "occurred_at": record.published_at or record.collected_at,
+            "source": record.source,
+            "symbol": record.symbol_mentions[0] if record.symbol_mentions else None,
+            "ref_id": record.source_id,
+            "payload": record.to_dict(),
+        }
+        for event_id, record in zip(event_ids, records, strict=False)
+    ]
+
+
+def _truthy(value: str) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")

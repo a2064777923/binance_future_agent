@@ -32,6 +32,10 @@ class FakeSignedClient:
         self.calls.append(("new_order", kwargs))
         return {"orderId": 123, "status": "NEW", **kwargs}
 
+    def new_algo_order(self, **kwargs):
+        self.calls.append(("new_algo_order", kwargs))
+        return {"algoId": 456, "status": "NEW", **kwargs}
+
     def test_order(self, **kwargs):
         self.calls.append(("test_order", kwargs))
         return {}
@@ -167,6 +171,12 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(fake_client.calls[0], ("margin", "BTCUSDT", "ISOLATED"))
         self.assertEqual(fake_client.calls[1], ("leverage", "BTCUSDT", 3))
         self.assertEqual(fake_client.calls[2][0], "new_order")
+        self.assertEqual(fake_client.calls[3][0], "new_algo_order")
+        self.assertEqual(fake_client.calls[3][1]["order_type"], "STOP_MARKET")
+        self.assertEqual(fake_client.calls[3][1]["side"], "SELL")
+        self.assertEqual(fake_client.calls[4][0], "new_algo_order")
+        self.assertEqual(fake_client.calls[4][1]["order_type"], "TAKE_PROFIT_MARKET")
+        self.assertEqual(fake_client.calls[4][1]["side"], "SELL")
         self.assertEqual(
             connection.execute("SELECT COUNT(*) AS count FROM exchange_responses").fetchone()["count"],
             1,

@@ -25,6 +25,7 @@ class DeployAssetTests(unittest.TestCase):
         ):
             self.assertRegex(text, rf"(?m)^{key}=$")
         self.assertIn("BFA_MODE=dry_run", text)
+        self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS=true", text)
         self.assertIn("BFA_DB_PATH=/opt/binance-futures-agent/data/agent.sqlite", text)
 
     def test_deploy_assets_do_not_reference_forbidden_paths_or_secrets(self):
@@ -59,18 +60,26 @@ class DeployAssetTests(unittest.TestCase):
 
         self.assertIn("BFA_MODE=dry_run", docs)
         self.assertIn("Preview mode", docs)
-        self.assertIn("Live activation is a separate", docs)
-        self.assertNotIn("BFA_MODE=live", docs)
+        self.assertIn("BFA_MODE=live", docs)
+        self.assertIn("binance-futures-agent-live.timer", docs)
+        self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS=true", docs)
         self.assertNotIn("ssh root@", docs)
 
     def test_systemd_unit_uses_project_isolated_paths(self):
         unit = self.read("systemd", "binance-futures-agent.service")
+        live_unit = self.read("systemd", "binance-futures-agent-live.service")
+        live_timer = self.read("systemd", "binance-futures-agent-live.timer")
 
         self.assertIn("WorkingDirectory=/opt/binance-futures-agent/app", unit)
         self.assertIn("EnvironmentFile=/etc/binance-futures-agent/env", unit)
         self.assertIn("/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops health-check", unit)
         self.assertIn("ReadWritePaths=/opt/binance-futures-agent /etc/binance-futures-agent", unit)
         self.assertNotIn("BFA_MODE=live", unit)
+        self.assertIn("WorkingDirectory=/opt/binance-futures-agent/app", live_unit)
+        self.assertIn("EnvironmentFile=/etc/binance-futures-agent/env", live_unit)
+        self.assertIn("/opt/binance-futures-agent/.venv/bin/python -m bfa.cli agent run-once", live_unit)
+        self.assertIn("OnUnitActiveSec=5min", live_timer)
+        self.assertIn("Unit=binance-futures-agent-live.service", live_timer)
 
     def test_remote_bootstrap_is_path_allowlisted_and_not_auto_enabled(self):
         script = self.read("remote-bootstrap.sh")
@@ -78,6 +87,8 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn('APP_ROOT="${BFA_DEPLOY_ROOT:-/opt/binance-futures-agent}"', script)
         self.assertIn('ETC_DIR="${BFA_ETC_DIR:-/etc/binance-futures-agent}"', script)
         self.assertIn('UNIT_PATH="/etc/systemd/system/binance-futures-agent.service"', script)
+        self.assertIn('LIVE_UNIT_PATH="/etc/systemd/system/binance-futures-agent-live.service"', script)
+        self.assertIn('LIVE_TIMER_PATH="/etc/systemd/system/binance-futures-agent-live.timer"', script)
         self.assertIn('refusing non-isolated APP_ROOT', script)
         self.assertIn('refusing non-isolated ETC_DIR', script)
         self.assertIn("tr -d '\\r'", script)

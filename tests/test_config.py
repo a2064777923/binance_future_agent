@@ -99,6 +99,20 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BFA_MAX_RISK_PER_TRADE_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MAX_DAILY_LOSS_USDT must be a positive number", result.errors)
 
+    def test_live_requires_protective_orders(self):
+        config = load_config(
+            base_env(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                BFA_REQUIRE_PROTECTIVE_ORDERS="false",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS must be true for live mode", result.errors)
+
     def test_unknown_mode_fails(self):
         config = load_config(base_env(BFA_MODE="reckless"))
         result = validate_config(config)

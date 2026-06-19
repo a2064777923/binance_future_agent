@@ -26,6 +26,7 @@ DEFAULTS = {
     "BFA_MAX_RISK_PER_TRADE_USDT": "1",
     "BFA_MAX_DAILY_LOSS_USDT": "3",
     "BFA_MAX_OPEN_POSITIONS": "2",
+    "BFA_REQUIRE_PROTECTIVE_ORDERS": "true",
     "BFA_KILL_SWITCH_FILE": "/opt/binance-futures-agent/runtime/KILL_SWITCH",
     "BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT,SOLUSDT",
     "BFA_DB_PATH": "/opt/binance-futures-agent/data/agent.sqlite",
@@ -112,6 +113,8 @@ def validate_config(config: AppConfig) -> ValidationResult:
     if mode is RuntimeMode.LIVE:
         if not config.get("BFA_KILL_SWITCH_FILE"):
             errors.append("BFA_KILL_SWITCH_FILE is required for live mode")
+        if not _truthy(config.get("BFA_REQUIRE_PROTECTIVE_ORDERS")):
+            errors.append("BFA_REQUIRE_PROTECTIVE_ORDERS must be true for live mode")
 
     if mode is RuntimeMode.LIVE and config.get("BINANCE_USE_TESTNET").lower() in {"1", "true", "yes"}:
         warnings.append("BINANCE_USE_TESTNET is true while BFA_MODE=live")

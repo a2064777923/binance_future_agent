@@ -4,7 +4,9 @@ This project deploys into an isolated server prefix:
 
 - App root: `/opt/binance-futures-agent`
 - Environment file: `/etc/binance-futures-agent/env`
-- Systemd unit: `/etc/systemd/system/binance-futures-agent.service`
+- Health unit: `/etc/systemd/system/binance-futures-agent.service`
+- Live runner unit: `/etc/systemd/system/binance-futures-agent-live.service`
+- Live timer: `/etc/systemd/system/binance-futures-agent-live.timer`
 
 Do not place secret values in git, planning docs, shell history, or deployment
 commands. Configure SSH authentication outside this repository.
@@ -29,8 +31,8 @@ powershell -ExecutionPolicy Bypass -File scripts\deploy-server.ps1 -Apply
 ```
 
 The script uploads a git-tracked source archive, runs `deploy/remote-bootstrap.sh`
-on the server, installs a Python virtualenv, installs the dedicated systemd unit,
-and runs a secret-safe health check in dry-run mode.
+on the server, installs a Python virtualenv, installs the dedicated systemd
+units, and runs a secret-safe health check in dry-run mode.
 
 ## Server Env
 
@@ -46,10 +48,24 @@ The first deployment should keep:
 ```bash
 BFA_MODE=dry_run
 BFA_OPENAI_ENABLED=false
+BFA_REQUIRE_PROTECTIVE_ORDERS=true
 ```
 
-Enable OpenAI and live mode only after dry-run health checks pass and the kill
-switch behavior is confirmed.
+For live automated trading, configure the same file out of band with Binance
+and OpenAI credentials, then set:
+
+```bash
+BFA_MODE=live
+BFA_OPENAI_ENABLED=true
+BFA_REQUIRE_PROTECTIVE_ORDERS=true
+```
+
+Keep the kill-switch path configured. Creating that file stops future live
+orders:
+
+```bash
+touch /opt/binance-futures-agent/runtime/KILL_SWITCH
+```
 
 ## Health Checks
 
@@ -81,6 +97,26 @@ systemctl status binance-futures-agent.service --no-pager
 journalctl -u binance-futures-agent.service -n 100 --no-pager
 ```
 
-Do not enable live mode from the deploy script. Live activation is a separate
-operator action after reviewing health output, env values, account balance, risk
-limits, and the kill-switch file.
+## Live Automated Runner
+
+After env values, account balance, risk limits, OpenAI, Binance credentials, and
+kill-switch behavior are reviewed, run one live cycle manually:
+
+```bash
+systemctl start binance-futures-agent-live.service
+journalctl -u binance-futures-agent-live.service -n 100 --no-pager
+```
+
+Enable periodic execution only after the one-cycle result is acceptable:
+
+```bash
+systemctl enable --now binance-futures-agent-live.timer
+systemctl list-timers 'binance-futures-agent-live*' --no-pager
+```
+
+Stop automated trading:
+
+```bash
+systemctl disable --now binance-futures-agent-live.timer
+touch /opt/binance-futures-agent/runtime/KILL_SWITCH
+```

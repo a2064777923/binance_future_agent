@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TextIO
 
+from bfa.agent import run_agent_once
 from bfa.ai.client import OpenAIResponsesClient
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
@@ -88,6 +89,17 @@ def main(
             stdout=stdout,
             client_factory=client_factory,
             ai_client_factory=ai_client_factory,
+        )
+    if args.command == "agent":
+        return _run_agent(
+            args,
+            env=env,
+            stdout=stdout,
+            client_factory=client_factory,
+            collector_factory=collector_factory,
+            narrative_runner_factory=narrative_runner_factory,
+            ai_client_factory=ai_client_factory,
+            signed_client_factory=signed_client_factory,
         )
 
     parser.print_help(file=stderr)
@@ -246,6 +258,20 @@ def _build_parser() -> argparse.ArgumentParser:
     health.add_argument("--check-binance", action="store_true", help="check public Binance exchangeInfo")
     health.add_argument("--check-openai", action="store_true", help="check OpenAI Responses API when enabled")
     health.add_argument("--skip-network", action="store_true", help="disable all network health checks")
+
+    agent = subparsers.add_parser(
+        "agent",
+        help="automated one-cycle trading runner",
+    )
+    agent_subparsers = agent.add_subparsers(dest="agent_command", required=True)
+    run_once = agent_subparsers.add_parser(
+        "run-once",
+        help="collect data, decide, and execute at most one risk-gated order",
+    )
+    run_once.add_argument("--env-file", help="optional env file to load before environment overrides")
+    run_once.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    run_once.add_argument("--journal", help="optional redacted AI journal JSONL path")
+    run_once.add_argument("--top-n", type=int, default=3, help="maximum candidates to evaluate")
     return parser
 
 
@@ -549,6 +575,44 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1
+    return 2
+
+
+def _run_agent(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+    client_factory,
+    collector_factory,
+    narrative_runner_factory,
+    ai_client_factory,
+    signed_client_factory,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    if args.agent_command == "run-once":
+        market_client = _build_client(config, client_factory)
+        result = run_agent_once(
+            config=config,
+            db_path=args.db,
+            journal_path=args.journal,
+            top_n=args.top_n,
+            market_client=market_client,
+            collector=_build_collector(config, market_client, collector_factory)
+            if collector_factory is not None
+            else None,
+            narrative_runner=_build_narrative_runner(config, narrative_runner_factory)
+            if narrative_runner_factory is not None
+            else None,
+            ai_client=_build_ai_client(config, ai_client_factory)
+            if ai_client_factory is not None
+            else None,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if signed_client_factory is not None
+            else None,
+        )
+        print(json.dumps(result.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if result.ok else 1
     return 2
 
 

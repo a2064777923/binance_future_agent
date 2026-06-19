@@ -101,7 +101,7 @@ class ExecutionEngine:
             )
 
         self._ensure_live_margin(intent)
-        response = self.signed_client.new_order(
+        entry_response = self.signed_client.new_order(
             symbol=intent.symbol,
             side=intent.side,
             order_type=intent.order_type,
@@ -109,6 +109,41 @@ class ExecutionEngine:
             reduce_only=intent.reduce_only,
             new_client_order_id=_client_order_id(intent),
         )
+        response = {"entry_order": entry_response}
+        if _protective_orders_required(self.config):
+            try:
+                response.update(self._place_protective_orders(intent))
+            except BinanceSignedError as exc:
+                response["protective_error"] = {
+                    "endpoint": exc.endpoint,
+                    "code": exc.binance_code,
+                    "message": exc.binance_message,
+                }
+                response["kill_switch_activated"] = _activate_kill_switch(self.config)
+                try:
+                    response["emergency_close_order"] = self.signed_client.new_order(
+                        symbol=intent.symbol,
+                        side=_opposite_side(intent.side),
+                        order_type="MARKET",
+                        quantity=intent.quantity,
+                        reduce_only=True,
+                        new_client_order_id=_client_order_id(intent, suffix="close"),
+                    )
+                    status = "protective_order_failed_closed"
+                except BinanceSignedError as close_exc:
+                    response["emergency_close_error"] = {
+                        "endpoint": close_exc.endpoint,
+                        "code": close_exc.binance_code,
+                        "message": close_exc.binance_message,
+                    }
+                    status = "protective_order_failed_open"
+                return self._finish(
+                    status=status,
+                    submitted=True,
+                    intent=intent,
+                    risk=risk,
+                    exchange_response=response,
+                )
         return self._finish(
             status="submitted",
             submitted=True,
@@ -160,7 +195,58 @@ class ExecutionEngine:
                 raise
         self.signed_client.change_initial_leverage(intent.symbol, leverage=intent.leverage)
 
+    def _place_protective_orders(self, intent: OrderIntent) -> dict[str, dict]:
+        assert self.signed_client is not None
+        close_side = _opposite_side(intent.side)
+        return {
+            "stop_loss_order": self.signed_client.new_algo_order(
+                symbol=intent.symbol,
+                side=close_side,
+                order_type="STOP_MARKET",
+                stop_price=intent.stop_price,
+                close_position=True,
+                client_algo_id=_client_order_id(intent, suffix="sl"),
+            ),
+            "take_profit_order": self.signed_client.new_algo_order(
+                symbol=intent.symbol,
+                side=close_side,
+                order_type="TAKE_PROFIT_MARKET",
+                stop_price=intent.target_price,
+                close_position=True,
+                client_algo_id=_client_order_id(intent, suffix="tp"),
+            ),
+        }
 
-def _client_order_id(intent: OrderIntent) -> str:
+
+def _client_order_id(intent: OrderIntent, *, suffix: str | None = None) -> str:
     cleaned_time = "".join(ch for ch in intent.decided_at if ch.isdigit())
-    return f"bfa-{intent.symbol.lower()}-{cleaned_time}"[:36]
+    base = f"bfa-{intent.symbol.lower()}-{cleaned_time}"
+    if suffix:
+        suffix_text = f"-{suffix}"
+        return f"{base[: 36 - len(suffix_text)]}{suffix_text}"
+    return base[:36]
+
+
+def _opposite_side(side: str) -> str:
+    return "SELL" if side.upper() == "BUY" else "BUY"
+
+
+def _protective_orders_required(config: AppConfig) -> bool:
+    return config.get("BFA_REQUIRE_PROTECTIVE_ORDERS", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _activate_kill_switch(config: AppConfig) -> bool:
+    path = config.get("BFA_KILL_SWITCH_FILE")
+    if not path:
+        return False
+    from pathlib import Path
+
+    kill_switch = Path(path)
+    kill_switch.parent.mkdir(parents=True, exist_ok=True)
+    kill_switch.write_text("protective order failure\n", encoding="utf-8")
+    return True

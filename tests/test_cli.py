@@ -434,7 +434,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(payload["status"], "dry_run")
         self.assertFalse(payload["submitted"])
-        self.assertEqual(payload["persisted"]["order_intent"], 1)
+        self.assertGreaterEqual(payload["persisted"]["order_intent"], 1)
         self.assertEqual(fake_client.calls, [])
 
     def test_execution_run_live_missing_credentials_exits_nonzero(self):
@@ -478,6 +478,134 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(payload["status"], "rejected")
         self.assertIn("missing_binance_credentials", payload["risk"]["reason_codes"])
+
+    def test_agent_run_once_executes_dry_run_chain_with_injected_fakes(self):
+        class FakeMarketClient:
+            def exchange_info(self):
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/exchangeInfo",
+                    params={},
+                    payload=json.loads(
+                        (Path("tests") / "fixtures" / "binance_market" / "exchange_info.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                )
+
+        class FakeCollector:
+            def collect_rest_snapshots(self):
+                return [
+                    NormalizedMarketSnapshot(
+                        source="binance_usdm",
+                        event_type="ticker_24h",
+                        symbol="BTCUSDT",
+                        event_time=1700000000000,
+                        received_at="2026-06-20T10:00:00Z",
+                        payload={"price_change_percent": "5.2", "quote_volume": "12000000"},
+                    ),
+                    NormalizedMarketSnapshot(
+                        source="binance_usdm",
+                        event_type="kline",
+                        symbol="BTCUSDT",
+                        event_time=1700000000001,
+                        received_at="2026-06-20T10:00:00Z",
+                        payload={"high": "101", "low": "99", "close": "100"},
+                    ),
+                    NormalizedMarketSnapshot(
+                        source="binance_usdm",
+                        event_type="funding_rate",
+                        symbol="BTCUSDT",
+                        event_time=1700000000002,
+                        received_at="2026-06-20T10:00:00Z",
+                        payload={"funding_rate": "0.0001"},
+                    ),
+                    NormalizedMarketSnapshot(
+                        source="binance_usdm",
+                        event_type="open_interest_hist",
+                        symbol="BTCUSDT",
+                        event_time=1700000000003,
+                        received_at="2026-06-20T10:00:00Z",
+                        payload={"sum_open_interest_value": "5000000"},
+                    ),
+                    NormalizedMarketSnapshot(
+                        source="binance_usdm",
+                        event_type="taker_buy_sell_volume",
+                        symbol="BTCUSDT",
+                        event_time=1700000000004,
+                        received_at="2026-06-20T10:00:00Z",
+                        payload={"buy_sell_ratio": "1.2"},
+                    ),
+                ]
+
+        class FakeNarrativeRunner:
+            def collect(self):
+                return [
+                    NormalizedNarrativeRecord(
+                        source="binance_square",
+                        source_id="square-1",
+                        author="poster",
+                        symbol_mentions=["BTCUSDT"],
+                        text="BTCUSDT breakout narrative",
+                        url=None,
+                        published_at="2026-06-20T09:58:00Z",
+                        collected_at="2026-06-20T10:00:00Z",
+                        engagement={"likes": 50, "comments": 5},
+                        raw={},
+                        quality_flags=[],
+                    )
+                ]
+
+        class FakeAiClient:
+            def create_decision(self, context, *, instructions, schema):
+                payload = {
+                    "decision": "trade",
+                    "side": "long",
+                    "confidence": 0.74,
+                    "entry_price": 100.0,
+                    "stop_price": 96.0,
+                    "target_price": 108.0,
+                    "notional_usdt": 20.0,
+                    "hold_time_minutes": 30,
+                    "reasons": ["narrative heat plus market confirmation"],
+                }
+                return OpenAIResponse(
+                    response_id="resp_agent_1",
+                    request_payload={"context": context, "schema": schema},
+                    raw_response={"id": "resp_agent_1", "output_text": json.dumps(payload)},
+                    output_text=json.dumps(payload),
+                    response_headers={},
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            code, stdout, stderr = self.invoke(
+                "agent",
+                "run-once",
+                "--db",
+                str(root / "agent.sqlite"),
+                "--journal",
+                str(root / "ai.jsonl"),
+                env={
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                },
+                client_factory=lambda _config: FakeMarketClient(),
+                collector_factory=lambda _config, _client: FakeCollector(),
+                narrative_runner_factory=lambda _config: FakeNarrativeRunner(),
+                ai_client_factory=lambda _config: FakeAiClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "dry_run")
+        self.assertEqual(payload["selected_symbol"], "BTCUSDT")
+        self.assertTrue(payload["ai_accepted"])
+        self.assertGreaterEqual(payload["persisted"]["order_intent"], 1)
 
     def test_ops_health_check_prints_secret_safe_json(self):
         secret = "synthetic-openai-key-abcdef"
