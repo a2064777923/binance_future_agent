@@ -1,6 +1,6 @@
 import unittest
 
-from bfa.config import RuntimeMode, load_config, market_symbols, validate_config
+from bfa.config import RuntimeMode, load_config, market_symbols, rss_feed_urls, telegram_channels, validate_config
 
 
 def base_env(**overrides):
@@ -48,6 +48,20 @@ class ConfigTests(unittest.TestCase):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
 
         self.assertEqual(market_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+
+    def test_narrative_source_lists_are_trimmed_and_ordered(self):
+        config = load_config(
+            base_env(
+                RSS_FEED_URLS=" https://news.example.test/rss.xml,https://blog.example.test/feed.xml ",
+                TELEGRAM_CHANNELS=" SquareWatch, hotcoins ",
+            )
+        )
+
+        self.assertEqual(
+            rss_feed_urls(config),
+            ["https://news.example.test/rss.xml", "https://blog.example.test/feed.xml"],
+        )
+        self.assertEqual(telegram_channels(config), ["SquareWatch", "hotcoins"])
 
     def test_testnet_requires_binance_credentials(self):
         config = load_config(base_env(BFA_MODE="testnet"))

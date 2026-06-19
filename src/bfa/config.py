@@ -130,6 +130,14 @@ def market_symbols(config: AppConfig) -> list[str]:
     return config.get_list("BFA_MARKET_SYMBOLS")
 
 
+def rss_feed_urls(config: AppConfig) -> list[str]:
+    return _split_csv_values(config.get("RSS_FEED_URLS"))
+
+
+def telegram_channels(config: AppConfig) -> list[str]:
+    return _split_csv_values(config.get("TELEGRAM_CHANNELS"))
+
+
 def _parse_mode(value: str, errors: list[str]) -> RuntimeMode | None:
     try:
         return RuntimeMode(value or RuntimeMode.DRY_RUN.value)
@@ -193,9 +201,13 @@ def _strip_quotes(value: str) -> str:
 
 
 def _split_csv_symbols(value: str) -> list[str]:
-    symbols: list[str] = []
-    for raw_symbol in value.split(","):
-        symbol = raw_symbol.strip().upper()
-        if symbol:
-            symbols.append(symbol)
-    return symbols
+    return _split_csv_values(value, uppercase=True)
+
+
+def _split_csv_values(value: str, *, uppercase: bool = False) -> list[str]:
+    values: list[str] = []
+    for raw_value in value.split(","):
+        parsed = raw_value.strip()
+        if parsed:
+            values.append(parsed.upper() if uppercase else parsed)
+    return values

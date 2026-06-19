@@ -8,10 +8,13 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TextIO
 
-from bfa.config import AppConfig, load_config, market_symbols, validate_config
+from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, validate_config
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.market.snapshot_writer import write_jsonl_snapshots
+from bfa.narrative.collector import NarrativeCollectionRunner
+from bfa.narrative.manual import ManualExportCollector
+from bfa.narrative.rss import RssFeedCollector
 
 
 def main(
@@ -22,6 +25,7 @@ def main(
     stderr: TextIO | None = None,
     client_factory=None,
     collector_factory=None,
+    narrative_runner_factory=None,
 ) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -35,6 +39,13 @@ def main(
             stdout=stdout,
             client_factory=client_factory,
             collector_factory=collector_factory,
+        )
+    if args.command == "narrative":
+        return _run_narrative(
+            args,
+            env=env,
+            stdout=stdout,
+            runner_factory=narrative_runner_factory,
         )
 
     parser.print_help(file=stderr)
@@ -81,6 +92,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output",
         required=True,
         help="JSONL output path under a caller-managed data/runtime directory",
+    )
+
+    narrative = subparsers.add_parser(
+        "narrative",
+        help="narrative and hot-coin source collection smoke commands",
+    )
+    narrative_subparsers = narrative.add_subparsers(dest="narrative_command", required=True)
+
+    collect = narrative_subparsers.add_parser(
+        "collect",
+        help="collect configured narrative sources and write normalized JSONL records",
+    )
+    collect.add_argument(
+        "--env-file",
+        help="optional env file to load before environment overrides",
+    )
+    collect.add_argument(
+        "--output",
+        required=True,
+        help="JSONL output path under a caller-managed data/runtime directory",
+    )
+    collect.add_argument(
+        "--append",
+        action="store_true",
+        help="append to the output JSONL file instead of overwriting it",
     )
     return parser
 
@@ -152,6 +188,46 @@ def _build_collector(config: AppConfig, client, collector_factory):
     if collector_factory is not None:
         return collector_factory(config, client)
     return MarketDataCollector(client=client, symbols=market_symbols(config))
+
+
+def _run_narrative(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+    runner_factory,
+) -> int:
+    config = load_config(env=env, env_file=args.env_file)
+    if args.narrative_command == "collect":
+        runner = _build_narrative_runner(config, runner_factory)
+        records, written = runner.collect_to_jsonl(args.output, append=args.append)
+        payload = {
+            "output": str(args.output),
+            "record_count": len(records),
+            "sources": sorted({record.source for record in records}),
+            "symbols": sorted({symbol for record in records for symbol in record.symbol_mentions}),
+            "written": written,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
+    return 2
+
+
+def _build_narrative_runner(config: AppConfig, runner_factory):
+    if runner_factory is not None:
+        return runner_factory(config)
+    known_symbols = market_symbols(config)
+    collectors = [
+        ManualExportCollector(
+            config.get("SQUARE_EXPORT_DIR"),
+            default_source="binance_square",
+            known_symbols=known_symbols,
+        )
+    ]
+    feeds = rss_feed_urls(config)
+    if feeds:
+        collectors.append(RssFeedCollector(feeds, known_symbols=known_symbols))
+    return NarrativeCollectionRunner(collectors)
 
 
 if __name__ == "__main__":

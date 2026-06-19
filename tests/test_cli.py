@@ -7,10 +7,18 @@ from pathlib import Path
 
 from bfa.cli import main
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
+from bfa.narrative.models import NormalizedNarrativeRecord
 
 
 class CliTests(unittest.TestCase):
-    def invoke(self, *args, env=None, client_factory=None, collector_factory=None):
+    def invoke(
+        self,
+        *args,
+        env=None,
+        client_factory=None,
+        collector_factory=None,
+        narrative_runner_factory=None,
+    ):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -19,6 +27,7 @@ class CliTests(unittest.TestCase):
                 env={} if env is None else env,
                 client_factory=client_factory,
                 collector_factory=collector_factory,
+                narrative_runner_factory=narrative_runner_factory,
             )
         return code, stdout.getvalue(), stderr.getvalue()
 
@@ -150,6 +159,49 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["symbols"], ["BTCUSDT"])
         self.assertEqual(len(lines), 1)
         self.assertEqual(json.loads(lines[0])["event_type"], "ticker_24h")
+
+    def test_narrative_collect_uses_injected_fake_runner_and_writes_jsonl(self):
+        class FakeRunner:
+            def collect_to_jsonl(self, output, *, append=False):
+                record = NormalizedNarrativeRecord(
+                    source="binance_square",
+                    source_id="square-1",
+                    author="poster",
+                    symbol_mentions=["BTCUSDT"],
+                    text="BTCUSDT hot narrative",
+                    url=None,
+                    published_at="2026-06-19T09:00:00Z",
+                    collected_at="2026-06-19T09:01:00Z",
+                    engagement={},
+                    raw={},
+                    quality_flags=[],
+                )
+                Path(output).write_text(json.dumps(record.to_dict()) + "\n", encoding="utf-8")
+                return [record], 1
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "narrative.jsonl"
+            code, stdout, stderr = self.invoke(
+                "narrative",
+                "collect",
+                "--env-file",
+                ".env.example",
+                "--output",
+                str(output_path),
+                narrative_runner_factory=lambda _config: FakeRunner(),
+            )
+
+            lines = output_path.read_text(encoding="utf-8").splitlines()
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["record_count"], 1)
+        self.assertEqual(payload["written"], 1)
+        self.assertEqual(payload["sources"], ["binance_square"])
+        self.assertEqual(payload["symbols"], ["BTCUSDT"])
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn("SQUARE_COOKIE_FILE", stdout)
 
 
 if __name__ == "__main__":
