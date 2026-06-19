@@ -13,9 +13,9 @@
 
 ### Configuration And Secrets
 
-- [ ] **CFG-01**: User can configure Binance, OpenAI, runtime mode, risk limits, and data paths through env/config files without committing secret values.
-- [ ] **CFG-02**: The system can validate required config for dry-run, testnet, and live modes.
-- [ ] **CFG-03**: The system can redact secret values in logs, diagnostics, and config-check output.
+- [x] **CFG-01**: User can configure Binance, OpenAI, runtime mode, risk limits, and data paths through env/config files without committing secret values.
+- [x] **CFG-02**: The system can validate required config for dry-run, testnet, and live modes.
+- [x] **CFG-03**: The system can redact secret values in logs, diagnostics, and config-check output.
 
 ### Binance Market Data
 
@@ -97,9 +97,9 @@
 | ISO-01 | Phase 1 | Pending |
 | ISO-02 | Phase 1 | Pending |
 | ISO-03 | Phase 1 | Pending |
-| CFG-01 | Phase 1 | Pending |
-| CFG-02 | Phase 1 | Pending |
-| CFG-03 | Phase 1 | Pending |
+| CFG-01 | Phase 1 | Complete |
+| CFG-02 | Phase 1 | Complete |
+| CFG-03 | Phase 1 | Complete |
 | MKT-01 | Phase 2 | Pending |
 | MKT-02 | Phase 2 | Pending |
 | MKT-03 | Phase 2 | Pending |
@@ -130,6 +130,7 @@
 | DEP-04 | Phase 8 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 34 total
 - Mapped to phases: 34
 - Unmapped: 0
