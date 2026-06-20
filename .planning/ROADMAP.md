@@ -18,6 +18,8 @@
 - ✅ **v1.23 Strategy Evidence And Live Resume Readiness** — Phases 48-52,
   shipped 2026-06-21 ([archive](milestones/v1.23-ROADMAP.md)).
 
+- ◆ **v1.24 Server Readiness And Paper Promotion** — Phases 53-55, in progress.
+
 ## Phases
 
 <details>
@@ -96,6 +98,87 @@
 
 </details>
 
+### Phase 53: Server Live-Resume Readiness Evidence
+
+**Goal:** Prove the Phase 52 readiness command runs on the isolated server as a
+read-only evidence command against current server, exchange, and manual
+exposure state.
+
+**Requirements:** SRV-01, SRV-02, SRV-03
+
+**Status:** Not started.
+
+**Plans:** 0/1 plans complete
+
+**Success Criteria:**
+
+1. Server deployment exposes `ops live-resume-readiness` without enabling live
+   timer/service or applying any risk profile.
+
+2. A secret-safe readiness artifact records paper timer, live timer, live
+   service, risk profile, exchange exposure, and confirmation blockers.
+
+3. Manual ETH/ETHUSDT exposure is passed as manual exposure and reported
+   separately from agent-managed submitted intents.
+
+4. Local and server verification prove the command is read-only and does not
+   place, cancel, or modify Binance orders.
+
+### Phase 54: Guarded Paper Evidence Promotion
+
+**Goal:** Collect and evaluate current guarded setup evidence before any live
+resume discussion.
+
+**Requirements:** PEV-01, PEV-02, PEV-03
+
+**Depends on:** Phase 53
+
+**Status:** Not started.
+
+**Plans:** 0/1 plans complete
+
+**Success Criteria:**
+
+1. Current-data matrix evidence is rerun for `quant_setup_selective_guarded`
+   and compared against the archived Phase 50 candidate result.
+
+2. Server paper collection can run or preview the guarded variant without
+   creating live order intents or mutating exchange/live service state.
+
+3. Post-change paper performance is evaluated from a clear variant/timestamp
+   boundary with PnL, win-rate, profit-factor, outcome-count, and drawdown
+   gates.
+
+4. Evidence remains fail-closed when samples are missing, thin, or negative.
+
+### Phase 55: Operator Resume Decision Packet
+
+**Goal:** Produce one operator-facing packet that says whether to keep live
+paused, collect more paper evidence, resolve exposure, or prepare a separate
+confirmed live resume.
+
+**Requirements:** RDM-01, RDM-02, RDM-03
+
+**Depends on:** Phase 54
+
+**Status:** Not started.
+
+**Plans:** 0/1 plans complete
+
+**Success Criteria:**
+
+1. Resume decision returns one of `keep_live_paused`, `collect_more_paper`,
+   `resolve_exposure`, or `eligible_for_operator_resume`.
+
+2. Decision blockers are grouped by strategy, paper, server, exchange/manual
+   exposure, risk profile, AI/provider health, and confirmation.
+
+3. The decision packet cannot restore timers, apply profiles, place orders, or
+   mutate exchange/server state.
+
+4. If eligibility is reached, the output still points to a separate explicit
+   confirmation flow rather than performing resume.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
@@ -104,6 +187,7 @@
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
+| v1.24 Server Readiness And Paper Promotion | 53-55 | 0/3 | In progress | - |
 
 ## Requirement Coverage
 
@@ -111,11 +195,12 @@
 - v1.1-v1.21 requirements: archived at `.planning/milestones/v1.21-REQUIREMENTS.md`
 - v1.22 requirements: archived at `.planning/milestones/v1.22-REQUIREMENTS.md`
 - v1.23 requirements: archived at `.planning/milestones/v1.23-REQUIREMENTS.md`
+- v1.24 requirements: active at `.planning/REQUIREMENTS.md`
 
 ## Next Step
 
-Start the next milestone with `$gsd-new-milestone`. Keep live automation paused
-while strategy matrix evidence and forward-paper evidence remain insufficient.
-The paper timer can continue collecting paper-only evidence; live auto-hot and
-live service/timer remain disabled until explicit readiness gates pass, manual
-exposure is classified separately, and the operator approves resume separately.
+Start Phase 53 with `$gsd-plan-phase 53`. Keep live automation paused while
+server readiness and guarded paper evidence are being verified. The paper timer
+can continue collecting paper-only evidence; live auto-hot and live service/timer
+remain disabled until explicit readiness gates pass, manual exposure is
+classified separately, and the operator approves resume separately.

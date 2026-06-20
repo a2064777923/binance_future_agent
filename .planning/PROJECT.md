@@ -188,6 +188,13 @@ control of downside.
 - [x] Allow protected active positions to be carried into a target
   multi-position profile only when exchange protection and target portfolio caps
   are both verified.
+- [ ] Deploy and run the Phase 52 live-resume readiness command on the server
+  as a read-only check, with manual ETH/ETHUSDT exposure classified separately.
+- [ ] Collect post-change paper evidence for the selected guarded setup variant
+  without creating live order intents or restoring live automation.
+- [ ] Produce a single operator-facing resume decision packet that separates
+  "collect more paper evidence" from "eligible for separately confirmed live
+  resume".
 
 ### Out of Scope
 
@@ -568,6 +575,28 @@ any small live automation can be resumed.
 for future live resume, but it did not authorize live timer restore, higher-risk
 profile apply, or order submission.
 
+## Current Milestone: v1.24 Server Readiness And Paper Promotion
+
+**Goal:** Move the v1.23 readiness work from local proof to server evidence,
+then collect guarded post-change paper evidence before any separately approved
+live resume.
+
+**Target features:**
+
+- Deploy or verify `ops live-resume-readiness` on the isolated server path and
+  run it read-only with manual ETH/ETHUSDT exposure marked as manual.
+- Keep live timer/service disabled while server readiness reports explain
+  strategy, paper, exchange, manual exposure, profile, and confirmation
+  blockers.
+- Run current-data matrix and guarded forward-paper evidence for
+  `quant_setup_selective_guarded`, with a clear post-change evidence boundary.
+- Produce a resume decision packet that says whether to keep collecting paper,
+  investigate exchange/manual exposure, or prepare a separate operator-confirmed
+  live resume.
+
+**Status:** Planning. No server live automation, risk profile, or Binance order
+state has been changed for this milestone.
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
@@ -614,8 +643,29 @@ profile apply, or order submission.
 | Matrix before forward-paper promotion | Backtest evidence must cover multiple hot universes and intervals before any post-change forward-paper gate can be trusted. | Phase 50 complete |
 | Paper promotion needs profit factor | Post-change forward-paper evidence must pass PnL, win-rate, profit-factor, and drawdown gates before readiness reporting can consider it. | Phase 51 complete |
 | Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete; v1.23 archived |
+| Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | v1.24 active |
+| Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | v1.24 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition**:
+1. Requirements invalidated? Move to Out of Scope with reason.
+2. Requirements validated? Move to Validated with phase reference.
+3. New requirements emerged? Add to Active.
+4. Decisions to log? Add to Key Decisions.
+5. "What This Is" still accurate? Update if drifted.
+
+**After each milestone**:
+1. Full review of all sections.
+2. Core Value check - still the right priority?
+3. Business Context check - customer, revenue model, and success metric still
+   accurate?
+4. Audit Out of Scope - reasons still valid?
+5. Update Context with current state.
+
 ---
-*Last updated: 2026-06-21 after archiving v1.23 Strategy Evidence And Live Resume Readiness.*
+*Last updated: 2026-06-21 after starting v1.24 Server Readiness And Paper Promotion.*

@@ -1,29 +1,29 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.23
-milestone_name: Strategy Evidence And Live Resume Readiness
-current_phase: 52 — Live Resume Readiness Report
-status: milestone_archived
-stopped_at: v1.23 archived; next milestone not started.
-last_updated: "2026-06-21T01:50:49+08:00"
+milestone: v1.24
+milestone_name: Server Readiness And Paper Promotion
+current_phase: 53 — Server Live-Resume Readiness Evidence
+status: planning
+stopped_at: v1.24 requirements and roadmap initialized.
+last_updated: "2026-06-21T01:57:11+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Milestone v1.23 completed, audited, and archived
+last_activity_desc: Milestone v1.24 started
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
-current_phase_name: Live Resume Readiness Report
+  total_phases: 3
+  completed_phases: 0
+  total_plans: 3
+  completed_plans: 0
+  percent: 0
+current_phase_name: Server Live-Resume Readiness Evidence
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 52 — Live Resume Readiness Report
-**Status:** v1.23 milestone archived; next milestone not started
+**Current phase:** 53 — Server Live-Resume Readiness Evidence
+**Status:** v1.24 planning
 **Last planned:** 2026-06-21
-**Plan count:** 1
+**Plan count:** 0
 
 ## Project Reference
 
@@ -32,9 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan the next milestone. Live automation remains paused until
-read-only server readiness, post-change paper evidence, manual exposure
-classification, and operator confirmation all pass.
+**Current focus:** Plan and execute Phase 53: deploy or verify the
+live-resume readiness command on the isolated server and run it read-only with
+manual ETH/ETHUSDT exposure classified separately.
 
 ## Decisions
 
@@ -59,6 +59,10 @@ classification, and operator confirmation all pass.
 - v1.23 direction: completed and archived. The system now has read-only
   strategy evidence, recalibration, matrix, post-change paper, and live-resume
   readiness gates. These gates do not authorize live resume by themselves.
+
+- v1.24 direction: move the readiness workflow onto the isolated server, collect
+  guarded post-change paper evidence, and produce an operator-facing resume
+  decision packet before any separate live resume confirmation flow.
 
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -577,24 +581,24 @@ classification, and operator confirmation all pass.
 
 ## Next Command
 
-Start the next milestone with `$gsd-new-milestone`. Keep live automation
+Plan Phase 53 with `$gsd-plan-phase 53`, then execute it. Keep live automation
 disabled. Do not enable unattended live auto-hot, restore live automation,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while strategy
-matrix evidence and forward-paper performance are negative.
+execute adjustment orders, or apply `30u_10x_multi_dynamic` while server
+readiness and guarded paper evidence remain incomplete.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** v1.23 milestone archived; next milestone not started.
-**Resume file:** .planning/PROJECT.md
+**Stopped at:** v1.24 requirements and roadmap initialized.
+**Resume file:** .planning/REQUIREMENTS.md
 
 ## Current Position
 
-Phase: Milestone v1.23 complete
-Plan: none
-Status: Awaiting next milestone
-Last activity: 2026-06-21 - Milestone v1.23 completed and archived
+Phase: 53 — Server Live-Resume Readiness Evidence
+Plan: not started
+Status: Ready to plan
+Last activity: 2026-06-21 - Milestone v1.24 started
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`.
+- Run `$gsd-plan-phase 53`.
