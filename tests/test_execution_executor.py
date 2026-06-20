@@ -196,6 +196,30 @@ class ExecutionEngineTests(unittest.TestCase):
             1,
         )
 
+    def test_live_cross_margin_mode_uses_crossed_margin_type(self):
+        fake_client = FakeSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_MARGIN_MODE="cross",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "submitted")
+        self.assertEqual(fake_client.calls[0], ("margin", "BTCUSDT", "CROSSED"))
+        self.assertEqual(fake_client.calls[1], ("leverage", "BTCUSDT", 3))
+
     def test_live_margin_setup_error_fails_closed_before_entry_order(self):
         fake_client = MarginFailingSignedClient()
         connection = sqlite3.connect(":memory:")

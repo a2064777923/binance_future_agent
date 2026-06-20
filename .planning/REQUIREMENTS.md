@@ -109,6 +109,22 @@ v1.0 requirements are archived at
 - [x] **MSF-03**: Multi-Assets mode isolated-margin rejection is covered by a
   regression test.
 
+### Configurable Margin Mode
+
+- [x] **CMM-01**: Runtime config includes explicit `BFA_MARGIN_MODE` with only
+  `isolated` and `cross` accepted values.
+
+- [x] **CMM-02**: Execution maps `BFA_MARGIN_MODE=isolated` to Binance
+  `ISOLATED` and `BFA_MARGIN_MODE=cross` to Binance `CROSSED` before leverage
+  setup.
+
+- [x] **CMM-03**: Cross margin mode keeps the same 100 USDT pilot risk caps,
+  protective-order requirement, and fail-closed margin setup behavior.
+
+- [x] **CMM-04**: Server live config can use `BFA_MARGIN_MODE=cross` to match
+  the current Binance Multi-Assets account mode without changing secrets or
+  other services.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -145,13 +161,17 @@ v1.0 requirements are archived at
 | MSF-01 | Phase 14 | Complete - margin setup errors return rejected results |
 | MSF-02 | Phase 14 | Complete - margin errors persist as exchange-response evidence |
 | MSF-03 | Phase 14 | Complete - Multi-Assets isolated-margin rejection regression added |
+| CMM-01 | Phase 15 | Complete - margin mode config added and validated |
+| CMM-02 | Phase 15 | Complete - isolated/cross map to Binance margin types |
+| CMM-03 | Phase 15 | Complete - risk caps and protective-order requirement unchanged |
+| CMM-04 | Phase 15 | Complete - server can be explicitly configured for cross mode |
 
 **Coverage:**
 
-- v1.1-v1.6 requirements: 23 total
-- Mapped to phases: 23
+- v1.1-v1.7 requirements: 27 total
+- Mapped to phases: 27
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.6 margin setup fail-closed*
+*Last updated: 2026-06-20 after completing v1.7 configurable margin mode*

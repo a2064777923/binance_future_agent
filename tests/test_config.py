@@ -27,6 +27,7 @@ def base_env(**overrides):
         "BFA_MAX_RISK_PER_TRADE_USDT": "1",
         "BFA_MAX_DAILY_LOSS_USDT": "3",
         "BFA_MAX_OPEN_POSITIONS": "2",
+        "BFA_MARGIN_MODE": "isolated",
         "BFA_KILL_SWITCH_FILE": "/tmp/binance-futures-agent/KILL_SWITCH",
         "BFA_DB_PATH": "/tmp/binance-futures-agent/data/agent.sqlite",
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
@@ -135,6 +136,27 @@ class ConfigTests(unittest.TestCase):
 
         self.assertFalse(result.valid)
         self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS must be true for live mode", result.errors)
+
+    def test_invalid_margin_mode_fails(self):
+        config = load_config(base_env(BFA_MARGIN_MODE="portfolio"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_MARGIN_MODE must be isolated or cross", result.errors)
+
+    def test_live_cross_margin_mode_warns_but_keeps_config_valid(self):
+        config = load_config(
+            base_env(
+                BFA_MODE="live",
+                BFA_MARGIN_MODE="cross",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertTrue(result.valid)
+        self.assertIn("BFA_MARGIN_MODE=cross uses account-level cross margin under pilot caps", result.warnings)
 
     def test_unknown_mode_fails(self):
         config = load_config(base_env(BFA_MODE="reckless"))

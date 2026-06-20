@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.6
-milestone_name: Margin Setup Fail-Closed
-current_phase: Phase 14 - Margin Setup Fail-Closed
+milestone: v1.7
+milestone_name: Configurable Margin Mode
+current_phase: Phase 15 - Configurable Margin Mode
 status: completed
-stopped_at: Phase 14 complete; timer stopped pending fail-closed deployment
-last_updated: "2026-06-20T01:35:00.000Z"
+stopped_at: Phase 15 complete; pending server deploy with explicit cross margin mode
+last_updated: "2026-06-20T01:45:00.000Z"
 last_activity: 2026-06-20
-last_activity_desc: Phase 14 complete
+last_activity_desc: Phase 15 complete
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 6
-  completed_plans: 6
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 7
+  completed_plans: 7
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 14 - Margin Setup Fail-Closed
-**Status:** v1.6 complete; live timer paused until deployment verification
+**Current phase:** Phase 15 - Configurable Margin Mode
+**Status:** v1.7 complete; live timer active on server pending cross-mode deploy
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -81,10 +81,13 @@ projects or losing control of downside.
 - Binance Multi-Assets mode rejects isolated-margin setup on the live account;
   execution must reject before entry submission when margin setup fails.
 
+- Cross margin mode is now explicit and validated via `BFA_MARGIN_MODE=cross`;
+  it keeps the same notional/risk caps and protective-order requirement.
+
 ## Next Command
 
-Deploy Phase 14, rerun health checks, resume the live timer, and observe that
-margin setup failures become rejected evidence instead of service crashes.
+Deploy Phase 15, set server `BFA_MARGIN_MODE=cross`, rerun health checks, and
+observe the live timer under unchanged 100 USDT pilot caps.
 
 ## Session
 
@@ -94,15 +97,15 @@ margin setup failures become rejected evidence instead of service crashes.
 
 ## Current Position
 
-Phase: Phase 14 - Margin Setup Fail-Closed
-Plan: 14-01 complete
-Status: Margin setup errors are handled as rejected non-submitted execution results
-Last activity: 2026-06-20 — Phase 14 complete
+Phase: Phase 15 - Configurable Margin Mode
+Plan: 15-01 complete
+Status: Margin mode can be explicitly set to isolated or cross without changing pilot caps
+Last activity: 2026-06-20 — Phase 15 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
-- Confirm live cycles reject margin setup failures without entry submission or service crash.
+- Confirm live cycles use `BFA_MARGIN_MODE=cross` on the Multi-Assets account and still fail closed on weak/no-trade signals.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.

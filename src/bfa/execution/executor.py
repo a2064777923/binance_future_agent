@@ -204,8 +204,9 @@ class ExecutionEngine:
 
     def _ensure_live_margin(self, intent: OrderIntent) -> None:
         assert self.signed_client is not None
+        margin_type = _binance_margin_type(self.config)
         try:
-            self.signed_client.change_margin_type(intent.symbol, margin_type="ISOLATED")
+            self.signed_client.change_margin_type(intent.symbol, margin_type=margin_type)
         except BinanceSignedError as exc:
             if exc.binance_code != -4046:
                 raise
@@ -254,6 +255,13 @@ def _protective_orders_required(config: AppConfig) -> bool:
         "yes",
         "on",
     }
+
+
+def _binance_margin_type(config: AppConfig) -> str:
+    margin_mode = config.get("BFA_MARGIN_MODE", "isolated").strip().lower()
+    if margin_mode == "cross":
+        return "CROSSED"
+    return "ISOLATED"
 
 
 def _activate_kill_switch(config: AppConfig) -> bool:

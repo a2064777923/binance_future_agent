@@ -77,6 +77,8 @@ control of downside.
   minimum executable notionals fit the 20 USDT max-position-notional cap.
 - Phase 14 validated fail-closed handling for Binance margin setup errors, after
   live evidence showed Multi-Assets mode rejects isolated-margin changes.
+- Phase 15 added explicit configurable margin mode so the server can use cross
+  margin with the current Multi-Assets account while preserving pilot caps.
 
 ### Active
 
@@ -100,6 +102,8 @@ control of downside.
   Binance filters under the 20 USDT max-position-notional cap.
 - [x] Fail closed when Binance margin/leverage setup cannot be applied before
   entry order submission.
+- [x] Support explicit cross margin setup for the current Binance Multi-Assets
+  account without increasing pilot caps.
 - [ ] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
 
@@ -165,7 +169,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 14 are complete and verified. The project is installable as an
+Phases 1 through 15 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -175,8 +179,9 @@ execution helpers, reconciliation reports, deployment health checks, CLI smoke
 commands, automated one-cycle trading runner, live systemd timer assets,
 exchange-side protective order submission, OpenAI-compatible base URL
 configuration, AI timeout/backoff behavior, market-heat fallback narratives, and
-pilot tradability filtering, a 10-symbol cap-compatible pilot universe, and
-fail-closed margin setup handling. The server deployment is installed under
+pilot tradability filtering, a 10-symbol cap-compatible pilot universe,
+fail-closed margin setup handling, and explicit configurable margin mode. The
+server deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
 and OpenAI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
@@ -193,16 +198,19 @@ The first Phase 13 live cycle produced a ZECUSDT trade decision, but Binance
 rejected isolated-margin setup because the account is in Multi-Assets mode.
 Execution now records this as `margin_setup_failed` without submitting an entry
 order.
+`BFA_MARGIN_MODE=cross` is now available for the server account; it maps to
+Binance `CROSSED` while keeping the 100 USDT pilot caps and protective-order
+requirements unchanged.
 
-## Current Milestone: v1.6 Margin Setup Fail-Closed
+## Current Milestone: v1.7 Configurable Margin Mode
 
-**Goal:** Keep live execution fail-closed when Binance account mode prevents
-pre-entry margin setup.
+**Goal:** Match the current Binance account mode explicitly while preserving the
+same small-capital risk limits.
 
 **Target features:**
-- Catch Binance margin setup errors before entry order submission.
-- Persist rejected order-intent and margin-error evidence.
-- Keep the timer service from crashing on account-mode incompatibility.
+- Validate `BFA_MARGIN_MODE` as `isolated` or `cross`.
+- Map cross mode to Binance `CROSSED` setup before entry orders.
+- Warn on live cross mode while keeping caps unchanged.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
 ## Key Decisions
@@ -224,8 +232,9 @@ pre-entry margin setup.
 | Filter for pilot tradability before AI | Hot symbols that cannot fit Binance minimum executable notional under the pilot cap should not consume AI/execution cycles. | Phase 12 complete |
 | Use cap-compatible pilot universe | BTC/ETH can be impossible under a 20 USDT notional cap; the pilot needs tradable high-liquidity symbols without raising caps. | Phase 13 complete |
 | Fail closed on margin setup errors | Binance account mode can reject isolated-margin setup; no entry should be submitted unless pre-entry setup succeeds. | Phase 14 complete |
+| Make margin mode explicit | The live account is Multi-Assets/cross; using cross must be deliberate, validated, and still capped. | Phase 15 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 after completing v1.6 margin setup fail-closed.*
+*Last updated: 2026-06-20 after completing v1.7 configurable margin mode.*

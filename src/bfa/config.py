@@ -27,6 +27,7 @@ DEFAULTS = {
     "BFA_MAX_DAILY_LOSS_USDT": "3",
     "BFA_MAX_OPEN_POSITIONS": "2",
     "BFA_REQUIRE_PROTECTIVE_ORDERS": "true",
+    "BFA_MARGIN_MODE": "isolated",
     "BFA_KILL_SWITCH_FILE": "/opt/binance-futures-agent/runtime/KILL_SWITCH",
     "BFA_MARKET_SYMBOLS": "HYPEUSDT,SOLUSDT,ZECUSDT,WLDUSDT,XRPUSDT,AVAXUSDT,BNBUSDT,DOGEUSDT,NEARUSDT,ADAUSDT",
     "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "true",
@@ -133,6 +134,11 @@ def validate_config(config: AppConfig) -> ValidationResult:
             errors.append("BFA_KILL_SWITCH_FILE is required for live mode")
         if not _truthy(config.get("BFA_REQUIRE_PROTECTIVE_ORDERS")):
             errors.append("BFA_REQUIRE_PROTECTIVE_ORDERS must be true for live mode")
+        if config.get("BFA_MARGIN_MODE").strip().lower() == "cross":
+            warnings.append("BFA_MARGIN_MODE=cross uses account-level cross margin under pilot caps")
+
+    if config.get("BFA_MARGIN_MODE").strip().lower() not in {"isolated", "cross"}:
+        errors.append("BFA_MARGIN_MODE must be isolated or cross")
 
     if mode is RuntimeMode.LIVE and config.get("BINANCE_USE_TESTNET").lower() in {"1", "true", "yes"}:
         warnings.append("BINANCE_USE_TESTNET is true while BFA_MODE=live")

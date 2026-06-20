@@ -16,6 +16,7 @@
 - ✅ **v1.4 Pilot Tradability Filter** — Phase 12, completed 2026-06-20.
 - ✅ **v1.5 Pilot Symbol Universe** — Phase 13, completed 2026-06-20.
 - ✅ **v1.6 Margin Setup Fail-Closed** — Phase 14, completed 2026-06-20.
+- ✅ **v1.7 Configurable Margin Mode** — Phase 15, completed 2026-06-20.
 
 ## Phases
 
@@ -181,6 +182,26 @@ without crashing the live service or submitting an entry order.
 4. Regression coverage reproduces Multi-Assets mode isolated-margin rejection.
 5. Full tests and server health checks pass after deployment.
 
+### Phase 15: Configurable Margin Mode
+
+**Goal:** Allow the live pilot to use explicit cross margin setup for a Binance
+Multi-Assets account while preserving existing pilot caps and fail-closed gates.
+
+**Requirements:** CMM-01, CMM-02, CMM-03, CMM-04
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. `BFA_MARGIN_MODE` validates to either `isolated` or `cross`.
+2. `isolated` maps to Binance `ISOLATED`; `cross` maps to Binance `CROSSED`.
+3. Live cross mode produces a config warning but does not change notional,
+   leverage, per-trade risk, daily loss, max positions, kill switch, or
+   protective-order requirements.
+4. Server env can be updated to `BFA_MARGIN_MODE=cross` without touching
+   credentials or other services.
+5. Full tests and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -199,15 +220,17 @@ without crashing the live service or submitting an entry order.
 | 12 | v1.4 | 1/1 | Complete | 2026-06-20 |
 | 13 | v1.5 | 1/1 | Complete | 2026-06-20 |
 | 14 | v1.6 | 1/1 | Complete | 2026-06-20 |
+| 15 | v1.7 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.6 requirements: 23
-- Mapped: 23
+- v1.1-v1.7 requirements: 27
+- Mapped: 27
 - Unmapped: 0
 
 ## Next Step
 
-Margin setup now fails closed. Keep 100 USDT pilot caps unchanged and observe
-live timer cycles; after the first submitted live entry, verify protective-order
-evidence with `ops live-status`.
+Configurable margin mode is ready. Deploy with `BFA_MARGIN_MODE=cross` on the
+server, keep 100 USDT pilot caps unchanged, and observe live timer cycles; after
+the first submitted live entry, verify protective-order evidence with
+`ops live-status`.
