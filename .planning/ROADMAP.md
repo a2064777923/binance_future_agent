@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-41, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-42, active.
 
 ## Phases
 
@@ -351,13 +351,38 @@ can be collected repeatedly without enabling live automation.
    observation without widening the live trading allowlist.
 7. Full local test suite passes.
 
+### Phase 42: Forward-Paper Performance Gate
+
+**Goal:** Convert collected forward-paper signals and outcomes into a
+read-only performance gate while keeping live resume blocked by paper evidence
+alone.
+
+**Requirements:** FPG-01, FPG-02, FPG-03, FPG-04
+
+**Status:** In progress locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. `ops forward-paper-performance-check` reads `paper_signals` and
+   `paper_outcomes` for a selected variant, interval, and optional start time.
+2. The command reports signal/outcome counts, open signals, win rate, net PnL,
+   profit factor, worst drawdown, exit reasons, symbol summaries, and latest
+   outcomes.
+3. Missing signals, insufficient settled outcomes, losing evidence, weak win
+   rate, or excessive drawdown all block paper promotion.
+4. Promising paper evidence can return `paper_evidence_promising`, but always
+   keeps `live_resume_allowed=false`.
+5. Full local and server test suites pass after deployment.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-41 | 12/12 | Phase 41 deployed, auto-hot paper active | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-42 | 12/13 | Phase 42 in progress, paper performance gate local | Pending |
 
 ## Requirement Coverage
 
@@ -374,7 +399,9 @@ observation through `--scope selected-intervals --intervals 5m`, and local
 `ops forward-paper-run` can record paper signals/outcomes without order
 intents, and deployment assets now include an active paper-only systemd timer
 on the server. The paper timer uses auto-hot symbol selection rather than the
-10-symbol live pilot allowlist. Next work should collect out-of-sample paper
+10-symbol live pilot allowlist. Current work is adding
+`ops forward-paper-performance-check` so the collected paper outcomes become a
+read-only performance gate. Next work should collect out-of-sample paper
 evidence and/or recalibrate failed `15m` behavior before restoring live
 automation. Monitor any active position through
 filter-aware `ops position-adjustment-plan` and use

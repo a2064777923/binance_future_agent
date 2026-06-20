@@ -199,6 +199,22 @@ projects or losing control of downside.
   universe than the live pilot allowlist, without changing the live
   `BFA_MARKET_SYMBOLS` trading universe.
 
+### Forward-Paper Performance Gate
+
+- [ ] **FPG-01**: Operators can run a read-only
+  `ops forward-paper-performance-check` command against stored
+  `paper_signals` and `paper_outcomes`.
+
+- [ ] **FPG-02**: The performance gate reports signal/outcome counts, open
+  signal count, win/loss/flat counts, win rate, net PnL, profit factor, worst
+  drawdown, exit reasons, per-symbol summaries, and latest outcomes.
+
+- [ ] **FPG-03**: Missing paper signals, too few settled outcomes, non-positive
+  net PnL, low win rate, or excessive drawdown return non-promoted statuses.
+
+- [ ] **FPG-04**: Passing paper thresholds can allow only paper promotion and
+  must keep `live_resume_allowed=false`.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -258,12 +274,16 @@ projects or losing control of downside.
 | FPS-02 | Phase 41 | Complete and deployed |
 | FPS-03 | Phase 41 | Complete and deployed |
 | FPS-04 | Phase 41 | Complete and deployed |
+| FPG-01 | Phase 42 | In progress |
+| FPG-02 | Phase 42 | In progress |
+| FPG-03 | Phase 42 | In progress |
+| FPG-04 | Phase 42 | In progress |
 
 **Coverage:**
-- v1.22 requirements: 47 total
-- Mapped to phases: 47
+- v1.22 requirements: 51 total
+- Mapped to phases: 51
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 41 forward-paper scheduling assets*
+*Last updated: 2026-06-20 during Phase 42 forward-paper performance gate*

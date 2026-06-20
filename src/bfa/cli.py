@@ -36,6 +36,7 @@ from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.forward_paper import run_forward_paper
+from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_adjustment import (
     build_position_adjustment_execute_report,
@@ -384,6 +385,26 @@ def _build_parser() -> argparse.ArgumentParser:
     forward_paper.add_argument("--variant", default="quant_setup_selective", help="quant_setup backtest variant to observe")
     forward_paper.add_argument("--limit", type=int, default=36, help="recent kline bars to fetch per symbol")
     forward_paper.add_argument("--now", help="optional deterministic run timestamp")
+
+    forward_paper_performance = ops_subparsers.add_parser(
+        "forward-paper-performance-check",
+        help="read-only gate for evaluating forward-paper outcome performance",
+    )
+    forward_paper_performance.add_argument("--env-file", help="optional env file to load before environment overrides")
+    forward_paper_performance.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    forward_paper_performance.add_argument("--variant", default="quant_setup_selective", help="paper variant to evaluate")
+    forward_paper_performance.add_argument("--interval", default="5m", help="paper interval to evaluate")
+    forward_paper_performance.add_argument("--since", help="only include paper signals opened at or after this ISO time")
+    forward_paper_performance.add_argument("--min-outcomes", type=int, default=20, help="minimum settled paper outcomes")
+    forward_paper_performance.add_argument("--min-win-rate", type=float, default=0.5, help="minimum paper win rate")
+    forward_paper_performance.add_argument("--min-net-pnl-usdt", type=float, default=0.0, help="minimum total net PnL")
+    forward_paper_performance.add_argument(
+        "--max-worst-drawdown-usdt",
+        type=float,
+        default=1.5,
+        help="maximum paper equity drawdown; use a negative value to disable this cap",
+    )
+    forward_paper_performance.add_argument("--latest-limit", type=int, default=10, help="number of recent outcomes to show")
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -1074,6 +1095,22 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1
+    if args.ops_command == "forward-paper-performance-check":
+        report = build_forward_paper_performance_report(
+            args.db or config.get("BFA_DB_PATH"),
+            variant=args.variant,
+            interval=args.interval,
+            since=args.since,
+            min_outcomes=args.min_outcomes,
+            min_win_rate=args.min_win_rate,
+            min_net_pnl_usdt=args.min_net_pnl_usdt,
+            max_worst_drawdown_usdt=None
+            if args.max_worst_drawdown_usdt is not None and args.max_worst_drawdown_usdt < 0
+            else args.max_worst_drawdown_usdt,
+            latest_limit=args.latest_limit,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.paper_promotion_allowed else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:

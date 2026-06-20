@@ -2235,6 +2235,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["symbols"], ["HOTUSDT"])
         self.assertEqual(fake_client.kline_symbols, ["HOTUSDT"])
 
+    def test_ops_forward_paper_performance_check_reports_insufficient_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "forward-paper-performance-check",
+                "--db",
+                str(db),
+                "--min-outcomes",
+                "1",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_forward_paper_performance_v1")
+        self.assertEqual(payload["status"], "no_paper_evidence")
+        self.assertFalse(payload["live_resume_allowed"])
+
 
 if __name__ == "__main__":
     unittest.main()

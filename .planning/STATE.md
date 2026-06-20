@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 41
+current_phase: 42
 status: active
-stopped_at: Phase 41 deployed; paper-only timer active; live timer inactive
-last_updated: "2026-06-20T21:53:07+08:00"
+stopped_at: Phase 42 local implementation in progress; paper-only timer active; live timer inactive
+last_updated: "2026-06-20T22:24:53+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
+last_activity_desc: Added forward-paper performance gate locally for paper signal/outcome evidence
 progress:
-  total_phases: 37
+  total_phases: 38
   completed_phases: 37
-  total_plans: 58
+  total_plans: 59
   completed_plans: 58
-  percent: 100
+  percent: 97
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 41 — Forward-Paper Scheduling Assets
-**Status:** Phase 41 deployed; paper-only timer active; live timer remains paused while default all-interval strategy promotion fails
+**Current phase:** Phase 42 — Forward-Paper Performance Gate
+**Status:** Phase 42 local implementation in progress; paper-only timer active; live timer remains paused while default all-interval strategy promotion and paper outcome evidence are insufficient
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -496,31 +496,43 @@ gated by all-interval strategy evidence.
   `order_intents`; DB counts after timer/manual paper runs were
   `paper_signals=23`, `paper_outcomes=0`, `order_intents=18`.
 
+- Phase 42 local implementation is adding read-only
+  `ops forward-paper-performance-check`. The gate summarizes stored
+  `paper_signals` and `paper_outcomes` by selected variant/interval, checks
+  minimum outcome count, win rate, total net PnL, and worst drawdown, and keeps
+  `live_resume_allowed=false` even when paper thresholds pass. It is intended
+  to turn the active paper timer's output into auditable evidence rather than
+  blindly restoring live automation.
+
 ## Next Command
 
-Collect repeated out-of-sample `ops forward-paper-run` evidence from the active
-paper-only timer, then rerun matrix and promotion checks. Do not restore the
-live timer, execute adjustment orders, or apply `30u_10x_multi_dynamic` while
-the default all-interval promotion gate returns `keep_live_paused`.
+Finish Phase 42 verification, deploy `ops forward-paper-performance-check`, run
+it against `/opt/binance-futures-agent/data/agent.sqlite`, and keep collecting
+out-of-sample `ops forward-paper-run` evidence from the active paper-only
+timer. Do not restore the live timer, execute adjustment orders, or apply
+`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
+`keep_live_paused` and paper outcomes remain insufficient.
 
 ## Session
 
-**Last session:** 2026-06-21T00:30:00+08:00
-**Stopped at:** Phase 41 deployed; paper-only timer active; live timer inactive
-**Resume file:** .planning/phases/41-forward-paper-scheduling-assets/41-01-SUMMARY.md
+**Last session:** 2026-06-20T22:24:53+08:00
+**Stopped at:** Phase 42 local implementation in progress; paper-only timer active; live timer inactive
+**Resume file:** .planning/phases/42-forward-paper-performance-gate/42-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 41 — Forward-Paper Scheduling Assets
-Plan: 41-01 local implementation
-Status: Deployed; paper-only timer active; live service/timer inactive
-Last activity: 2026-06-20 — paper-only systemd service/timer deployed and enabled
+Phase: 42 — Forward-Paper Performance Gate
+Plan: 42-01 local implementation
+Status: Local implementation in progress; deployment pending
+Last activity: 2026-06-20 — performance gate command added locally
 
 ## Operator Next Steps
 
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
+- Use `ops forward-paper-performance-check` after deployment to decide whether
+  paper evidence is still missing, insufficient, failing, or promising.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware
