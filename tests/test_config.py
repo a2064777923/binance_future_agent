@@ -28,6 +28,7 @@ def base_env(**overrides):
         "BFA_MAX_DAILY_LOSS_USDT": "3",
         "BFA_MAX_OPEN_POSITIONS": "2",
         "BFA_MARGIN_MODE": "isolated",
+        "BFA_POSITION_MODE": "one_way",
         "BFA_KILL_SWITCH_FILE": "/tmp/binance-futures-agent/KILL_SWITCH",
         "BFA_DB_PATH": "/tmp/binance-futures-agent/data/agent.sqlite",
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
@@ -144,6 +145,13 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(result.valid)
         self.assertIn("BFA_MARGIN_MODE must be isolated or cross", result.errors)
 
+    def test_invalid_position_mode_fails(self):
+        config = load_config(base_env(BFA_POSITION_MODE="dual"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_POSITION_MODE must be one_way or hedge", result.errors)
+
     def test_live_cross_margin_mode_warns_but_keeps_config_valid(self):
         config = load_config(
             base_env(
@@ -157,6 +165,20 @@ class ConfigTests(unittest.TestCase):
 
         self.assertTrue(result.valid)
         self.assertIn("BFA_MARGIN_MODE=cross uses account-level cross margin under pilot caps", result.warnings)
+
+    def test_live_hedge_position_mode_warns_but_keeps_config_valid(self):
+        config = load_config(
+            base_env(
+                BFA_MODE="live",
+                BFA_POSITION_MODE="hedge",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertTrue(result.valid)
+        self.assertIn("BFA_POSITION_MODE=hedge sends explicit Binance positionSide values", result.warnings)
 
     def test_unknown_mode_fails(self):
         config = load_config(base_env(BFA_MODE="reckless"))

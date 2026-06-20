@@ -117,14 +117,32 @@ class ExecutionEngine:
                 },
                 exchange_response_type="margin_setup_error",
             )
-        entry_response = self.signed_client.new_order(
-            symbol=intent.symbol,
-            side=intent.side,
-            order_type=intent.order_type,
-            quantity=intent.quantity,
-            reduce_only=intent.reduce_only,
-            new_client_order_id=_client_order_id(intent),
-        )
+        position_side = _position_side(intent, self.config)
+        try:
+            entry_response = self.signed_client.new_order(
+                symbol=intent.symbol,
+                side=intent.side,
+                order_type=intent.order_type,
+                quantity=intent.quantity,
+                reduce_only=intent.reduce_only,
+                position_side=position_side,
+                new_client_order_id=_client_order_id(intent),
+            )
+        except BinanceSignedError as exc:
+            return self._finish(
+                status="rejected",
+                submitted=False,
+                intent=intent,
+                risk=RiskDecision(False, ["entry_order_failed"]),
+                exchange_response={
+                    "entry_error": {
+                        "endpoint": exc.endpoint,
+                        "code": exc.binance_code,
+                        "message": exc.binance_message,
+                    }
+                },
+                exchange_response_type="entry_order_error",
+            )
         response = {"entry_order": entry_response}
         if _protective_orders_required(self.config):
             try:
@@ -142,7 +160,8 @@ class ExecutionEngine:
                         side=_opposite_side(intent.side),
                         order_type="MARKET",
                         quantity=intent.quantity,
-                        reduce_only=True,
+                        reduce_only=_reduce_only_supported(self.config),
+                        position_side=position_side,
                         new_client_order_id=_client_order_id(intent, suffix="close"),
                     )
                     status = "protective_order_failed_closed"
@@ -215,6 +234,7 @@ class ExecutionEngine:
     def _place_protective_orders(self, intent: OrderIntent) -> dict[str, dict]:
         assert self.signed_client is not None
         close_side = _opposite_side(intent.side)
+        position_side = _position_side(intent, self.config)
         return {
             "stop_loss_order": self.signed_client.new_algo_order(
                 symbol=intent.symbol,
@@ -222,6 +242,7 @@ class ExecutionEngine:
                 order_type="STOP_MARKET",
                 stop_price=intent.stop_price,
                 close_position=True,
+                position_side=position_side,
                 client_algo_id=_client_order_id(intent, suffix="sl"),
             ),
             "take_profit_order": self.signed_client.new_algo_order(
@@ -230,6 +251,7 @@ class ExecutionEngine:
                 order_type="TAKE_PROFIT_MARKET",
                 stop_price=intent.target_price,
                 close_position=True,
+                position_side=position_side,
                 client_algo_id=_client_order_id(intent, suffix="tp"),
             ),
         }
@@ -262,6 +284,16 @@ def _binance_margin_type(config: AppConfig) -> str:
     if margin_mode == "cross":
         return "CROSSED"
     return "ISOLATED"
+
+
+def _position_side(intent: OrderIntent, config: AppConfig) -> str | None:
+    if config.get("BFA_POSITION_MODE", "one_way").strip().lower() != "hedge":
+        return None
+    return "LONG" if intent.side.upper() == "BUY" else "SHORT"
+
+
+def _reduce_only_supported(config: AppConfig) -> bool:
+    return config.get("BFA_POSITION_MODE", "one_way").strip().lower() != "hedge"
 
 
 def _activate_kill_switch(config: AppConfig) -> bool:

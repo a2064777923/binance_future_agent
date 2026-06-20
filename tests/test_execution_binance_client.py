@@ -43,6 +43,7 @@ class BinanceSignedClientTests(unittest.TestCase):
             side="BUY",
             order_type="MARKET",
             quantity=0.2,
+            position_side="LONG",
             new_client_order_id="bfa-test-1",
         )
 
@@ -57,6 +58,7 @@ class BinanceSignedClientTests(unittest.TestCase):
         self.assertEqual(query["side"], ["BUY"])
         self.assertEqual(query["type"], ["MARKET"])
         self.assertEqual(query["quantity"], ["0.2"])
+        self.assertEqual(query["positionSide"], ["LONG"])
         self.assertEqual(query["timestamp"], ["1700000000000"])
         self.assertEqual(query["recvWindow"], ["6000"])
         self.assertIn("signature", query)
@@ -82,6 +84,7 @@ class BinanceSignedClientTests(unittest.TestCase):
             side="SELL",
             order_type="STOP_MARKET",
             stop_price=96.0,
+            position_side="LONG",
             client_algo_id="bfa-test-sl",
         )
 
@@ -95,7 +98,8 @@ class BinanceSignedClientTests(unittest.TestCase):
         self.assertEqual(query["side"], ["SELL"])
         self.assertEqual(query["algoType"], ["CONDITIONAL"])
         self.assertEqual(query["type"], ["STOP_MARKET"])
-        self.assertEqual(query["stopPrice"], ["96"])
+        self.assertEqual(query["triggerPrice"], ["96"])
+        self.assertEqual(query["positionSide"], ["LONG"])
         self.assertEqual(query["closePosition"], ["true"])
         self.assertEqual(query["clientAlgoId"], ["bfa-test-sl"])
         self.assertIn("signature", query)

@@ -79,6 +79,8 @@ control of downside.
   live evidence showed Multi-Assets mode rejects isolated-margin changes.
 - Phase 15 added explicit configurable margin mode so the server can use cross
   margin with the current Multi-Assets account while preserving pilot caps.
+- Phase 16 added explicit position mode and entry-order fail-closed handling
+  after live evidence showed the account expects Binance `positionSide`.
 
 ### Active
 
@@ -104,6 +106,8 @@ control of downside.
   entry order submission.
 - [x] Support explicit cross margin setup for the current Binance Multi-Assets
   account without increasing pilot caps.
+- [x] Support explicit hedge position-side setup for the current Binance account
+  without increasing pilot caps.
 - [ ] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
 
@@ -169,7 +173,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 15 are complete and verified. The project is installable as an
+Phases 1 through 16 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -181,7 +185,8 @@ exchange-side protective order submission, OpenAI-compatible base URL
 configuration, AI timeout/backoff behavior, market-heat fallback narratives, and
 pilot tradability filtering, a 10-symbol cap-compatible pilot universe,
 fail-closed margin setup handling, and explicit configurable margin mode. The
-server deployment is installed under
+system now also has explicit configurable position mode and entry-order
+fail-closed handling. The server deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
 and OpenAI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
@@ -201,16 +206,20 @@ order.
 `BFA_MARGIN_MODE=cross` is now available for the server account; it maps to
 Binance `CROSSED` while keeping the 100 USDT pilot caps and protective-order
 requirements unchanged.
+The first cross-mode live trade attempt reached entry order placement, but
+Binance rejected it because the account expects explicit `positionSide`. The
+execution path now supports `BFA_POSITION_MODE=hedge` and records entry order
+errors as rejected evidence rather than service crashes.
 
-## Current Milestone: v1.7 Configurable Margin Mode
+## Current Milestone: v1.8 Position Mode And Entry Fail-Closed
 
-**Goal:** Match the current Binance account mode explicitly while preserving the
-same small-capital risk limits.
+**Goal:** Match the current Binance account position-side mode explicitly while
+preserving the same small-capital risk limits.
 
 **Target features:**
-- Validate `BFA_MARGIN_MODE` as `isolated` or `cross`.
-- Map cross mode to Binance `CROSSED` setup before entry orders.
-- Warn on live cross mode while keeping caps unchanged.
+- Validate `BFA_POSITION_MODE` as `one_way` or `hedge`.
+- Send Binance `positionSide` values in hedge mode.
+- Persist entry-order failures as rejected, non-submitted evidence.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
 ## Key Decisions
@@ -233,8 +242,9 @@ same small-capital risk limits.
 | Use cap-compatible pilot universe | BTC/ETH can be impossible under a 20 USDT notional cap; the pilot needs tradable high-liquidity symbols without raising caps. | Phase 13 complete |
 | Fail closed on margin setup errors | Binance account mode can reject isolated-margin setup; no entry should be submitted unless pre-entry setup succeeds. | Phase 14 complete |
 | Make margin mode explicit | The live account is Multi-Assets/cross; using cross must be deliberate, validated, and still capped. | Phase 15 complete |
+| Make position mode explicit | The live account can require hedge `positionSide`; using it must be deliberate, validated, and still capped. | Phase 16 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 after completing v1.7 configurable margin mode.*
+*Last updated: 2026-06-20 after completing v1.8 position mode entry fail-closed.*

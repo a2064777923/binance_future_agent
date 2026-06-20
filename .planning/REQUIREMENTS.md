@@ -125,6 +125,21 @@ v1.0 requirements are archived at
   the current Binance Multi-Assets account mode without changing secrets or
   other services.
 
+### Position Mode And Entry Fail-Closed
+
+- [x] **PME-01**: Runtime config includes explicit `BFA_POSITION_MODE` with only
+  `one_way` and `hedge` accepted values.
+
+- [x] **PME-02**: Hedge mode sends Binance `positionSide=LONG` or `SHORT` on
+  entry, protective, and emergency close orders.
+
+- [x] **PME-03**: Entry order failures are persisted as rejected,
+  non-submitted execution evidence instead of uncaught service crashes.
+
+- [x] **PME-04**: Server live config can use `BFA_POSITION_MODE=hedge` to match
+  the current Binance account position-side setting without changing risk caps
+  or other services.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -165,13 +180,17 @@ v1.0 requirements are archived at
 | CMM-02 | Phase 15 | Complete - isolated/cross map to Binance margin types |
 | CMM-03 | Phase 15 | Complete - risk caps and protective-order requirement unchanged |
 | CMM-04 | Phase 15 | Complete - server can be explicitly configured for cross mode |
+| PME-01 | Phase 16 | Complete - position mode config added and validated |
+| PME-02 | Phase 16 | Complete - hedge positionSide sent on execution orders |
+| PME-03 | Phase 16 | Complete - entry order errors fail closed and persist evidence |
+| PME-04 | Phase 16 | Complete - server can be explicitly configured for hedge mode |
 
 **Coverage:**
 
-- v1.1-v1.7 requirements: 27 total
-- Mapped to phases: 27
+- v1.1-v1.8 requirements: 31 total
+- Mapped to phases: 31
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.7 configurable margin mode*
+*Last updated: 2026-06-20 after completing v1.8 position mode entry fail-closed*

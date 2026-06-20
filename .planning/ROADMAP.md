@@ -17,6 +17,7 @@
 - ✅ **v1.5 Pilot Symbol Universe** — Phase 13, completed 2026-06-20.
 - ✅ **v1.6 Margin Setup Fail-Closed** — Phase 14, completed 2026-06-20.
 - ✅ **v1.7 Configurable Margin Mode** — Phase 15, completed 2026-06-20.
+- ✅ **v1.8 Position Mode Entry Fail-Closed** — Phase 16, completed 2026-06-20.
 
 ## Phases
 
@@ -202,6 +203,26 @@ Multi-Assets account while preserving existing pilot caps and fail-closed gates.
    credentials or other services.
 5. Full tests and server health checks pass after deployment.
 
+### Phase 16: Position Mode And Entry Fail-Closed
+
+**Goal:** Allow the live pilot to match Binance hedge/position-side account
+settings and fail closed if entry order placement is rejected.
+
+**Requirements:** PME-01, PME-02, PME-03, PME-04
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. `BFA_POSITION_MODE` validates to either `one_way` or `hedge`.
+2. Hedge mode sends `positionSide=LONG` for long entries and `SHORT` for short
+   entries on entry and protective orders.
+3. Entry order errors produce `status=rejected`, `submitted=false`, and
+   `entry_order_failed` evidence instead of a service crash.
+4. Server env can be updated to `BFA_POSITION_MODE=hedge` without touching
+   credentials, risk caps, or other services.
+5. Full tests and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -221,16 +242,17 @@ Multi-Assets account while preserving existing pilot caps and fail-closed gates.
 | 13 | v1.5 | 1/1 | Complete | 2026-06-20 |
 | 14 | v1.6 | 1/1 | Complete | 2026-06-20 |
 | 15 | v1.7 | 1/1 | Complete | 2026-06-20 |
+| 16 | v1.8 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.7 requirements: 27
-- Mapped: 27
+- v1.1-v1.8 requirements: 31
+- Mapped: 31
 - Unmapped: 0
 
 ## Next Step
 
-Configurable margin mode is ready. Deploy with `BFA_MARGIN_MODE=cross` on the
+Position mode support is ready. Deploy with `BFA_POSITION_MODE=hedge` on the
 server, keep 100 USDT pilot caps unchanged, and observe live timer cycles; after
 the first submitted live entry, verify protective-order evidence with
 `ops live-status`.

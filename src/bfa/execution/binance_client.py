@@ -108,6 +108,7 @@ class BinanceFuturesSignedClient:
         order_type: str,
         quantity: float,
         reduce_only: bool = False,
+        position_side: str | None = None,
         new_client_order_id: str | None = None,
     ) -> dict[str, Any]:
         params = {
@@ -118,6 +119,8 @@ class BinanceFuturesSignedClient:
         }
         if reduce_only:
             params["reduceOnly"] = "true"
+        if position_side:
+            params["positionSide"] = position_side.upper()
         if new_client_order_id:
             params["newClientOrderId"] = new_client_order_id
         return self._signed_request("POST", "/fapi/v1/order", params)
@@ -131,6 +134,7 @@ class BinanceFuturesSignedClient:
         stop_price: float,
         close_position: bool = True,
         quantity: float | None = None,
+        position_side: str | None = None,
         client_algo_id: str | None = None,
         working_type: str = "MARK_PRICE",
     ) -> dict[str, Any]:
@@ -139,9 +143,11 @@ class BinanceFuturesSignedClient:
             "side": side.upper(),
             "algoType": "CONDITIONAL",
             "type": order_type.upper(),
-            "stopPrice": _number(stop_price),
+            "triggerPrice": _number(stop_price),
             "workingType": working_type.upper(),
         }
+        if position_side:
+            params["positionSide"] = position_side.upper()
         if close_position:
             params["closePosition"] = "true"
         elif quantity is not None:
@@ -175,16 +181,20 @@ class BinanceFuturesSignedClient:
         side: str,
         order_type: str,
         quantity: float,
+        position_side: str | None = None,
     ) -> dict[str, Any]:
+        params = {
+            "symbol": _symbol(symbol),
+            "side": side.upper(),
+            "type": order_type.upper(),
+            "quantity": _number(quantity),
+        }
+        if position_side:
+            params["positionSide"] = position_side.upper()
         return self._signed_request(
             "POST",
             "/fapi/v1/order/test",
-            {
-                "symbol": _symbol(symbol),
-                "side": side.upper(),
-                "type": order_type.upper(),
-                "quantity": _number(quantity),
-            },
+            params,
         )
 
     def account(self) -> dict[str, Any]:

@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: Configurable Margin Mode
-current_phase: Phase 15 - Configurable Margin Mode
+milestone: v1.8
+milestone_name: Position Mode And Entry Fail-Closed
+current_phase: Phase 16 - Position Mode And Entry Fail-Closed
 status: completed
-stopped_at: Phase 15 deployed with cross margin mode; awaiting future submitted entry for LVA-05 evidence
-last_updated: "2026-06-20T01:55:00.000Z"
+stopped_at: Phase 16 complete; pending server deploy with explicit hedge position mode
+last_updated: "2026-06-20T02:05:00.000Z"
 last_activity: 2026-06-20
-last_activity_desc: Phase 15 complete
+last_activity_desc: Phase 16 complete
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 8
+  completed_phases: 8
+  total_plans: 8
+  completed_plans: 8
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 15 - Configurable Margin Mode
-**Status:** v1.7 complete and deployed; live timer active under pilot caps
+**Current phase:** Phase 16 - Position Mode And Entry Fail-Closed
+**Status:** v1.8 complete; live timer paused pending hedge-mode deploy
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -84,10 +84,13 @@ projects or losing control of downside.
 - Cross margin mode is now explicit and validated via `BFA_MARGIN_MODE=cross`;
   it keeps the same notional/risk caps and protective-order requirement.
 
+- Binance position-side mode expects explicit `positionSide`; execution must
+  send hedge position sides when configured and fail closed on entry rejections.
+
 ## Next Command
 
-Keep live timer active under `BFA_MARGIN_MODE=cross`. After the first submitted
-live entry, use `ops live-status` to verify protective-order evidence.
+Deploy Phase 16, set server `BFA_POSITION_MODE=hedge`, rerun health checks, and
+observe the live timer under unchanged 100 USDT pilot caps.
 
 ## Session
 
@@ -97,15 +100,15 @@ live entry, use `ops live-status` to verify protective-order evidence.
 
 ## Current Position
 
-Phase: Phase 15 - Configurable Margin Mode
-Plan: 15-01 complete
-Status: Margin mode is deployed as cross on the server without changing pilot caps
-Last activity: 2026-06-20 — Phase 15 complete
+Phase: Phase 16 - Position Mode And Entry Fail-Closed
+Plan: 16-01 complete
+Status: Hedge position mode and entry order fail-closed handling are implemented locally
+Last activity: 2026-06-20 — Phase 16 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
-- Observe future cycles; if a trade submits, verify protective orders before any risk-limit change.
+- Deploy hedge position mode and verify future cycles; if a trade submits, verify protective orders before any risk-limit change.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.
