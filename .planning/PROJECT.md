@@ -118,6 +118,11 @@ control of downside.
   and setup profile gates for blocked setup reasons, blocked negative factor
   names, missing open interest, thin liquidity, weak momentum, and weak volume
   impulse while leaving live defaults unchanged.
+- Phase 50 adds `backtest matrix-suite`, which runs multiple hot-universe
+  presets across `5m`/`15m` and baseline/recalibrated quant setup variants.
+  The Phase 50 public-data report marks `quant_setup_selective_guarded` as a
+  forward-paper candidate but keeps the overall verdict at
+  `mixed_candidate_collect_more_data`.
 
 ### Active
 
@@ -593,8 +598,9 @@ any small live automation can be resumed.
 | Evidence before live resume | The latest paper evidence is negative, so v1.23 prioritizes strategy evidence, recalibration, and explicit readiness gates over restoring unattended live automation. | v1.23 active |
 | Baseline before recalibration | Weak setup changes should be driven by one compact current evidence report before profiles or live-readiness gates are changed. | Phase 48 complete |
 | Recalibration stays paper-first | Loss-driven filters should be explicit backtest/paper variants until repeated matrix and forward-paper evidence pass. | Phase 49 complete |
+| Matrix before forward-paper promotion | Backtest evidence must cover multiple hot universes and intervals before any post-change forward-paper gate can be trusted. | Phase 50 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-21 after completing Phase 49 loss-driven setup recalibration.*
+*Last updated: 2026-06-21 after completing Phase 50 multi-window hot-symbol matrix.*

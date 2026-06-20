@@ -2009,6 +2009,66 @@ class CliTests(unittest.TestCase):
         self.assertIn("taker_flow_acceleration", payload["config"]["setup_profile"]["blocked_factor_reasons"])
         self.assertIn("volume_impulse", payload["config"]["setup_profile"]["blocked_factor_names"])
 
+    def test_backtest_matrix_suite_emits_multi_universe_report(self):
+        class FakeClient:
+            def ticker_24hr(self, symbol=None):
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {"symbol": "HOTUSDT", "priceChangePercent": "6", "quoteVolume": "90000000", "count": 1000},
+                        {"symbol": "MOVEUSDT", "priceChangePercent": "-4", "quoteVolume": "70000000", "count": 1000},
+                    ],
+                )
+
+            def klines(self, symbol, *, interval, limit=30, start_time=None, end_time=None):
+                rows = []
+                price = 100.0
+                for index in range(limit):
+                    close = price * 1.01
+                    rows.append(
+                        test_kline(
+                            1_700_000_000_000 + index * 300_000,
+                            open_price=str(price),
+                            high=str(close * 1.025),
+                            low=str(price * 0.997),
+                            close=str(close),
+                        )
+                    )
+                    price = close
+                return MarketDataResponse(endpoint="/fapi/v1/klines", params={}, payload=rows)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "matrix-suite.json"
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "matrix-suite",
+                "--intervals",
+                "5m",
+                "--limit",
+                "16",
+                "--window-bars",
+                "8",
+                "--step-bars",
+                "4",
+                "--variants",
+                "quant_setup_selective,quant_setup_loss_recalibrated",
+                "--universe-presets",
+                "broad,momentum",
+                "--output",
+                str(output),
+                client_factory=lambda _config: FakeClient(),
+            )
+            wrote_output = output.exists()
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_hot_backtest_matrix_suite_v1")
+        self.assertEqual([item["preset"] for item in payload["matrices"]], ["broad", "momentum"])
+        self.assertIn("quant_setup_loss_recalibrated", payload["promotion"]["variants"])
+        self.assertTrue(wrote_output)
+
     def test_backtest_matrix_auto_selects_hot_symbols_and_writes_report(self):
         class FakeClient:
             def ticker_24hr(self, symbol=None):

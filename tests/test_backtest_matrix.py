@@ -1,6 +1,14 @@
 import unittest
 
-from bfa.backtest.matrix import BacktestMatrixConfig, HotUniverseConfig, run_hot_backtest_matrix, select_hot_usdt_symbols
+from bfa.backtest.matrix import (
+    BacktestMatrixConfig,
+    BacktestMatrixSuiteConfig,
+    HotUniverseConfig,
+    hot_universe_presets,
+    run_hot_backtest_matrix,
+    run_hot_backtest_matrix_suite,
+    select_hot_usdt_symbols,
+)
 from bfa.market.models import MarketDataResponse
 
 
@@ -94,6 +102,14 @@ class BacktestMatrixTests(unittest.TestCase):
         self.assertEqual([item["symbol"] for item in selected], ["BIGUSDT", "MOVEUSDT"])
         self.assertTrue(all(item["symbol"].endswith("USDT") for item in selected))
 
+    def test_hot_universe_presets_resolve_named_configs(self):
+        presets = hot_universe_presets(["broad", "momentum"])
+
+        self.assertEqual([item.name for item in presets], ["broad", "momentum"])
+        self.assertGreater(presets[0].config.top_n, presets[1].config.top_n)
+        with self.assertRaises(ValueError):
+            hot_universe_presets(["unknown"])
+
     def test_hot_backtest_matrix_auto_selects_symbols_and_reports_promotion(self):
         client = FakeClient()
 
@@ -177,6 +193,31 @@ class BacktestMatrixTests(unittest.TestCase):
         self.assertIn("quant_setup_selective", payload["promotion"]["variants"])
         self.assertIn("quant_setup_selective_guarded", payload["promotion"]["variants"])
         self.assertIn("quant_setup_loss_recalibrated", payload["promotion"]["variants"])
+
+    def test_hot_backtest_matrix_suite_runs_multiple_universe_presets(self):
+        client = FakeClient()
+
+        payload = run_hot_backtest_matrix_suite(
+            client,
+            BacktestMatrixSuiteConfig(
+                intervals=("5m",),
+                limit=16,
+                window_bars=8,
+                step_bars=4,
+                variants=("quant_setup_selective", "quant_setup_loss_recalibrated"),
+                universe_presets=("broad", "momentum"),
+            ),
+        )
+
+        self.assertEqual(payload["schema"], "bfa_hot_backtest_matrix_suite_v1")
+        self.assertEqual([item["preset"] for item in payload["matrices"]], ["broad", "momentum"])
+        self.assertIn("quant_setup_selective", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_loss_recalibrated", payload["promotion"]["variants"])
+        self.assertEqual(payload["promotion"]["variants"]["quant_setup_selective"]["matrix_count"], 2)
+        self.assertEqual(
+            [call for call in client.calls if call[0] == "ticker_24hr"],
+            [("ticker_24hr", None), ("ticker_24hr", None)],
+        )
 
     def test_hot_backtest_matrix_reports_no_symbols_selected(self):
         client = FakeClient()

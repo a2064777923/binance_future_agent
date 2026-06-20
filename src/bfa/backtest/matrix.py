@@ -40,6 +40,26 @@ class BacktestMatrixConfig:
     hot_universe: HotUniverseConfig = field(default_factory=HotUniverseConfig)
 
 
+@dataclass(frozen=True)
+class HotUniversePreset:
+    name: str
+    config: HotUniverseConfig
+
+
+@dataclass(frozen=True)
+class BacktestMatrixSuiteConfig:
+    intervals: tuple[str, ...] = ("5m", "15m")
+    limit: int = 144
+    window_bars: int = 72
+    step_bars: int = 36
+    variants: tuple[str, ...] = (
+        "quant_setup_selective",
+        "quant_setup_selective_guarded",
+        "quant_setup_loss_recalibrated",
+    )
+    universe_presets: tuple[str, ...] = ("broad", "momentum", "liquid")
+
+
 def select_hot_usdt_symbols(
     ticker_rows: Iterable[dict[str, Any]],
     config: HotUniverseConfig | None = None,
@@ -81,6 +101,89 @@ def select_hot_usdt_symbols(
         ),
         reverse=True,
     )[: cfg.top_n]
+
+
+def hot_universe_presets(names: Iterable[str]) -> list[HotUniversePreset]:
+    presets = {
+        "broad": HotUniversePreset(
+            "broad",
+            HotUniverseConfig(top_n=40, min_quote_volume_usdt=10_000_000.0, min_abs_price_change_percent=0.5),
+        ),
+        "momentum": HotUniversePreset(
+            "momentum",
+            HotUniverseConfig(top_n=24, min_quote_volume_usdt=10_000_000.0, min_abs_price_change_percent=3.0),
+        ),
+        "liquid": HotUniversePreset(
+            "liquid",
+            HotUniverseConfig(top_n=30, min_quote_volume_usdt=50_000_000.0, min_abs_price_change_percent=0.5),
+        ),
+    }
+    selected: list[HotUniversePreset] = []
+    unknown: list[str] = []
+    for name in names:
+        normalized = name.strip().lower()
+        if not normalized:
+            continue
+        if normalized not in presets:
+            unknown.append(normalized)
+            continue
+        selected.append(presets[normalized])
+    if unknown:
+        raise ValueError(f"unknown hot-universe presets: {', '.join(unknown)}")
+    if not selected:
+        raise ValueError("at least one hot-universe preset is required")
+    return selected
+
+
+def run_hot_backtest_matrix_suite(
+    client: BinanceFuturesRestClient,
+    config: BacktestMatrixSuiteConfig | None = None,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> dict[str, Any]:
+    """Run the hot-symbol matrix across multiple universe presets."""
+
+    cfg = config or BacktestMatrixSuiteConfig()
+    _validate_matrix_suite_config(cfg)
+    matrices: list[dict[str, Any]] = []
+    for preset in hot_universe_presets(cfg.universe_presets):
+        matrix = run_hot_backtest_matrix(
+            client,
+            BacktestMatrixConfig(
+                intervals=cfg.intervals,
+                limit=cfg.limit,
+                window_bars=cfg.window_bars,
+                step_bars=cfg.step_bars,
+                variants=cfg.variants,
+                hot_universe=preset.config,
+            ),
+            start=start,
+            end=end,
+        )
+        matrices.append(
+            {
+                "preset": preset.name,
+                "symbols": matrix["symbols"],
+                "hot_universe": matrix["hot_universe"],
+                "matrix_config": matrix["matrix_config"],
+                "reports": matrix["reports"],
+                "promotion": matrix["promotion"],
+            }
+        )
+    return {
+        "schema": "bfa_hot_backtest_matrix_suite_v1",
+        "suite_config": {
+            "intervals": list(cfg.intervals),
+            "limit": cfg.limit,
+            "window_bars": cfg.window_bars,
+            "step_bars": cfg.step_bars,
+            "variants": list(cfg.variants),
+            "universe_presets": list(cfg.universe_presets),
+        },
+        "matrices": matrices,
+        "promotion": _suite_promotion_summary(matrices),
+    }
 
 
 def run_hot_backtest_matrix(
@@ -248,6 +351,64 @@ def _overall_verdict(variant_summary: dict[str, dict[str, Any]]) -> str:
     if any(row["verdict"] == "drawdown_exceeds_pilot_cap" for row in variant_summary.values()):
         return "keep_caps_unchanged_drawdown_risk"
     return "keep_caps_unchanged"
+
+
+def _suite_promotion_summary(matrices: list[dict[str, Any]]) -> dict[str, Any]:
+    by_variant: dict[str, list[dict[str, Any]]] = {}
+    for matrix in matrices:
+        preset = matrix["preset"]
+        for variant, row in matrix["promotion"]["variants"].items():
+            by_variant.setdefault(variant, []).append({"preset": preset, **row})
+
+    variants: dict[str, dict[str, Any]] = {}
+    for variant, rows in sorted(by_variant.items()):
+        total_net = sum(float(row["total_net_pnl_usdt"]) for row in rows)
+        worst_drawdown = max((float(row["worst_drawdown_usdt"]) for row in rows), default=0.0)
+        candidate_count = sum(1 for row in rows if row["verdict"] == "candidate_for_forward_paper")
+        mixed_count = sum(1 for row in rows if row["verdict"] == "mixed_candidate_collect_more_data")
+        variants[variant] = {
+            "matrix_count": len(rows),
+            "candidate_matrix_count": candidate_count,
+            "mixed_matrix_count": mixed_count,
+            "total_net_pnl_usdt": round(total_net, 8),
+            "worst_drawdown_usdt": round(worst_drawdown, 8),
+            "verdict": _suite_variant_verdict(rows, total_net, candidate_count, mixed_count),
+        }
+    return {
+        "variants": variants,
+        "overall": _overall_verdict(variants),
+    }
+
+
+def _suite_variant_verdict(
+    rows: list[dict[str, Any]],
+    total_net: float,
+    candidate_count: int,
+    mixed_count: int,
+) -> str:
+    if not rows:
+        return "no_evidence"
+    if candidate_count == len(rows) and total_net > 0:
+        return "candidate_for_forward_paper"
+    if (candidate_count or mixed_count) and total_net > 0:
+        return "mixed_candidate_collect_more_data"
+    if any(row["verdict"] == "drawdown_exceeds_pilot_cap" for row in rows):
+        return "drawdown_exceeds_pilot_cap"
+    return "not_promoted"
+
+
+def _validate_matrix_suite_config(config: BacktestMatrixSuiteConfig) -> None:
+    _validate_matrix_config(
+        BacktestMatrixConfig(
+            intervals=config.intervals,
+            limit=config.limit,
+            window_bars=config.window_bars,
+            step_bars=config.step_bars,
+            variants=config.variants,
+            hot_universe=HotUniverseConfig(),
+        )
+    )
+    hot_universe_presets(config.universe_presets)
 
 
 def _validate_matrix_config(config: BacktestMatrixConfig) -> None:

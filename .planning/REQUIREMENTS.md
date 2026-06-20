@@ -42,10 +42,10 @@ projects or losing control of downside.
 
 ### Backtest And Forward Paper
 
-- [ ] **BFP-01**: Operator can run a refreshed hot-symbol matrix across multiple
+- [x] **BFP-01**: Operator can run a refreshed hot-symbol matrix across multiple
   recent hot universes, at least `5m` and `15m`, and multiple setup variants.
 
-- [ ] **BFP-02**: Matrix reports compare total net PnL, win rate,
+- [x] **BFP-02**: Matrix reports compare total net PnL, win rate,
   positive-window rate, trade count, and worst drawdown for each interval and
   variant.
 
@@ -111,8 +111,8 @@ projects or losing control of downside.
 | SRC-02 | Phase 49 | Complete |
 | SRC-03 | Phase 49 | Complete |
 | SRC-04 | Phase 49 | Complete |
-| BFP-01 | Phase 50 | Pending |
-| BFP-02 | Phase 50 | Pending |
+| BFP-01 | Phase 50 | Complete |
+| BFP-02 | Phase 50 | Complete |
 | BFP-03 | Phase 51 | Pending |
 | BFP-04 | Phase 51 | Pending |
 | LRR-01 | Phase 52 | Pending |

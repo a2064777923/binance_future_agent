@@ -15,7 +15,14 @@ from bfa.ai.providers import ai_source, build_ai_client
 from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.backtest.data import fetch_historical_klines, load_klines_dataset, write_klines_dataset
 from bfa.backtest.engine import run_hot_momentum_backtest, run_staged_sweep
-from bfa.backtest.matrix import BacktestMatrixConfig, HotUniverseConfig, run_hot_backtest_matrix, select_hot_usdt_symbols
+from bfa.backtest.matrix import (
+    BacktestMatrixConfig,
+    BacktestMatrixSuiteConfig,
+    HotUniverseConfig,
+    run_hot_backtest_matrix,
+    run_hot_backtest_matrix_suite,
+    select_hot_usdt_symbols,
+)
 from bfa.backtest.models import BacktestConfig, built_in_variants
 from bfa.config import AppConfig, forward_paper_symbols, load_config, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect, migrate
@@ -728,6 +735,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="minimum absolute 24h price change percent for automatic hot-symbol selection",
     )
     matrix.add_argument("--output", help="optional JSON report path")
+
+    matrix_suite = backtest_subparsers.add_parser(
+        "matrix-suite",
+        help="run multi-preset hot-symbol matrix sweeps across intervals and variants",
+    )
+    matrix_suite.add_argument("--env-file", help="optional env file to load before environment overrides")
+    matrix_suite.add_argument("--intervals", default="5m,15m", help="comma-separated intervals to fetch and sweep")
+    matrix_suite.add_argument("--start", help="inclusive ISO time or epoch milliseconds")
+    matrix_suite.add_argument("--end", help="inclusive ISO time or epoch milliseconds")
+    matrix_suite.add_argument("--limit", type=int, default=144, help="maximum bars per symbol per interval")
+    matrix_suite.add_argument("--window-bars", type=int, default=72, help="bars per stage window")
+    matrix_suite.add_argument("--step-bars", type=int, default=36, help="bars to move between windows")
+    matrix_suite.add_argument(
+        "--variants",
+        default="quant_setup_selective,quant_setup_selective_guarded,quant_setup_loss_recalibrated",
+        help="comma-separated variants; see backtest run --help for names",
+    )
+    matrix_suite.add_argument(
+        "--universe-presets",
+        default="broad,momentum,liquid",
+        help="comma-separated hot-universe presets: broad,momentum,liquid",
+    )
+    matrix_suite.add_argument("--output", help="optional JSON report path")
     return parser
 
 
@@ -1459,6 +1489,26 @@ def _run_backtest(
             _build_client(config, client_factory),
             matrix_config,
             symbols=_symbols_arg(args.symbols) if args.symbols else None,
+            start=args.start,
+            end=args.end,
+        )
+        _write_optional_json(args.output, payload)
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
+
+    if args.backtest_command == "matrix-suite":
+        config = load_config(env=env, env_file=args.env_file)
+        suite_config = BacktestMatrixSuiteConfig(
+            intervals=tuple(_symbols_arg(args.intervals, uppercase=False)),
+            limit=args.limit,
+            window_bars=args.window_bars,
+            step_bars=args.step_bars,
+            variants=tuple(_symbols_arg(args.variants, uppercase=False)),
+            universe_presets=tuple(_symbols_arg(args.universe_presets, uppercase=False)),
+        )
+        payload = run_hot_backtest_matrix_suite(
+            _build_client(config, client_factory),
+            suite_config,
             start=args.start,
             end=args.end,
         )
