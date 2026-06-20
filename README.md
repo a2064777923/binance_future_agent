@@ -164,12 +164,13 @@ notional after the proposed new entry using:
 - `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT`
 
 `30u_10x_multi_dynamic` is available as a preview/apply profile for a 30 USDT
-account with concurrent-position, per-position notional, portfolio margin, total
-notional, and same-direction caps. It remains confirmation-gated and should be
-treated as experimental until backtests and live evidence justify it. Profile
-readiness may carry a protected active position into this target profile only
-when exchange-side algo protection is present and the active exposure fits the
-target portfolio caps.
+account with 10x leverage, up to 8 concurrent positions, 80 USDT effective
+notional per position, 500 USDT total notional, and 400 USDT same-direction
+notional caps. It remains confirmation-gated and should be treated as
+experimental until backtests and live evidence justify it. Profile readiness may
+carry a protected active position into this target profile only when
+exchange-side algo protection is present and the active exposure fits the target
+portfolio caps.
 
 ## Small-Capital Backtesting
 

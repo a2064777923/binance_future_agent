@@ -701,15 +701,16 @@ projects or losing control of downside.
 
 - Operator clarified the current `BTWUSDT` position is manual and must remain
   ignored by agent management. The live pilot cap profile was widened one step
-  beyond the previous 5-position/50U profile to a 6-position/60U profile:
-  `BFA_MAX_OPEN_POSITIONS=6`, `BFA_MAX_POSITION_NOTIONAL_USDT=60`,
-  `BFA_MAX_MARGIN_PER_POSITION_USDT=6`,
-  `BFA_MAX_MARGIN_FRACTION=0.20`,
-  `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=60`,
+  beyond the previous 6-position/60U profile to an 8-position/80U profile:
+  `BFA_MANUAL_POSITION_SYMBOLS=BTWUSDT`,
+  `BFA_MAX_OPEN_POSITIONS=8`, `BFA_MAX_POSITION_NOTIONAL_USDT=80`,
+  `BFA_MAX_MARGIN_PER_POSITION_USDT=8`,
+  `BFA_MAX_MARGIN_FRACTION=0.27`,
+  `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=80`,
   `BFA_MAX_PORTFOLIO_MARGIN_USDT=30`,
   `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.95`,
-  `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=360`, and
-  `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=300`. The per-trade risk cap remains
+  `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=500`, and
+  `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=400`. The per-trade risk cap remains
   `BFA_MAX_RISK_PER_TRADE_USDT=0.4`.
 
 - Phase 59 is complete locally. It adds `ops live-resume-plan` and
@@ -743,7 +744,7 @@ collection while the live timer remains active under the widened caps.
 
 **Last session:** 2026-06-21T00:00:00+08:00
 **Stopped at:** Phase 60 complete; live timer active; NEARUSDT needs review;
-BTWUSDT marked manual; 10x/6-position/60U dynamic caps deployed and verified.
+BTWUSDT marked manual; 10x/8-position/80U dynamic caps deployed and verified.
 **Resume file:** .planning/phases/60-server-evidence-and-pilot-resume-packet/60-VERIFICATION.md
 
 ## Current Position

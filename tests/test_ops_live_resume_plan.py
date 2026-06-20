@@ -27,9 +27,9 @@ class LiveResumePlanTests(unittest.TestCase):
         self.assertFalse(payload["read_only"]["changes_systemd_state"])
         self.assertFalse(payload["read_only"]["mutates_exchange_state"])
         self.assertEqual(payload["risk_boundaries"]["max_leverage"], 10.0)
-        self.assertEqual(payload["risk_boundaries"]["max_open_positions"], 6)
-        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 60.0)
-        self.assertEqual(payload["risk_boundaries"]["max_portfolio_notional_usdt"], 360.0)
+        self.assertEqual(payload["risk_boundaries"]["max_open_positions"], 8)
+        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 80.0)
+        self.assertEqual(payload["risk_boundaries"]["max_portfolio_notional_usdt"], 500.0)
 
     def test_eligible_preview_builds_confirmation_token_and_systemd_plan(self):
         report = build_live_resume_plan(
@@ -186,18 +186,18 @@ def _config():
             "BFA_MODE": "live",
             "BFA_ACCOUNT_CAPITAL_USDT": "30",
             "BFA_MAX_LEVERAGE": "10",
-            "BFA_MAX_POSITION_NOTIONAL_USDT": "60",
+            "BFA_MAX_POSITION_NOTIONAL_USDT": "80",
             "BFA_MAX_RISK_PER_TRADE_USDT": "0.4",
             "BFA_MAX_DAILY_LOSS_USDT": "1",
-            "BFA_MAX_OPEN_POSITIONS": "6",
+            "BFA_MAX_OPEN_POSITIONS": "8",
             "BFA_DYNAMIC_POSITION_SIZING_ENABLED": "true",
-            "BFA_MAX_MARGIN_PER_POSITION_USDT": "6",
-            "BFA_MAX_MARGIN_FRACTION": "0.20",
-            "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "60",
+            "BFA_MAX_MARGIN_PER_POSITION_USDT": "8",
+            "BFA_MAX_MARGIN_FRACTION": "0.27",
+            "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "80",
             "BFA_MAX_PORTFOLIO_MARGIN_USDT": "30",
             "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.95",
-            "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "360",
-            "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "300",
+            "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "500",
+            "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "400",
             "BFA_MULTI_POSITION_ENABLED": "true",
             "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
             "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
