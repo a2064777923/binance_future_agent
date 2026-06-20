@@ -714,6 +714,32 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["latest"]["candidate"]["symbol"], "SOLUSDT")
         self.assertFalse(payload["lva05_complete"])
 
+    def test_ops_resume_check_requires_exchange_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "resume-check",
+                "--skip-binance",
+                "--db",
+                str(db_path),
+                env={
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BFA_DB_PATH": str(db_path),
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertFalse(payload["resume_allowed"])
+        self.assertEqual(payload["status"], "keep_paused")
+        self.assertIn("exchange_evidence_missing", payload["reasons"])
+
     def test_backtest_fetch_klines_uses_fake_client_and_writes_dataset(self):
         class FakeClient:
             def __init__(self):

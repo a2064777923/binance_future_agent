@@ -33,6 +33,7 @@ from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.live_status import build_live_status_report
+from bfa.ops.resume_check import build_resume_check_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
 
@@ -278,6 +279,18 @@ def _build_parser() -> argparse.ArgumentParser:
     live_status.add_argument("--env-file", help="optional env file to load before environment overrides")
     live_status.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     live_status.add_argument("--check-binance", action="store_true", help="also fetch read-only signed Binance account evidence")
+
+    resume_check = ops_subparsers.add_parser(
+        "resume-check",
+        help="read-only gate for deciding whether the live timer can be resumed",
+    )
+    resume_check.add_argument("--env-file", help="optional env file to load before environment overrides")
+    resume_check.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    resume_check.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
 
     agent = subparsers.add_parser(
         "agent",
@@ -668,6 +681,14 @@ def _run_ops(
         report = build_live_status_report(config, db_path=args.db, check_binance=args.check_binance)
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0
+    if args.ops_command == "resume-check":
+        report = build_resume_check_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.resume_allowed else 1
     return 2
 
 

@@ -1,26 +1,27 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.11
-milestone_name: 30U Higher-Leverage Trial Profile
-current_phase: Phase 19 - 30U Higher-Leverage Trial Profile
+milestone: v1.12
+milestone_name: Timer Resume Gate
+current_phase: Phase 20 - Timer Resume Gate
 status: completed
-stopped_at: Phase 19 verified; timer paused for open ZECUSDT position review
-last_updated: "2026-06-20T11:13:00.000+08:00"
+stopped_at: Phase 20 verified; timer resumed and first cycle submitted no order
+last_updated: "2026-06-20T11:33:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: 30U/5x server profile verified, live-status fixed, ZECUSDT protective orders confirmed
+last_activity_desc: Read-only resume gate deployed; timer resumed after resume_allowed and first cycle submitted no order
 progress:
-  total_phases: 11
-  completed_phases: 11
-  total_plans: 11
-  completed_plans: 11
+  total_phases: 12
+  completed_phases: 12
+  total_plans: 12
+  completed_plans: 12
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 19 - 30U Higher-Leverage Trial Profile
-**Status:** v1.11 complete; live timer paused while an open ZECUSDT position is reviewed
+**Current phase:** Phase 20 - Timer Resume Gate
+**Status:** v1.12 complete; live timer active after `ops resume-check` returned
+`resume_allowed`
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -43,6 +44,7 @@ projects or losing control of downside.
 - Active trial profile: 30 USDT account capital, 5x max leverage, 12 USDT max
   position notional, 0.3 USDT max per-trade risk, 1 USDT max daily loss, and
   1 open position.
+- Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
 - Backtest discipline: use short-window staged sweeps with completed candles,
   next-candle entries, fees/slippage, and small-capital caps before any scale-up.
@@ -71,16 +73,17 @@ projects or losing control of downside.
   caps.
 - Binance hedge position mode is explicit via `BFA_POSITION_MODE=hedge`; entry,
   protective, and emergency orders must keep sending `positionSide`.
-- A real pre-switch ZECUSDT LONG position is open. It has stop-loss and
-  take-profit algo orders, but automation is paused until the operator decides
-  whether to resume scanning under the one-position cap.
+- The pre-switch ZECUSDT LONG has cleared. The resume gate permitted timer
+  resume because there were no active positions, no normal open orders, no open
+  algo orders, and no active AI backoff.
+- The first resumed timer cycle exited 0 with `submitted=false` and
+  `risk_reasons=["ai_decision_pass"]`.
 
 ## Next Command
 
-Review the open ZECUSDT position. Re-enable
-`binance-futures-agent-live.timer` only after the position closes, or after
-explicit operator approval to resume cycles while `BFA_MAX_OPEN_POSITIONS=1`
-blocks new entries.
+Continue observing live timer cycles under the 30U profile. Before any future
+manual timer resume, run `ops resume-check` and resume only if the gate returns
+`resume_allowed`.
 
 ## Session
 
@@ -90,18 +93,14 @@ blocks new entries.
 
 ## Current Position
 
-Phase: Phase 19 - 30U Higher-Leverage Trial Profile
-Plan: 19-01 complete
-Status: Server env on 30U/5x profile; live-status includes exchange positions
-and algo orders; timer paused for open ZECUSDT review
-Last activity: 2026-06-20 - Phase 19 verified
+Phase: Phase 20 - Timer Resume Gate
+Plan: 20-01 complete
+Status: `ops resume-check` deployed; timer active; first resumed cycle selected
+ZECUSDT, AI passed, and no order was submitted
+Last activity: 2026-06-20 - Phase 20 verified
 
 ## Operator Next Steps
 
-- Review or wait for the current ZECUSDT LONG to exit by stop-loss or
-  take-profit.
-- Keep timer paused until that review is complete, unless explicitly choosing to
-  resume scanning while the one-position cap blocks fresh entries.
+- Observe the next live cycles and confirm no unexpected order submission.
+- Run `ops resume-check` before any future manual timer resume.
 - Rerun staged matrix backtests before any further risk-limit increase.
-- If resuming automation, observe the next live cycle and verify it reports the
-  existing position instead of opening a second one.

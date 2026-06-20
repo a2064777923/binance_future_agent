@@ -88,6 +88,8 @@ control of downside.
 - Phase 19 switches the active trial profile from 100 USDT/3x to a tighter 30
   USDT/5x trial with lower absolute notional, trade-risk, daily-loss, and
   concurrency caps.
+- Phase 20 adds a read-only timer resume gate so automation resumes only after
+  exchange positions, normal orders, algo orders, and AI backoff are clear.
 
 ### Active
 
@@ -121,6 +123,7 @@ control of downside.
   verify health/live-status evidence.
 - [x] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
+- [x] Gate future timer resume with read-only exchange and AI-backoff checks.
 
 ### Out of Scope
 
@@ -199,6 +202,7 @@ timeout/backoff behavior, market-heat fallback narratives, pilot tradability
 filtering, a cap-compatible pilot universe, fail-closed margin setup handling,
 explicit configurable margin mode, explicit position mode, account-balance
 preflight, DeepSeek support, and 30U/5x trial runtime caps.
+Phase 20 also adds a read-only resume gate for timer reactivation.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -213,6 +217,11 @@ reports normal open orders and algo orders separately. The live timer is
 currently disabled intentionally while that position is reviewed; automation can
 be resumed after the position closes or after explicit operator approval to run
 while the one-position cap blocks new entries.
+The ZECUSDT position later cleared, and the current server `ops resume-check`
+result is `resume_allowed` with zero active positions, zero normal open orders,
+zero open algo orders, and no active AI backoff.
+The live timer was re-enabled after that gate result; the first resumed cycle
+exited successfully with `submitted=false` after the AI returned pass.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -272,6 +281,21 @@ leverage ceiling while lowering absolute exposure.
 ZECUSDT position and two protective algo orders, and the live timer is paused
 for open-position review.
 
+## Current Milestone: v1.12 Timer Resume Gate
+
+**Goal:** Make timer resume decisions auditable with a read-only gate.
+
+**Target features:**
+- Add `ops resume-check`.
+- Return `resume_allowed` only for clear exchange/backoff state.
+- Return `keep_paused` for protected active positions.
+- Return `urgent_attention` for unprotected active positions or orphan orders.
+
+**Status:** Complete. Server resume check first returned `keep_paused` for the
+protected ZECUSDT position, then returned `resume_allowed` after the position
+and algo orders cleared. The timer was re-enabled, and the first resumed cycle
+submitted no order.
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
@@ -296,8 +320,9 @@ for open-position review.
 | Add balance preflight before live orders | The live account can be unfunded even when order geometry is valid; avoid repeated exchange-side insufficient-margin errors. | Phase 17 complete |
 | Add DeepSeek provider support | The previous OpenAI-compatible endpoint was intermittent and returned invalid JSON; DeepSeek can use Chat Completions JSON mode behind the same validation gates. | Phase 18 complete and deployed |
 | Switch to 30U/5x trial profile | User wants to fund 30 USDT for a first live trial; higher leverage is allowed only with tighter absolute notional/loss/concurrency caps. | Phase 19 complete; timer paused for open-position review |
+| Gate timer resume with exchange state | Timer resume should be a read-only decision based on live positions, open orders, algo orders, and AI backoff rather than manual JSON interpretation. | Phase 20 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.11 30U higher-leverage trial profile.*
+*Last updated: 2026-06-20 after verifying v1.12 timer resume gate.*

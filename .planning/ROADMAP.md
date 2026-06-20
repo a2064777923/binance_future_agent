@@ -22,6 +22,7 @@
 - ✅ **v1.10 DeepSeek Provider Switch** — Phase 18, completed 2026-06-20.
 - ✅ **v1.11 30U Higher-Leverage Trial Profile** — Phase 19, completed 2026-06-20
   with live timer paused for open-position review.
+- ✅ **v1.12 Timer Resume Gate** — Phase 20, completed 2026-06-20.
 
 ## Phases
 
@@ -297,6 +298,27 @@ position remains open.
 5. The live timer remains paused until the existing live position is closed or
    the operator explicitly approves resuming cycles under the 1-position cap.
 
+### Phase 20: Timer Resume Gate
+
+**Goal:** Make the decision to resume `binance-futures-agent-live.timer`
+auditable and scriptable with a read-only gate.
+
+**Requirements:** TRG-01, TRG-02, TRG-03
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. `ops resume-check` returns `resume_allowed` only when exchange positions,
+   normal open orders, algo open orders, and AI backoff are all clear.
+2. A protected active position returns `keep_paused` and a non-zero exit code.
+3. An unprotected active position or orphan open orders return
+   `urgent_attention` and a non-zero exit code.
+4. Unit and CLI tests cover the resume gate states.
+5. Server read-only resume check reports protected ZECUSDT as `keep_paused`
+   while open, then `resume_allowed` after positions and orders clear; the first
+   resumed timer cycle submits no order.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -320,16 +342,16 @@ position remains open.
 | 17 | v1.9 | 1/1 | Complete | 2026-06-20 |
 | 18 | v1.10 | 1/1 | Complete | 2026-06-20 |
 | 19 | v1.11 | 1/1 | Complete, timer paused for open-position review | 2026-06-20 |
+| 20 | v1.12 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.11 requirements: 41
-- Mapped: 41
+- v1.1-v1.12 requirements: 44
+- Mapped: 44
 - Unmapped: 0
 
 ## Next Step
 
-Review the open ZECUSDT position. Re-enable
-`binance-futures-agent-live.timer` only after the position closes, or after
-explicit operator approval to resume scanning while `BFA_MAX_OPEN_POSITIONS=1`
-blocks new entries.
+Continue observing live timer cycles under the 30U profile. Before any future
+manual timer resume, rerun `ops resume-check` and resume only if it returns
+`resume_allowed`.

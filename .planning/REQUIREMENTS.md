@@ -182,6 +182,20 @@ v1.0 requirements are archived at
   switch, and live-status reports the real exchange position and protective
   algo-order state.
 
+### Timer Resume Gate
+
+- [x] **TRG-01**: Provide a read-only `ops resume-check` command that returns
+  `resume_allowed` only when there are no active exchange positions, no open
+  normal orders, no open algo orders, and no active AI backoff.
+
+- [x] **TRG-02**: If an active position exists with confirmed protective algo
+  orders, the resume gate returns `keep_paused` rather than allowing timer
+  resume.
+
+- [x] **TRG-03**: If an active position lacks confirmed protective algo orders,
+  or open orders exist without a position, the resume gate returns
+  `urgent_attention`.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -236,13 +250,16 @@ v1.0 requirements are archived at
 | HLT-01 | Phase 19 | Complete - server env switched while preserving credentials/provider/margin/position/service isolation |
 | HLT-02 | Phase 19 | Complete - 30U/5x/12U/0.3U/1U/1-position caps verified on server |
 | HLT-03 | Phase 19 | Complete - health/live-status checks passed and exchange evidence includes current position plus algo protection |
+| TRG-01 | Phase 20 | Complete - `ops resume-check` allows resume only for clear exchange/backoff state |
+| TRG-02 | Phase 20 | Complete - protected active ZECUSDT returns `keep_paused` |
+| TRG-03 | Phase 20 | Complete - unprotected positions and orphan orders return `urgent_attention` in tests |
 
 **Coverage:**
 
-- v1.1-v1.11 requirements: 41 total
-- Mapped to phases: 41
+- v1.1-v1.12 requirements: 44 total
+- Mapped to phases: 44
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.11 30U higher-leverage trial profile*
+*Last updated: 2026-06-20 after verifying v1.12 timer resume gate*
