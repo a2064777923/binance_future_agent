@@ -16,7 +16,7 @@ projects or losing control of downside.
 - [ ] **POS-02**: System can produce a Binance-filter-aware close/reduce plan
   for each agent-managed `close_review` position in hedge/cross mode while
   ignoring positions listed in `BFA_MANUAL_POSITION_SYMBOLS`.
-- [ ] **POS-03**: Every live cycle evaluates active agent-managed positions
+- [x] **POS-03**: Every live cycle evaluates active agent-managed positions
   before scanning new entries and records a lifecycle decision of `hold`,
   `watch`, `reduce`, `close_review`, `close_ready`, `blocked`, or `manual_hold`.
 - [ ] **POS-04**: Unprotected or deteriorating agent-managed positions are
@@ -28,7 +28,7 @@ projects or losing control of downside.
 - [ ] **EXIT-01**: Operator can execute a close/reduce action for an
   agent-managed position only when a fresh plan token matches, the live service
   state is safe, and Binance quantity/notional filters pass.
-- [ ] **EXIT-02**: The live runner can optionally perform deterministic
+- [x] **EXIT-02**: The live runner can optionally perform deterministic
   auto-management for agent-managed positions under explicit env flags,
   small-account caps, daily-loss limits, and manual-symbol exclusions.
 - [ ] **EXIT-03**: After any close/reduce execution, the system verifies the
@@ -89,10 +89,10 @@ projects or losing control of downside.
 |-------------|-------|--------|
 | POS-01 | Phase 61 | Satisfied |
 | POS-02 | Phase 61 | Satisfied |
-| POS-03 | Phase 63 | Pending |
+| POS-03 | Phase 63 | Satisfied |
 | POS-04 | Phase 61 | Satisfied |
 | EXIT-01 | Phase 62 | Satisfied |
-| EXIT-02 | Phase 63 | Pending |
+| EXIT-02 | Phase 63 | Satisfied |
 | EXIT-03 | Phase 62 | Satisfied |
 | LEARN-01 | Phase 64 | Pending |
 | LEARN-02 | Phase 64 | Pending |
@@ -108,4 +108,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after v1.26 roadmap creation*
+*Last updated: 2026-06-21 after Phase 63 verification*

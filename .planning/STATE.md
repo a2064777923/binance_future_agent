@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.26
 milestone_name: Live Position Management And Pilot Learning
-current_phase: 63
-current_phase_name: Live Cycle Position Stewardship
+current_phase: 64
+current_phase_name: Live Outcome Ledger And Guard Feedback
 status: ready_to_plan
-stopped_at: Phase 62 complete; live timer active; guarded execution preview-only verified;
-last_updated: "2026-06-21T06:00:00+08:00"
+stopped_at: Phase 63 complete; live/paper timers active; lifecycle artifact verified before candidate event;
+last_updated: "2026-06-21T06:25:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 62 complete; Phase 63 ready to plan
+last_activity_desc: Phase 63 complete; lifecycle stewardship deployed and verified
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 60
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 63 — Live Cycle Position Stewardship
-**Status:** Phase 62 complete; Phase 63 ready to plan
+**Current phase:** Phase 64 — Live Outcome Ledger And Guard Feedback
+**Status:** Phase 63 complete; Phase 64 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -32,8 +32,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Explain and repair the gap where an agent-managed
-`close_review` position can fail to produce an executable close/reduce plan.
+**Current focus:** Reconcile closed live outcomes quickly and turn
+lifecycle/exit evidence into recommendation-only guard feedback.
 
 ## Decisions
 
@@ -739,27 +739,37 @@ projects or losing control of downside.
   `BTWUSDT` as `manual_hold` with `manual_position_ignored`. No resume apply,
   adjustment execution, time-exit execution, live order, or cancelation was run.
 
+- Phase 63 is complete. Live agent cycles now persist
+  `position_lifecycle_decision` risk-state artifacts before candidate scanning,
+  market snapshots, trade setup, or AI calls. The server smoke artifact
+  `/opt/binance-futures-agent/runtime/phase63-live-cycle-smoke.json` returned
+  `status=entry_capacity_blocked`, `submitted=false`, `candidate_count=0`, and
+  `persisted.position_lifecycle=432677`. The next normal live timer run wrote
+  lifecycle event `432682` before candidate event `439056`, then completed with
+  `status=quant_pass` and `submitted=false`. Diagnostics show `NEARUSDT` as
+  `close_ready` and `BTWUSDT` as `manual_hold`; auto-management remains
+  explicitly disabled in server env.
+
 ## Next Command
 
-Plan Phase 63 with `$gsd-plan-phase 63`: live-cycle stewardship should evaluate
-active agent-managed positions before scanning new entries, with optional
-env-gated auto-management.
+Plan Phase 64 with `$gsd-plan-phase 64`: reconcile closed live outcomes quickly
+and turn live result attribution into recommendation-only guard feedback.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 62 complete; live timer active; guarded execution
-preview-only checks passed; `NEARUSDT` remains plan-ready but no exit was
-executed; `BTWUSDT` remains manual.
-**Resume file:** .planning/phases/62-guarded-position-exit-execution/62-VERIFICATION.md
+**Stopped at:** Phase 63 complete; live/paper timers active; lifecycle
+artifact and event ordering verified on server; `NEARUSDT` remains plan-ready
+but no exit was executed; `BTWUSDT` remains manual.
+**Resume file:** .planning/phases/63-live-cycle-position-stewardship/63-VERIFICATION.md
 
 ## Current Position
 
-Phase: 63 — Live Cycle Position Stewardship
+Phase: 64 — Live Outcome Ledger And Guard Feedback
 Plan: —
 Status: Ready to plan
-Last activity: 2026-06-21 — Phase 62 complete
+Last activity: 2026-06-21 — Phase 63 complete
 
 ## Operator Next Steps
 
-- Plan Phase 63 with `$gsd-plan-phase 63`.
+- Plan Phase 64 with `$gsd-plan-phase 64`.

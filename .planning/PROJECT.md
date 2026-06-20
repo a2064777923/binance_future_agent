@@ -170,6 +170,10 @@ control of downside.
   operator-confirmed close/reduce execution. `NEARUSDT` can be shown as
   `close_ready`, while `BTWUSDT` remains manual, and execution still refuses to
   submit without a fresh matching token.
+- Phase 63 persists live-cycle position lifecycle artifacts before candidate
+  scanning. Server evidence shows lifecycle event `432682` written before
+  candidate event `439056`; `NEARUSDT` remained `close_ready`, `BTWUSDT`
+  remained `manual_hold`, and auto-management stayed explicitly disabled.
 
 ### Active
 
@@ -785,7 +789,7 @@ remains paused.
 | Paper observation before resume | Low-signal or zero-signal paper runs must show generated candidates, rejected setup reasons, factor snapshots, and source health before any promotion review. | Phase 57 complete |
 | Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 complete |
 | Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete; Phase 60 deployed |
-| Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | v1.26 active |
+| Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | Phase 63 lifecycle persistence complete; outcome feedback remains v1.26 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -809,4 +813,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after v1.26 milestone start.*
+*Last updated: 2026-06-21 after Phase 63 verification.*
