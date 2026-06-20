@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.20
-milestone_name: Dynamic Sizing And Multi-Position Guard
-current_phase: Phase 28 - Dynamic Sizing And Multi-Position Guard
+milestone: v1.21
+milestone_name: Confirmation-Gated Risk Profile Switch
+current_phase: Phase 29 - Confirmation-Gated Risk Profile Switch
 status: completed
-stopped_at: Phase 28 verified locally; server deployment pending non-trading tests
-last_updated: "2026-06-20T13:55:00.000+08:00"
+stopped_at: Phase 29 verified locally and on server; HYPEUSDT still blocks profile apply
+last_updated: "2026-06-20T14:45:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Dynamic sizing and multi-position guards implemented locally
+last_activity_desc: Confirmation-gated risk-profile switch implemented locally
 progress:
-  total_phases: 20
-  completed_phases: 20
-  total_plans: 20
-  completed_plans: 20
+  total_phases: 21
+  completed_phases: 21
+  total_plans: 21
+  completed_plans: 21
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 28 - Dynamic Sizing And Multi-Position Guard
-**Status:** v1.20 complete locally; server non-trading verification pending
+**Current phase:** Phase 29 - Confirmation-Gated Risk Profile Switch
+**Status:** v1.21 complete; risk-profile switch tooling is deployed and blocked correctly while HYPEUSDT is open
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -106,13 +106,17 @@ projects or losing control of downside.
   caps, stop-distance risk, and exchange min-notional pressure. Multi-position
   remains disabled by default and, when enabled, rejects same-symbol
   same-direction duplicate exposure.
+- Confirmation-gated risk-profile switching is implemented locally. The
+  `30u_8x_dynamic` profile can be previewed as a redacted env diff and later
+  applied only when `risk-change-check` allows it and a matching confirmation
+  token is supplied. No live env switch has been applied.
 
 ## Next Command
 
-Deploy Phase 28 code to the server and verify only non-trading behavior. Do not
-change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes,
-run `ops reconcile-outcomes --persist-closed`, then rerun
-`ops risk-change-check --target-leverage 8` before changing the live profile.
+Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
+not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes, run
+`ops reconcile-outcomes --persist-closed`, then rerun
+`ops risk-change-check --target-leverage 8` before applying any profile switch.
 
 ## Session
 
@@ -122,23 +126,23 @@ run `ops reconcile-outcomes --persist-closed`, then rerun
 
 ## Current Position
 
-Phase: Phase 28 - Dynamic Sizing And Multi-Position Guard
-Plan: 28-01 complete locally
-Status: dynamic sizing and multi-position guards are implemented; HYPEUSDT
-remains open and continues to block live risk-profile changes until closed and
-reconciled
-Last activity: 2026-06-20 - Phase 28 local verification passed
+Phase: Phase 29 - Confirmation-Gated Risk Profile Switch
+Plan: 29-01 complete locally
+Status: risk-profile switch planning/apply tooling is deployed and verified;
+HYPEUSDT remains open and continues to block live risk-profile changes until
+closed and reconciled
+Last activity: 2026-06-20 - Phase 29 server verification passed
 
 ## Operator Next Steps
 
-- Observe the current BNBUSDT live position and its protective orders.
+- Observe the current HYPEUSDT live position and its protective orders.
 - Use `ops position-hold-check` to monitor whether the current active position
   remains past its AI hold window.
 - Use `ops time-exit-plan` to inspect the read-only close-order plan.
 - Use `ops time-exit-execute` without `--confirm-token` to fetch the current
   confirmation token only; do not provide the token unless explicitly approving
   a live close.
-- Run `ops reconcile-outcomes --persist-closed` after BNBUSDT closes.
+- Run `ops reconcile-outcomes --persist-closed` after HYPEUSDT closes.
 - Rerun `ops risk-change-check --target-leverage 8` before any leverage change.
 - Do not raise leverage/risk caps while a live position is open unless
   explicitly reviewed.

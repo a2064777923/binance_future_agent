@@ -36,6 +36,7 @@ from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
+from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
 from bfa.ops.time_exit_execute import build_time_exit_execute_report
@@ -380,6 +381,37 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-binance",
         action="store_true",
         help="use only local event-store evidence instead of signed Binance reads",
+    )
+
+    risk_profile_plan = ops_subparsers.add_parser(
+        "risk-profile-plan",
+        help="preview a named risk profile env diff without writing files",
+    )
+    risk_profile_plan.add_argument("--env-file", help="optional env file to load before environment overrides")
+    risk_profile_plan.add_argument("--profile", default="30u_8x_dynamic", help="risk profile name")
+    risk_profile_plan.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="preview profile with two concurrent positions enabled",
+    )
+
+    risk_profile_apply = ops_subparsers.add_parser(
+        "risk-profile-apply",
+        help="apply a named risk profile after risk-change readiness and token confirmation",
+    )
+    risk_profile_apply.add_argument("--env-file", required=True, help="env file to read and update")
+    risk_profile_apply.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    risk_profile_apply.add_argument("--profile", default="30u_8x_dynamic", help="risk profile name")
+    risk_profile_apply.add_argument("--confirm-token", help="confirmation token from risk-profile-plan")
+    risk_profile_apply.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="apply profile with two concurrent positions enabled",
+    )
+    risk_profile_apply.add_argument(
+        "--service-active",
+        action="store_true",
+        help="fail closed when the live systemd service is currently active",
     )
 
     agent = subparsers.add_parser(
@@ -880,9 +912,31 @@ def _run_ops(
             db_path=args.db,
             check_binance=not args.skip_binance,
             target_leverage=args.target_leverage,
+            signed_client=_build_signed_client(config, signed_client_factory) if not args.skip_binance else None,
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.risk_change_allowed else 1
+    if args.ops_command == "risk-profile-plan":
+        plan = build_risk_profile_plan(
+            config,
+            profile=args.profile,
+            allow_two_positions=args.allow_two_positions,
+        )
+        print(json.dumps(plan.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
+    if args.ops_command == "risk-profile-apply":
+        report = apply_risk_profile(
+            config,
+            env_path=args.env_file,
+            db_path=args.db,
+            profile=args.profile,
+            confirm_token=args.confirm_token,
+            allow_two_positions=args.allow_two_positions,
+            service_active=args.service_active,
+            signed_client=_build_signed_client(config, signed_client_factory),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.applied else 1
     return 2
 
 

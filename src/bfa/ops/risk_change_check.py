@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from bfa.config import AppConfig
 from bfa.event_store.migrations import connect, migrate
+from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.ops.live_status import LiveStatusReport, build_live_status_report
 
 
@@ -71,12 +72,14 @@ def build_risk_change_check_report(
     check_binance: bool = True,
     target_leverage: int | None = None,
     live_status_report: LiveStatusReport | None = None,
+    signed_client: BinanceFuturesSignedClient | None = None,
 ) -> RiskChangeCheckReport:
     resolved_db_path = db_path or config.get("BFA_DB_PATH")
     live_status = live_status_report or build_live_status_report(
         config,
         db_path=resolved_db_path,
         check_binance=check_binance,
+        signed_client=signed_client,
     )
     connection = connect(resolved_db_path)
     try:

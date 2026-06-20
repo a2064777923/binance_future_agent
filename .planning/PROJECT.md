@@ -105,6 +105,8 @@ control of downside.
   post-close algo-order cleanup.
 - Phase 28 adds dynamic position sizing and bounded multi-position guards while
   keeping both disabled by default for live.
+- Phase 29 adds a confirmation-gated risk-profile switch mechanism for future
+  8x/dynamic profile changes.
 
 ### Active
 
@@ -153,6 +155,8 @@ control of downside.
   without a fresh confirmation token.
 - [x] Add dynamic position sizing and an explicit multi-position guard for a
   later approved risk-profile increase.
+- [x] Add a confirmation-gated risk-profile preview/apply tool so future live
+  profile changes do not require manual env editing.
 
 ### Out of Scope
 
@@ -218,7 +222,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 28 are complete and verified locally. The project is installable as an
+Phases 1 through 29 are complete and verified locally and on the server. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -249,6 +253,9 @@ dynamic sizing that can compute notional caps from capital, available balance,
 leverage, margin fraction, margin cap, stop distance, and exchange
 min-notional pressure; it also adds explicit multi-position guards. Both remain
 inactive in live until env settings are deliberately changed.
+Phase 29 adds a `30u_8x_dynamic` profile preview/apply tool that writes only
+approved non-secret risk keys, requires risk-change readiness and confirmation,
+and backs up the env file before any write.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -468,8 +475,24 @@ control.
   new controls.
 - Add multi-position guard with same-symbol same-direction duplicate rejection.
 
-**Status:** Complete locally. Server deployment should run tests only; live env
-must not be raised while HYPEUSDT is open.
+**Status:** Complete and deployed. Server tests passed, and live env remains
+5x/12U/one-position with dynamic sizing and multi-position disabled while
+HYPEUSDT is open.
+
+## Current Milestone: v1.21 Confirmation-Gated Risk Profile Switch
+
+**Goal:** Make future live profile changes auditable, previewable, and
+confirmation-gated.
+
+**Target features:**
+- Add `ops risk-profile-plan`.
+- Add `ops risk-profile-apply`.
+- Support a `30u_8x_dynamic` profile and optional two-position mode.
+- Require risk-change readiness plus confirmation token before writing env.
+- Back up the env and preserve credentials/provider/margin/position-mode keys.
+
+**Status:** Complete and deployed. Server plan and blocked-apply verification
+passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 
 ## Key Decisions
 
@@ -504,8 +527,9 @@ must not be raised while HYPEUSDT is open.
 | Plan time exits before execution | The system should show exact close-order parameters before any automated or operator-approved time exit is built. | Phase 26 complete |
 | Confirm before time-exit execution | Manual time exits should be possible, but only through a fresh confirmation token and post-close cleanup checks. | Phase 27 complete locally |
 | Size dynamically before increasing risk | Higher leverage should scale through explicit margin/risk formulas, not ad hoc env edits. | Phase 28 complete locally |
+| Profile switches need confirmation | Moving to 8x/dynamic sizing should be a token-confirmed env diff, not a manual edit. | Phase 29 complete and deployed |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.20 dynamic sizing locally.*
+*Last updated: 2026-06-20 after verifying v1.21 risk-profile switching on the server.*

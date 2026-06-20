@@ -30,7 +30,8 @@
 - ✅ **v1.17 Position Hold-Time Check** — Phase 25, completed 2026-06-20.
 - ✅ **v1.18 Time Exit Plan** — Phase 26, completed 2026-06-20.
 - ✅ **v1.19 Operator-Approved Time Exit Execution** — Phase 27, completed 2026-06-20.
-- 🚧 **v1.20 Dynamic Sizing And Multi-Position Guard** — Phase 28, in progress.
+- ✅ **v1.20 Dynamic Sizing And Multi-Position Guard** — Phase 28, completed 2026-06-20.
+- 🚧 **v1.21 Confirmation-Gated Risk Profile Switch** — Phase 29, in progress.
 
 ## Phases
 
@@ -514,6 +515,27 @@ position.
 5. Tests cover conservative 30U sizing, higher 8x sizing, min-notional pressure,
    and multi-position rejection/acceptance rules.
 
+### Phase 29: Confirmation-Gated Risk Profile Switch
+
+**Goal:** Make the future 8x/dynamic-sizing profile switch auditable and
+operator-confirmed instead of manual env editing.
+
+**Requirements:** RPS-01, RPS-02, RPS-03
+
+**Status:** Planned.
+
+**Success Criteria:**
+
+1. `ops risk-profile-plan` emits a redacted env diff for named profiles without
+   modifying files or exchange state.
+2. `ops risk-profile-apply` refuses to write env unless `ops risk-change-check`
+   allows the target leverage and an exact confirmation token is supplied.
+3. Applying a profile writes only approved non-secret BFA risk keys, preserves
+   credentials/provider/margin/position mode, and creates a timestamped env
+   backup.
+4. Unit and CLI tests cover blocked active-position state, confirmation-token
+   mismatch, env diff output, backup creation, and successful synthetic apply.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -545,18 +567,20 @@ position.
 | 25 | v1.17 | 1/1 | Complete | 2026-06-20 |
 | 26 | v1.18 | 1/1 | Complete | 2026-06-20 |
 | 27 | v1.19 | 1/1 | Complete | 2026-06-20 |
-| 28 | v1.20 | 0/1 | Planned | - |
+| 28 | v1.20 | 1/1 | Complete | 2026-06-20 |
+| 29 | v1.21 | 0/1 | Planned | - |
 
 ## Requirement Coverage
 
-- v1.1-v1.20 requirements: 68
-- Mapped: 68
+- v1.1-v1.21 requirements: 71
+- Mapped: 71
 - Unmapped: 0
 
 ## Next Step
 
-Implement Phase 28 dynamic sizing and multi-position guards locally first. Do
-not raise the live server's active risk profile while HYPEUSDT remains open.
-After HYPEUSDT closes, run `ops reconcile-outcomes --persist-closed`, then
-rerun `ops risk-change-check --target-leverage 8`; only if it returns
-`risk_change_allowed=true` should a later phase change the server profile.
+Implement Phase 29 risk-profile planning/apply tooling. Do not raise the live
+server's active risk profile while HYPEUSDT remains open. After HYPEUSDT
+closes, run `ops reconcile-outcomes --persist-closed`, then rerun
+`ops risk-change-check --target-leverage 8`; only if it returns
+`risk_change_allowed=true` should the confirmation-gated profile apply command
+be used.

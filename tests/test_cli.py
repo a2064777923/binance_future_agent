@@ -811,6 +811,97 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["current_max_leverage"], 5.0)
         self.assertIn("exchange_evidence_missing", payload["reasons"])
 
+    def test_ops_risk_profile_plan_outputs_8x_dynamic_diff(self):
+        code, stdout, stderr = self.invoke(
+            "ops",
+            "risk-profile-plan",
+            "--profile",
+            "30u_8x_dynamic",
+            env={
+                "BFA_MODE": "live",
+                "BFA_MAX_LEVERAGE": "5",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "12",
+                "BFA_MAX_OPEN_POSITIONS": "1",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            },
+        )
+
+        payload = json.loads(stdout)
+        changed = {item["key"]: item["target"] for item in payload["diff"] if item["changed"]}
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["target_leverage"], 8)
+        self.assertEqual(changed["BFA_MAX_LEVERAGE"], "8")
+        self.assertEqual(changed["BFA_DYNAMIC_POSITION_SIZING_ENABLED"], "true")
+        self.assertTrue(payload["confirmation_token"].startswith("RISK-PROFILE-30U_8X_DYNAMIC-"))
+
+    def test_ops_risk_profile_apply_blocks_active_position_without_writing_env(self):
+        class FakeSignedClient:
+            def account(self):
+                return {"availableBalance": "30", "totalWalletBalance": "30"}
+
+            def position_risk(self):
+                return [{"symbol": "HYPEUSDT", "positionAmt": "0.16", "positionSide": "LONG"}]
+
+            def open_orders(self):
+                return []
+
+            def open_algo_orders(self):
+                return [{"symbol": "HYPEUSDT", "positionSide": "LONG"}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+            env_path = root / "env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "BFA_MODE=live",
+                        "BFA_MAX_LEVERAGE=5",
+                        "BFA_MAX_POSITION_NOTIONAL_USDT=12",
+                        "BFA_RUNTIME_DIR=" + str(runtime),
+                        "BINANCE_API_KEY=synthetic-binance-key-abcdef",
+                        "BINANCE_API_SECRET=synthetic-binance-secret-abcdef",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            plan_code, plan_stdout, _ = self.invoke(
+                "ops",
+                "risk-profile-plan",
+                "--env-file",
+                str(env_path),
+            )
+            token = json.loads(plan_stdout)["confirmation_token"]
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "risk-profile-apply",
+                "--env-file",
+                str(env_path),
+                "--db",
+                str(db_path),
+                "--confirm-token",
+                token,
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+            text = env_path.read_text(encoding="utf-8")
+
+        payload = json.loads(stdout)
+        self.assertEqual(plan_code, 0)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertFalse(payload["applied"])
+        self.assertEqual(payload["status"], "apply_blocked")
+        self.assertIn("risk_change_not_allowed", payload["reasons"])
+        self.assertIn("active_position_present", payload["reasons"])
+        self.assertIn("BFA_MAX_LEVERAGE=5", text)
+        self.assertNotIn("BFA_MAX_LEVERAGE=8", text)
+
     def test_ops_trade_outcome_persists_latest_submitted_trade(self):
         class FakeSignedClient:
             def user_trades(self, symbol, *, start_time=None, limit=500):
