@@ -17,6 +17,18 @@
 
 - Focused local suites passed: position adjustment, position review, agent
   runner, CLI, and config.
+- Full local suite passed: 289 tests.
+- Server focused suite passed: 72 tests.
+- Server full suite passed: 289 tests.
+- Server secret-safe health check passed with Binance public and DeepSeek API
+  checks enabled.
+- Server read-only `ops position-adjustment-plan` preview returned
+  `adjustment_plan_empty` for a protected `SOLUSDT` LONG because the position
+  was still within its 15-minute hold window and review recommendation was
+  `hold`.
+- Post-deploy live cycle included `position_review` and
+  `position_adjustment_plan` summaries, then exited `entry_capacity_blocked`
+  with no submission under the unchanged one-position profile.
 
 ## Operational Result
 

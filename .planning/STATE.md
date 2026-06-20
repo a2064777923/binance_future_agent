@@ -281,10 +281,29 @@ confirmation-gated partial take-profit or full-close adjustment plans.
   before submitting any live adjustment order. The live runner now includes
   position-review and adjustment-plan summaries in every live cycle result.
 
+- Phase 32 server deployment is complete under
+  `/opt/binance-futures-agent/app`. The live timer was paused during deploy,
+  the package was reinstalled editable in `/opt/binance-futures-agent/.venv`,
+  server focused tests passed with 72 tests, full server suite passed with 289
+  tests, and the secret-safe health check passed with Binance public and
+  DeepSeek API checks enabled. The live timer was restored after verification.
+
+- Server read-only `ops position-adjustment-plan` preview currently reports
+  `adjustment_plan_empty`: a new `SOLUSDT` LONG `0.16` position is open,
+  protected by two algo orders, within its 15-minute hold window, and reviewed
+  as `hold` with small unrealized profit. No adjustment execution was run.
+
+- Post-deploy live cycle evidence: the scheduled run emitted
+  `position_review.status=review_ok`,
+  `position_review.positions[0].symbol=SOLUSDT`,
+  `recommendation=hold`, `position_adjustment_plan.status=adjustment_plan_empty`,
+  then exited `entry_capacity_blocked` with
+  `risk_reasons=["multi_position_disabled","max_open_positions_reached"]` and
+  `submitted=false`.
+
 ## Next Command
 
-Run full local tests for Phase 32, then deploy to the isolated server and run a
-read-only `ops position-adjustment-plan` preview. Do not execute adjustment
+Continue monitoring the deployed Phase 32 live cycle. Do not execute adjustment
 orders or apply `30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
@@ -297,14 +316,11 @@ orders or apply `30u_10x_multi_dynamic` without explicit confirmation.
 
 Phase: 32 — Active Position Adjustment Plan
 Plan: 32-01 local implementation
-Status: Local verification pending; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — active-position adjustment plan/execute added locally
+Status: Deployed and verified; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — active-position adjustment plan/execute deployed
 
 ## Operator Next Steps
 
-- Run full local tests and `git diff --check`.
-- Deploy Phase 32 to `/opt/binance-futures-agent/app` after local verification.
-- Run server focused/full tests and secret-safe health check.
-- Preview `ops position-adjustment-plan` on the server.
+- Monitor the active `SOLUSDT` position through `ops position-adjustment-plan`.
 - Do not run `ops position-adjustment-execute --confirm-token ...` unless the
   operator explicitly approves the fresh token.
