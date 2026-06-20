@@ -19,6 +19,7 @@ class ExecutionEngine:
     config: AppConfig
     signed_client: BinanceFuturesSignedClient | None = None
     store: EventStore | None = None
+    risk_limits: RiskLimits | None = None
 
     def run(
         self,
@@ -31,7 +32,7 @@ class ExecutionEngine:
         now: str | None = None,
     ) -> ExecutionResult:
         mode = RuntimeMode(self.config.get("BFA_MODE"))
-        risk_limits = RiskLimits.from_config(self.config)
+        risk_limits = self.risk_limits or RiskLimits.from_config(self.config)
         state = risk_state or RiskState()
         current_time = now or decided_at
         intent, intent_risk = intent_from_ai_decision(

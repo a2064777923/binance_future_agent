@@ -142,6 +142,75 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertIn("max_open_positions_reached", risk.reason_codes)
         self.assertIn("cooldown_active", risk.reason_codes)
 
+    def test_single_position_default_rejects_when_any_position_is_active(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("multi_position_disabled", risk.reason_codes)
+
+    def test_multi_position_enabled_allows_different_symbol_until_cap(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+        self.assertEqual(risk.reason_codes, ["risk_accepted"])
+
+    def test_multi_position_enabled_rejects_duplicate_symbol_direction(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
+
     def test_live_kill_switch_rejects(self):
         validation = self.validation()
         intent, _risk = intent_from_ai_decision(

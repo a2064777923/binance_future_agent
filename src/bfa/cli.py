@@ -25,6 +25,7 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
+from bfa.execution.sizing import compute_position_sizing, dynamic_sizing_enabled, sizing_input_from_config
 from bfa.execution.outcome import build_latest_trade_outcome, reconcile_submitted_trade_outcomes
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
@@ -37,6 +38,7 @@ from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
+from bfa.ops.time_exit_execute import build_time_exit_execute_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
 
@@ -350,6 +352,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="use only local event-store evidence instead of signed Binance reads",
     )
 
+    time_exit_execute = ops_subparsers.add_parser(
+        "time-exit-execute",
+        help="operator-approved execution of a ready time-exit plan",
+    )
+    time_exit_execute.add_argument("--env-file", help="optional env file to load before environment overrides")
+    time_exit_execute.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    time_exit_execute.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    time_exit_execute.add_argument(
+        "--confirm-token",
+        help="confirmation token from a prior dry confirmation-required response",
+    )
+    time_exit_execute.add_argument(
+        "--service-active",
+        action="store_true",
+        help="fail closed when the live systemd service is currently active",
+    )
+
     risk_change_check = ops_subparsers.add_parser(
         "risk-change-check",
         help="read-only gate for deciding whether leverage/risk caps may be changed",
@@ -593,13 +612,17 @@ def _run_strategy(
     config = load_config(env=env, env_file=args.env_file)
     if args.strategy_command == "candidates":
         replay_packet = json.loads(Path(args.replay).read_text(encoding="utf-8"))
+        sizing = compute_position_sizing(
+            sizing_input_from_config(config),
+            enabled=dynamic_sizing_enabled(config),
+        )
         result = generate_candidates(
             replay_packet,
             StrategyConfig(
                 allowed_symbols=market_symbols(config),
                 generated_at=args.generated_at,
                 top_n=args.top_n,
-                max_position_notional_usdt=float(config.get("BFA_MAX_POSITION_NOTIONAL_USDT")),
+                max_position_notional_usdt=sizing.max_position_notional_usdt,
             ),
         )
         persisted = 0
@@ -649,9 +672,13 @@ def _run_ai(
             return 1
 
         candidate = _candidate_payload_from_json(Path(args.candidate))
+        candidate_sizing = compute_position_sizing(
+            sizing_input_from_config(config, candidate=candidate),
+            enabled=dynamic_sizing_enabled(config),
+        )
         context = context_from_candidate(
             candidate,
-            risk_limits=RiskLimits.from_config(config),
+            risk_limits=RiskLimits.from_config(config, sizing_result=candidate_sizing),
             decided_at=args.decided_at,
         )
         client = _build_ai_client(config, ai_client_factory)
@@ -836,6 +863,17 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.exit_allowed else 1
+    if args.ops_command == "time-exit-execute":
+        report = build_time_exit_execute_report(
+            config,
+            db_path=args.db,
+            confirm_token=args.confirm_token,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+            service_active=args.service_active,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.exit_executed else 1
     if args.ops_command == "risk-change-check":
         report = build_risk_change_check_report(
             config,

@@ -9,6 +9,7 @@ from bfa.ai.schema import AiTradeDecision, DecisionValidationResult, RiskLimits
 from bfa.config import AppConfig, RuntimeMode
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import OrderIntent, RiskDecision, RiskState
+from bfa.execution.sizing import multi_position_enabled
 
 
 def intent_from_ai_decision(
@@ -108,8 +109,12 @@ def evaluate_risk(
         reasons.append("leverage_exceeds_cap")
     if risk_state.daily_loss_usdt >= risk_limits.max_daily_loss_usdt:
         reasons.append("daily_loss_cap_reached")
+    if not multi_position_enabled(config) and risk_state.active_positions >= 1:
+        reasons.append("multi_position_disabled")
     if risk_state.active_positions >= risk_limits.max_open_positions:
         reasons.append("max_open_positions_reached")
+    if _duplicate_exposure(intent, risk_state):
+        reasons.append("duplicate_symbol_direction_exposure")
     if risk_state.cooldown_until and now < risk_state.cooldown_until:
         reasons.append("cooldown_active")
 
@@ -140,6 +145,16 @@ def _order_side(decision: AiTradeDecision) -> str:
     if decision.side == "short":
         return "SELL"
     raise ValueError(f"unsupported trade side: {decision.side}")
+
+
+def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
+    intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+    for exposure in risk_state.active_exposures:
+        symbol = str(exposure.get("symbol", "")).upper()
+        direction = str(exposure.get("direction", "")).upper()
+        if symbol == intent.symbol.upper() and direction == intended_direction:
+            return True
+    return False
 
 
 def _dedupe(values: list[str]) -> list[str]:

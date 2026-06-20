@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from bfa.config import AppConfig
+from bfa.execution.sizing import PositionSizingResult, compute_position_sizing, dynamic_sizing_enabled, sizing_input_from_config
 
 
 DECISION_SCHEMA_FIELDS = (
@@ -29,19 +30,30 @@ class RiskLimits:
     max_risk_per_trade_usdt: float
     max_daily_loss_usdt: float
     max_open_positions: int
+    sizing: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_config(cls, config: AppConfig) -> "RiskLimits":
+    def from_config(
+        cls,
+        config: AppConfig,
+        *,
+        sizing_result: PositionSizingResult | None = None,
+    ) -> "RiskLimits":
+        sizing = sizing_result or compute_position_sizing(
+            sizing_input_from_config(config),
+            enabled=dynamic_sizing_enabled(config),
+        )
         return cls(
             account_capital_usdt=float(config.get("BFA_ACCOUNT_CAPITAL_USDT")),
             max_leverage=float(config.get("BFA_MAX_LEVERAGE")),
-            max_position_notional_usdt=float(config.get("BFA_MAX_POSITION_NOTIONAL_USDT")),
+            max_position_notional_usdt=sizing.max_position_notional_usdt,
             max_risk_per_trade_usdt=float(config.get("BFA_MAX_RISK_PER_TRADE_USDT")),
             max_daily_loss_usdt=float(config.get("BFA_MAX_DAILY_LOSS_USDT")),
             max_open_positions=int(config.get("BFA_MAX_OPEN_POSITIONS")),
+            sizing=sizing.to_dict(),
         )
 
-    def to_dict(self) -> dict[str, float | int]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "account_capital_usdt": self.account_capital_usdt,
             "max_leverage": self.max_leverage,
@@ -50,6 +62,7 @@ class RiskLimits:
             "max_risk_per_trade_usdt": self.max_risk_per_trade_usdt,
             "max_daily_loss_usdt": self.max_daily_loss_usdt,
             "max_open_positions": self.max_open_positions,
+            "sizing": dict(self.sizing),
         }
 
 

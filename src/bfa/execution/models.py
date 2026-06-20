@@ -52,6 +52,7 @@ class OrderIntent:
 @dataclass(frozen=True)
 class RiskState:
     active_positions: int = 0
+    active_exposures: list[dict[str, Any]] = field(default_factory=list)
     daily_realized_pnl_usdt: float = 0.0
     cooldown_until: str | None = None
 
@@ -62,6 +63,7 @@ class RiskState:
     def to_dict(self) -> dict[str, Any]:
         return {
             "active_positions": self.active_positions,
+            "active_exposures": [dict(item) for item in self.active_exposures],
             "daily_realized_pnl_usdt": self.daily_realized_pnl_usdt,
             "daily_loss_usdt": self.daily_loss_usdt,
             "cooldown_until": self.cooldown_until,

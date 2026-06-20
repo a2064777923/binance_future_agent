@@ -21,6 +21,7 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
+from bfa.execution.sizing import compute_position_sizing, dynamic_sizing_enabled, sizing_input_from_config
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.narrative.collector import NarrativeCollectionRunner
@@ -151,13 +152,17 @@ def run_agent_once(
                 *_narrative_records(narrative_event_ids, narrative_records),
             ],
         }
+        base_sizing = compute_position_sizing(
+            sizing_input_from_config(config),
+            enabled=dynamic_sizing_enabled(config),
+        )
         candidates = generate_candidates(
             replay_packet,
             StrategyConfig(
                 allowed_symbols=market_symbols(config),
                 generated_at=started_at,
                 top_n=top_n,
-                max_position_notional_usdt=float(config.get("BFA_MAX_POSITION_NOTIONAL_USDT")),
+                max_position_notional_usdt=base_sizing.max_position_notional_usdt,
             ),
         )
         persisted_candidate_count = len(persist_candidates(store, candidates.candidates))
@@ -174,12 +179,16 @@ def run_agent_once(
             )
 
         candidate = candidates.candidates[0]
+        candidate_sizing = compute_position_sizing(
+            sizing_input_from_config(config, candidate=candidate.to_dict()),
+            enabled=dynamic_sizing_enabled(config),
+        )
         try:
             ai_run = run_ai_decision(
                 client=ai_client,
                 context=context_from_candidate(
                     candidate,
-                    risk_limits=RiskLimits.from_config(config),
+                    risk_limits=RiskLimits.from_config(config, sizing_result=candidate_sizing),
                     decided_at=started_at,
                 ),
                 journal=AiDecisionJournal(journal_path) if journal_path else None,
@@ -239,6 +248,7 @@ def run_agent_once(
             config=config,
             signed_client=signed_client,
             store=store,
+            risk_limits=RiskLimits.from_config(config, sizing_result=candidate_sizing),
         ).run(
             symbol=candidate.symbol,
             validation=ai_run.validation,
@@ -319,6 +329,7 @@ def _risk_state_from_exchange(signed_client) -> RiskState | None:
     except Exception:
         return None
     active_positions = 0
+    active_exposures: list[dict[str, str]] = []
     for position in positions:
         try:
             amount = abs(float(position.get("positionAmt", 0)))
@@ -326,7 +337,25 @@ def _risk_state_from_exchange(signed_client) -> RiskState | None:
             amount = 0.0
         if amount > 0:
             active_positions += 1
-    return RiskState(active_positions=active_positions)
+            direction = _position_direction(position)
+            active_exposures.append(
+                {
+                    "symbol": str(position.get("symbol", "")).upper(),
+                    "direction": direction,
+                }
+            )
+    return RiskState(active_positions=active_positions, active_exposures=active_exposures)
+
+
+def _position_direction(position: dict[str, Any]) -> str:
+    side = str(position.get("positionSide") or "").upper()
+    if side in {"LONG", "SHORT"}:
+        return side
+    try:
+        amount = float(position.get("positionAmt", 0))
+    except (TypeError, ValueError):
+        amount = 0.0
+    return "LONG" if amount > 0 else "SHORT"
 
 
 def _market_records(event_ids, snapshots) -> list[dict[str, Any]]:

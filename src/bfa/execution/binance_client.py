@@ -174,6 +174,13 @@ class BinanceFuturesSignedClient:
             params["origClientOrderId"] = orig_client_order_id
         return self._signed_request("DELETE", "/fapi/v1/order", params)
 
+    def cancel_all_open_algo_orders(self, symbol: str) -> dict[str, Any]:
+        return self._signed_request(
+            "DELETE",
+            "/fapi/v1/algoOpenOrders",
+            {"symbol": _symbol(symbol)},
+        )
+
     def test_order(
         self,
         *,

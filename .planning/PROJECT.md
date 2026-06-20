@@ -101,6 +101,10 @@ control of downside.
 - Phase 25 adds a read-only active-position hold-time check.
 - Phase 26 adds a read-only time-exit order plan for overdue protected
   positions.
+- Phase 27 adds confirmation-gated operator time-exit execution with
+  post-close algo-order cleanup.
+- Phase 28 adds dynamic position sizing and bounded multi-position guards while
+  keeping both disabled by default for live.
 
 ### Active
 
@@ -145,6 +149,10 @@ control of downside.
   suggested hold window without modifying exchange state.
 - [x] Produce a read-only close-order plan for overdue protected positions
   without placing orders.
+- [x] Add an operator-approved time-exit execution command that refuses to run
+  without a fresh confirmation token.
+- [x] Add dynamic position sizing and an explicit multi-position guard for a
+  later approved risk-profile increase.
 
 ### Out of Scope
 
@@ -210,7 +218,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 26 are complete and verified. The project is installable as an
+Phases 1 through 28 are complete and verified locally. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -232,7 +240,15 @@ outcomes persisted without symbol-by-symbol manual commands. Phase 25 adds
 `ops position-hold-check` so active positions past their AI hold window are
 visible before any future time-exit automation is considered. Phase 26 adds
 `ops time-exit-plan` so the exact close-order shape can be inspected before any
-operator-approved execution phase.
+operator-approved execution phase. Phase 27 adds `ops time-exit-execute`, which
+re-runs signed live evidence and the time-exit plan, requires the exact
+plan-derived confirmation token, blocks while the live service is active,
+submits the planned close only after confirmation, and cancels symbol algo
+orders only after a post-close position check reports zero size. Phase 28 adds
+dynamic sizing that can compute notional caps from capital, available balance,
+leverage, margin fraction, margin cap, stop distance, and exchange
+min-notional pressure; it also adds explicit multi-position guards. Both remain
+inactive in live until env settings are deliberately changed.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -256,7 +272,8 @@ BNBUSDT as protected by two algo orders but past its 60-minute AI hold window,
 with `status=review_required`.
 Phase 26 server verification produced an `exit_plan_ready` read-only close plan:
 `SELL MARKET 0.01` with `positionSide=LONG` and no `reduceOnly` flag because
-the account uses hedge mode.
+the account uses hedge mode. Phase 27 adds the manual execution path, but no
+confirmed live close has been approved or submitted.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -419,6 +436,41 @@ execution-capable time-exit work.
 
 **Status:** Complete. Server plan for BNBUSDT is ready and remains read-only.
 
+## Current Milestone: v1.19 Operator-Approved Time Exit Execution
+
+**Goal:** Make manual time exits executable only through an auditable
+confirmation gate.
+
+**Target features:**
+- Add `ops time-exit-execute`.
+- Re-run live signed evidence and the Phase 26 plan before execution.
+- Emit a confirmation token and place no order without it.
+- Close using the planned market order only when the token matches.
+- Cancel remaining symbol algo orders only after the position is confirmed
+  flat.
+- Persist time-exit execution evidence.
+
+**Status:** Complete locally. Server deployment must verify only non-trading
+behavior unless the operator explicitly approves closing the current BNBUSDT
+position.
+
+## Current Milestone: v1.20 Dynamic Sizing And Multi-Position Guard
+
+**Goal:** Let a later approved profile use larger, account-aware position sizes
+and optionally more than one open position without losing deterministic risk
+control.
+
+**Target features:**
+- Add dynamic position sizing config and calculations.
+- Feed computed notional caps into candidate filtering, AI context, and final
+  execution risk.
+- Keep fixed 12U/one-position behavior unless live env explicitly enables the
+  new controls.
+- Add multi-position guard with same-symbol same-direction duplicate rejection.
+
+**Status:** Complete locally. Server deployment should run tests only; live env
+must not be raised while HYPEUSDT is open.
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
@@ -450,8 +502,10 @@ execution-capable time-exit work.
 | Sweep submitted outcomes before risk changes | Operators should not need symbol-specific one-off commands to clear closed outcome evidence after positions exit. | Phase 24 complete |
 | Check active position hold time | Positions that exceed AI hold guidance should be visible before adding any automated time-exit behavior. | Phase 25 complete |
 | Plan time exits before execution | The system should show exact close-order parameters before any automated or operator-approved time exit is built. | Phase 26 complete |
+| Confirm before time-exit execution | Manual time exits should be possible, but only through a fresh confirmation token and post-close cleanup checks. | Phase 27 complete locally |
+| Size dynamically before increasing risk | Higher leverage should scale through explicit margin/risk formulas, not ad hoc env edits. | Phase 28 complete locally |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.18 time exit plan.*
+*Last updated: 2026-06-20 after verifying v1.20 dynamic sizing locally.*

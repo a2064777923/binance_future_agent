@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.18
-milestone_name: Time Exit Plan
-current_phase: Phase 26 - Time Exit Plan
+milestone: v1.20
+milestone_name: Dynamic Sizing And Multi-Position Guard
+current_phase: Phase 28 - Dynamic Sizing And Multi-Position Guard
 status: completed
-stopped_at: Phase 26 verified; BNBUSDT time-exit plan is ready but not executed
-last_updated: "2026-06-20T13:02:00.000+08:00"
+stopped_at: Phase 28 verified locally; server deployment pending non-trading tests
+last_updated: "2026-06-20T13:55:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Time-exit plan deployed and verified against live server state
+last_activity_desc: Dynamic sizing and multi-position guards implemented locally
 progress:
-  total_phases: 18
-  completed_phases: 18
-  total_plans: 18
-  completed_plans: 18
+  total_phases: 20
+  completed_phases: 20
+  total_plans: 20
+  completed_plans: 20
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 26 - Time Exit Plan
-**Status:** v1.18 complete; read-only time-exit planning is available and verified
+**Current phase:** Phase 28 - Dynamic Sizing And Multi-Position Guard
+**Status:** v1.20 complete locally; server non-trading verification pending
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -95,13 +95,23 @@ projects or losing control of downside.
 - `ops time-exit-plan` is deployed and verified on the server. It reports
   `exit_plan_ready` for BNBUSDT with planned close `SELL MARKET 0.01`,
   `positionSide=LONG`, and `reduceOnly=false`. It does not place the order.
+- `ops time-exit-execute` is implemented locally. It re-runs signed live
+  evidence and time-exit planning, refuses to execute without the exact
+  plan-derived confirmation token, refuses when the live service is active,
+  submits the close order only after confirmation, and cancels symbol algo
+  orders only after a post-close position check reports zero size. No live
+  close has been approved or submitted.
+- Dynamic sizing is implemented locally and defaults off. It can compute a
+  per-trade notional cap from capital, available balance, leverage, margin
+  caps, stop-distance risk, and exchange min-notional pressure. Multi-position
+  remains disabled by default and, when enabled, rejects same-symbol
+  same-direction duplicate exposure.
 
 ## Next Command
 
-BNBUSDT is protected but past its AI hold window, and the read-only time-exit
-plan is ready. Continue observing or plan an operator-approved time-exit
-execution phase. After BNBUSDT closes, run
-`ops reconcile-outcomes --persist-closed`, then rerun
+Deploy Phase 28 code to the server and verify only non-trading behavior. Do not
+change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes,
+run `ops reconcile-outcomes --persist-closed`, then rerun
 `ops risk-change-check --target-leverage 8` before changing the live profile.
 
 ## Session
@@ -112,12 +122,12 @@ execution phase. After BNBUSDT closes, run
 
 ## Current Position
 
-Phase: Phase 26 - Time Exit Plan
-Plan: 26-01 complete
-Status: time-exit plan is deployed and verified; BNBUSDT remains protected,
-past its AI hold window, and continues to block risk changes until closed and
+Phase: Phase 28 - Dynamic Sizing And Multi-Position Guard
+Plan: 28-01 complete locally
+Status: dynamic sizing and multi-position guards are implemented; HYPEUSDT
+remains open and continues to block live risk-profile changes until closed and
 reconciled
-Last activity: 2026-06-20 - Phase 26 verified
+Last activity: 2026-06-20 - Phase 28 local verification passed
 
 ## Operator Next Steps
 
@@ -125,6 +135,9 @@ Last activity: 2026-06-20 - Phase 26 verified
 - Use `ops position-hold-check` to monitor whether the current active position
   remains past its AI hold window.
 - Use `ops time-exit-plan` to inspect the read-only close-order plan.
+- Use `ops time-exit-execute` without `--confirm-token` to fetch the current
+  confirmation token only; do not provide the token unless explicitly approving
+  a live close.
 - Run `ops reconcile-outcomes --persist-closed` after BNBUSDT closes.
 - Rerun `ops risk-change-check --target-leverage 8` before any leverage change.
 - Do not raise leverage/risk caps while a live position is open unless

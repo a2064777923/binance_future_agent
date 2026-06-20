@@ -29,6 +29,8 @@
 - ✅ **v1.16 Outcome Reconciliation Sweep** — Phase 24, completed 2026-06-20.
 - ✅ **v1.17 Position Hold-Time Check** — Phase 25, completed 2026-06-20.
 - ✅ **v1.18 Time Exit Plan** — Phase 26, completed 2026-06-20.
+- ✅ **v1.19 Operator-Approved Time Exit Execution** — Phase 27, completed 2026-06-20.
+- 🚧 **v1.20 Dynamic Sizing And Multi-Position Guard** — Phase 28, in progress.
 
 ## Phases
 
@@ -464,6 +466,54 @@ plan for the overdue protected BNBUSDT LONG without placing an order.
 5. The command remains read-only and does not touch exchange state or server
    timers.
 
+### Phase 27: Operator-Approved Time Exit Execution
+
+**Goal:** Add an execution-capable operator command for ready time-exit plans
+without making time exits automatic.
+
+**Requirements:** TEX-01, TEX-02, TEX-03, TEX-04
+
+**Status:** Complete. The command defaults to confirmation-required and was
+verified without placing live orders.
+
+**Success Criteria:**
+
+1. `ops time-exit-execute` re-runs signed live exchange checks and the Phase 26
+   plan before any execution attempt.
+2. The command fails closed unless the operator supplies the exact plan-derived
+   confirmation token.
+3. With a matching token, the command submits the planned close market order and
+   then cancels remaining open algo orders for the same symbol.
+4. The command refuses to run when the live service is active.
+5. Exchange responses, cleanup results, errors, and plan evidence are persisted
+   as a `time_exit` exchange response.
+6. Unit, CLI, and full-suite tests cover confirmation gating and execution
+   evidence without placing live orders during verification.
+
+### Phase 28: Dynamic Sizing And Multi-Position Guard
+
+**Goal:** Replace fixed small notional caps with configurable dynamic sizing and
+prepare an explicit, bounded path for allowing more than one simultaneous
+position.
+
+**Requirements:** DSZ-01, DSZ-02, DSZ-03, DSZ-04
+
+**Status:** Planned.
+
+**Success Criteria:**
+
+1. Runtime config can enable dynamic position sizing without changing API
+   credentials or live mode.
+2. Dynamic sizing computes a per-trade notional cap from account capital,
+   available balance, max leverage, max margin fraction, max risk per trade,
+   stop distance, and exchange minimum executable notional.
+3. Existing fixed `BFA_MAX_POSITION_NOTIONAL_USDT` remains the default fallback.
+4. Multi-position support remains disabled by default, and when enabled it is
+   capped by max open positions plus a per-symbol/per-direction uniqueness
+   guard.
+5. Tests cover conservative 30U sizing, higher 8x sizing, min-notional pressure,
+   and multi-position rejection/acceptance rules.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -494,18 +544,19 @@ plan for the overdue protected BNBUSDT LONG without placing an order.
 | 24 | v1.16 | 1/1 | Complete | 2026-06-20 |
 | 25 | v1.17 | 1/1 | Complete | 2026-06-20 |
 | 26 | v1.18 | 1/1 | Complete | 2026-06-20 |
+| 27 | v1.19 | 1/1 | Complete | 2026-06-20 |
+| 28 | v1.20 | 0/1 | Planned | - |
 
 ## Requirement Coverage
 
-- v1.1-v1.18 requirements: 60
-- Mapped: 60
+- v1.1-v1.20 requirements: 68
+- Mapped: 68
 - Unmapped: 0
 
 ## Next Step
 
-The current BNBUSDT position is protected but has exceeded its AI hold window.
-`ops time-exit-plan` now shows the read-only close-order plan. Continue
-observing or explicitly plan an operator-approved time-exit execution phase.
-After it closes, run `ops reconcile-outcomes --persist-closed`, then rerun
-`ops risk-change-check --target-leverage 8`; only if it returns
+Implement Phase 28 dynamic sizing and multi-position guards locally first. Do
+not raise the live server's active risk profile while HYPEUSDT remains open.
+After HYPEUSDT closes, run `ops reconcile-outcomes --persist-closed`, then
+rerun `ops risk-change-check --target-leverage 8`; only if it returns
 `risk_change_allowed=true` should a later phase change the server profile.

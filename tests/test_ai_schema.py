@@ -1,6 +1,8 @@
 import unittest
 
 from bfa.ai.schema import RiskLimits, context_from_candidate, decision_json_schema
+from bfa.config import load_config
+from bfa.execution.sizing import compute_position_sizing, sizing_input_from_config
 
 
 class AiSchemaTests(unittest.TestCase):
@@ -62,6 +64,32 @@ class AiSchemaTests(unittest.TestCase):
         self.assertAlmostEqual(payload["risk_limits"]["max_position_margin_usdt"], 20 / 3)
         self.assertNotIn("OPENAI_API_KEY", payload["candidate"])
         self.assertNotIn("ignored_extra", payload["candidate"]["features"])
+
+    def test_context_can_include_dynamic_sizing_limits(self):
+        config = load_config(
+            {
+                "BFA_DYNAMIC_POSITION_SIZING_ENABLED": "true",
+                "BFA_ACCOUNT_CAPITAL_USDT": "30",
+                "BFA_MAX_LEVERAGE": "8",
+                "BFA_MAX_MARGIN_PER_POSITION_USDT": "3",
+                "BFA_MAX_MARGIN_FRACTION": "0.08",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "30",
+            }
+        )
+        sizing = compute_position_sizing(
+            sizing_input_from_config(config, available_balance_usdt=30),
+            enabled=True,
+        )
+
+        context = context_from_candidate(
+            {"symbol": "HYPEUSDT", "features": {"reference_price": 70.0}},
+            risk_limits=RiskLimits.from_config(config, sizing_result=sizing),
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        payload = context.to_dict()
+        self.assertAlmostEqual(payload["risk_limits"]["max_position_notional_usdt"], 19.2)
+        self.assertTrue(payload["risk_limits"]["sizing"]["enabled"])
 
 
 if __name__ == "__main__":
