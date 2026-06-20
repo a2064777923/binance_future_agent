@@ -260,6 +260,18 @@ projects or losing control of downside.
   per-cycle candidate evaluation, setup gates, AI overlay or quant fallback,
   risk caps, and one-order-per-cycle behavior remain in force.
 
+### Live Auto-Hot Dry-Run Evidence
+
+- [x] **LAD-01**: Operators can collect one-shot server evidence for live
+  auto-hot scanning with `BFA_MODE=dry_run` and without enabling unattended live
+  automation.
+
+- [x] **LAD-02**: The evidence records the selected `scan_symbols`,
+  candidate/evaluated symbol counts, and whether the run remained non-live.
+
+- [x] **LAD-03**: The evidence confirms server env remains
+  `BFA_LIVE_AUTO_HOT_SYMBOLS=false` after the one-shot dry-run command.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -335,10 +347,13 @@ projects or losing control of downside.
 | LAC-02 | Phase 45 | Complete locally |
 | LAC-03 | Phase 45 | Complete locally |
 | LAC-04 | Phase 45 | Complete locally |
+| LAD-01 | Phase 46 | Complete and deployed |
+| LAD-02 | Phase 46 | Complete and deployed |
+| LAD-03 | Phase 46 | Complete and deployed |
 
 **Coverage:**
-- v1.22 requirements: 63 total
-- Mapped to phases: 63
+- v1.22 requirements: 66 total
+- Mapped to phases: 66
 - Unmapped: 0
 
 ---

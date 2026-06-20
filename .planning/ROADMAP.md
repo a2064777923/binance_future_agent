@@ -500,14 +500,18 @@ server env.
 
 1. Config exposes live auto-hot symbol selection and keeps it disabled by
    default.
+
 2. The live runner can derive a hot-symbol scanning universe from Binance 24h
    ticker data and fall back to `BFA_MARKET_SYMBOLS` when auto-hot selection is
    off or empty.
+
 3. The same selected universe drives market collection, narrative known
    symbols, market-heat fallback, replay packet symbols, and candidate
    allowlisting.
+
 4. Per-cycle `--top-n`, deterministic setup, AI overlay/quant fallback, risk
    caps, and one-order-per-cycle behavior remain unchanged.
+
 5. Focused and full local tests pass; deployment docs/env examples include the
    new variables without enabling them in live server env.
 
@@ -517,7 +521,7 @@ server env.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-45 | 16/16 | Phase 45 complete and deployed; live auto-hot disabled | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-46 | 17/17 | Phase 46 complete; live auto-hot remains disabled | Pending |
 
 ## Requirement Coverage
 
@@ -548,3 +552,25 @@ should improve selection/calibration beyond a static side/symbol guard,
 including live auto-hot candidate breadth under strict risk gates. Do not
 execute adjustment orders, restore the live timer, or apply
 `30u_10x_multi_dynamic` without an explicit confirmation token.
+
+### Phase 46: Live Auto-Hot Dry-Run Evidence
+
+**Goal:** Prove the newly deployed live auto-hot scanning capability in a
+one-shot dry-run/manual server command without enabling unattended live
+automation.
+
+**Requirements:** LAD-01, LAD-02, LAD-03
+**Depends on:** Phase 45
+**Status:** Complete; one-shot dry-run evidence collected.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. A one-shot server command runs with `BFA_MODE=dry_run` and
+   `BFA_LIVE_AUTO_HOT_SYMBOLS=true`.
+2. The command output records `scan_symbols`, `candidate_count`,
+   `evaluated_symbols`, `submitted=false`, and dry-run mode.
+3. Server `/etc/binance-futures-agent/env` remains live-auto-hot disabled after
+   the command.
+4. Paper timer remains active and live service/timer remain inactive.

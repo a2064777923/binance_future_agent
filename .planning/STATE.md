@@ -2,28 +2,27 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 45
+current_phase: 46
 status: active
-stopped_at: Phase 45 complete and deployed; live auto-hot disabled in server env
-last_updated: "2026-06-20T23:59:00+08:00"
+stopped_at: Phase 46 complete; live auto-hot dry-run evidence collected
+last_updated: "2026-06-21T00:00:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Deployed live auto-hot candidate breadth with server env disabled
+last_activity_desc: Collected one-shot dry-run evidence for live auto-hot scanning
 progress:
-  total_phases: 41
+  total_phases: 42
   completed_phases: 40
-  total_plans: 62
-  completed_plans: 62
+  total_plans: 63
+  completed_plans: 63
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 45 — Live Auto-Hot Candidate Breadth
-**Status:** Phase 45 complete and deployed; paper-only timer active; live
-auto-hot disabled in server env; live service/timer remain inactive while
-default all-interval strategy promotion and latest paper performance evidence
-fail
+**Current phase:** Phase 46 — Live Auto-Hot Dry-Run Evidence
+**Status:** Phase 46 complete; paper-only timer active; live auto-hot disabled
+in server env; live service/timer remain inactive while default all-interval
+strategy promotion and latest paper performance evidence fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -545,9 +544,9 @@ gated by all-interval strategy evidence.
 
 ## Next Command
 
-Continue collecting forward-paper evidence. If wider live candidate scanning is
-tested later, first run a controlled dry-run/manual cycle with
-`BFA_LIVE_AUTO_HOT_SYMBOLS=true`; do not enable it in the unattended server env,
+Continue forward-paper evidence collection and strategy calibration. Live
+auto-hot has now been proven as a one-shot dry-run scanner, but it remains
+disabled in unattended server env. Do not enable unattended live auto-hot,
 restore live automation, execute adjustment orders, or apply
 `30u_10x_multi_dynamic` while the default all-interval promotion gate returns
 `keep_live_paused` and paper performance is negative.
@@ -555,17 +554,16 @@ restore live automation, execute adjustment orders, or apply
 ## Session
 
 **Last session:** 2026-06-20T23:23:00+08:00
-**Stopped at:** Phase 45 complete and deployed; live auto-hot disabled in server
-env.
-**Resume file:** .planning/phases/45-live-auto-hot-candidate-breadth/45-01-PLAN.md
+**Stopped at:** Phase 46 complete; live auto-hot dry-run evidence collected.
+**Resume file:** .planning/phases/46-live-auto-hot-dry-run-evidence/46-01-PLAN.md
 
 ## Current Position
 
-Phase: 45 — Live Auto-Hot Candidate Breadth
-Plan: 45-01 implementation
-Status: Complete and deployed; server env keeps live auto-hot disabled
-Last activity: 2026-06-20 — server focused/full tests and health-check passed,
-paper timer restored, live service/timer inactive
+Phase: 46 — Live Auto-Hot Dry-Run Evidence
+Plan: 46-01 evidence run
+Status: Complete; live auto-hot remains disabled in server env
+Last activity: 2026-06-20 — one-shot dry-run selected 12 scan symbols, kept
+candidate evaluation bounded, and submitted no order
 
 ## Operator Next Steps
 
