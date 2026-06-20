@@ -25,11 +25,24 @@
 - Secret scan over changed files and docs found no real API key or password
   values.
 
-## Deployment Status
+## Deployment Evidence
 
-Deployment verification is still pending. Phase 18 should remain in progress
-until the server env is switched to DeepSeek, server tests and health checks
-pass, and one live service/timer cycle is observed.
+- Deployed committed HEAD to `/opt/binance-futures-agent` and kept env under
+  `/etc/binance-futures-agent/env`.
+- Updated only selected AI provider values to DeepSeek; pilot caps stayed at
+  100 USDT capital, 20 USDT max notional, 3x leverage, 1 USDT max trade risk,
+  and 3 USDT max daily loss.
+- Server focused tests passed 76 tests.
+- Server health check with `--skip-network` passed in live mode with redacted
+  secrets.
+- Server AI network health check passed with detail `deepseek AI API reachable`.
+- Manual live service cycle after clearing stale backoff exited 0; DeepSeek
+  returned a validated pass decision and no order was submitted.
+- Live status showed `submitted_order_intents=0`,
+  `openai_backoff.active=false`, and `lva05_complete=false`.
+- Re-enabled `binance-futures-agent-live.timer`; timer is active and a
+  timer-start cycle also exited 0 with a validated DeepSeek pass decision and
+  `submitted=false`.
 
 ## Follow-Up
 

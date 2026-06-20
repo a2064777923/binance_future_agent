@@ -19,7 +19,7 @@
 - ✅ **v1.7 Configurable Margin Mode** — Phase 15, completed 2026-06-20.
 - ✅ **v1.8 Position Mode Entry Fail-Closed** — Phase 16, completed 2026-06-20.
 - ✅ **v1.9 Balance Preflight Gate** — Phase 17, completed 2026-06-20.
-- ◆ **v1.10 DeepSeek Provider Switch** — Phase 18, local implementation complete; deployment verification pending.
+- ✅ **v1.10 DeepSeek Provider Switch** — Phase 18, completed 2026-06-20.
 
 ## Phases
 
@@ -111,7 +111,7 @@ outputs fail closed.
 
 **Requirements:** AIR-01, AIR-02, AIR-03, AIR-04
 
-**Status:** Deployment verification pending.
+**Status:** Complete.
 
 **Success Criteria:**
 
@@ -286,7 +286,7 @@ and all live risk caps.
 | 15 | v1.7 | 1/1 | Complete | 2026-06-20 |
 | 16 | v1.8 | 1/1 | Complete | 2026-06-20 |
 | 17 | v1.9 | 1/1 | Complete | 2026-06-20 |
-| 18 | v1.10 | 1/1 | Deployment verification pending | - |
+| 18 | v1.10 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
@@ -296,7 +296,7 @@ and all live risk caps.
 
 ## Next Step
 
-Deploy the DeepSeek provider switch, update only the selected AI provider values
-in `/etc/binance-futures-agent/env`, then run server tests, health checks, and
-one live service/timer cycle. Keep 100 USDT pilot caps unchanged. Funding the
-USD-M futures account is still required before the bot can submit a real entry.
+DeepSeek provider switch is deployed and the live timer is active. Keep 100
+USDT pilot caps unchanged. Funding the USD-M futures account is still required
+before the bot can submit a real entry; after the first submitted live entry,
+verify protective-order evidence with `ops live-status`.

@@ -3,24 +3,24 @@ gsd_state_version: 1.0
 milestone: v1.10
 milestone_name: DeepSeek Provider Switch
 current_phase: Phase 18 - DeepSeek Provider Switch
-status: in_progress
-stopped_at: Phase 18 local implementation complete; deployment verification pending
-last_updated: "2026-06-20T10:45:00.000+08:00"
+status: completed
+stopped_at: Phase 18 deployed; DeepSeek live cycles passed with no submission
+last_updated: "2026-06-20T10:44:30.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Phase 18 DeepSeek provider switch implemented locally
+last_activity_desc: Phase 18 DeepSeek provider switch deployed and verified
 progress:
   total_phases: 10
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 10
   completed_plans: 10
-  percent: 90
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 18 - DeepSeek Provider Switch
-**Status:** v1.10 implementation complete locally; deployment verification pending
+**Status:** v1.10 complete and deployed; live timer active under pilot caps
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -94,10 +94,11 @@ projects or losing control of downside.
 
 ## Next Command
 
-Deploy Phase 18 to the server, update `/etc/binance-futures-agent/env` to
-`BFA_AI_PROVIDER=deepseek` with the DeepSeek key, then run server health checks
-and one timer cycle. Funding the USD-M futures account is still required before
-expecting a real entry submission.
+Fund or transfer USDT into the Binance USD-M futures account before expecting a
+real entry submission. With the current unfunded account, live order intents are
+expected to reject or pass without submission; after the first submitted live
+entry, verify protective stop-loss and take-profit evidence with
+`ops live-status`.
 
 ## Session
 
@@ -109,8 +110,8 @@ expecting a real entry submission.
 
 Phase: Phase 18 - DeepSeek Provider Switch
 Plan: 18-01 complete locally
-Status: DeepSeek provider support implemented locally; server deployment pending
-Last activity: 2026-06-20 — Phase 18 implementation complete locally
+Status: DeepSeek provider support deployed; health checks passed; live timer active; latest cycles returned validated DeepSeek pass decisions and no submission
+Last activity: 2026-06-20 — Phase 18 deployed and verified
 
 ## Operator Next Steps
 

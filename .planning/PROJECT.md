@@ -181,8 +181,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 17 are complete and verified. Phase 18 is implemented locally
-and awaiting server deployment verification. The project is installable as an
+Phases 1 through 18 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -202,8 +201,10 @@ deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
 and AI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
-pass/no submission. Phase 18 switches live AI selection to DeepSeek because the
-previous OpenAI-compatible endpoint was intermittent and returned invalid JSON.
+pass/no submission. Phase 18 switched live AI selection to DeepSeek because the
+previous OpenAI-compatible endpoint was intermittent and returned invalid JSON;
+post-deploy health checks and live timer cycles now reach DeepSeek and return
+validated pass decisions with no submission.
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under the 20 USDT max-position-notional pilot setting, while
 SOLUSDT can currently fit. Candidate generation now rejects cap-incompatible
@@ -279,9 +280,9 @@ validation and all pilot risk caps.
 | Make margin mode explicit | The live account is Multi-Assets/cross; using cross must be deliberate, validated, and still capped. | Phase 15 complete |
 | Make position mode explicit | The live account can require hedge `positionSide`; using it must be deliberate, validated, and still capped. | Phase 16 complete |
 | Add balance preflight before live orders | The live account can be unfunded even when order geometry is valid; avoid repeated exchange-side insufficient-margin errors. | Phase 17 complete |
-| Add DeepSeek provider support | The previous OpenAI-compatible endpoint was intermittent and returned invalid JSON; DeepSeek can use Chat Completions JSON mode behind the same validation gates. | Phase 18 local implementation complete; deployment pending |
+| Add DeepSeek provider support | The previous OpenAI-compatible endpoint was intermittent and returned invalid JSON; DeepSeek can use Chat Completions JSON mode behind the same validation gates. | Phase 18 complete and deployed |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 after implementing v1.10 DeepSeek provider switch locally; deployment verification pending.*
+*Last updated: 2026-06-20 after completing and deploying v1.10 DeepSeek provider switch.*
