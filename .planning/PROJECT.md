@@ -162,6 +162,10 @@ control of downside.
   max position notional, 360 USDT portfolio notional, and 300 USDT
   same-direction notional while keeping 0.4 USDT per-trade risk and 1 USDT
   daily loss.
+- v1.26 starts from live evidence where `NEARUSDT` is agent-managed and in
+  `close_review` due to expired hold time, `BTWUSDT` is manual and must remain
+  unmanaged, and the live pilot has entry capacity under the widened caps. The
+  focus is now position lifecycle management before further risk scaling.
 
 ### Active
 
@@ -246,6 +250,16 @@ control of downside.
 - [x] Keep Lana/public hot-coin claims as design inspiration only; all promotion
   and sizing decisions must come from local backtest, paper, exchange, and live
   outcome evidence.
+- [ ] Explain why each agent-managed `close_review` position is or is not
+  eligible for a filter-aware close/reduce plan.
+- [ ] Add guarded close/reduce execution for agent-managed positions while
+  preserving manual-symbol exclusions.
+- [ ] Make each live cycle record active-position lifecycle decisions before
+  scanning new hot entries.
+- [ ] Reconcile closed live outcomes promptly and feed live result attribution
+  back into guard recommendations.
+- [ ] Deploy v1.26 server evidence without touching unrelated server projects
+  or managing manual `BTWUSDT`.
 
 ### Out of Scope
 
@@ -424,6 +438,24 @@ still need server deployment/evidence before the server's current exposure can
 be considered cleared. Phase 56 also fixes a readiness false blocker so
 manual-symbol overrides only block when the symbol is actually active on the
 exchange.
+
+## Current Milestone: v1.26 Live Position Management And Pilot Learning
+
+**Goal:** Turn the running live pilot into an auditable position lifecycle
+system that can explain, plan, and safely execute agent-managed exits while
+learning from closed live outcomes.
+
+**Target features:**
+- Explain and repair the gap between `close_review` and executable close/reduce
+  plans for agent-managed positions.
+- Add guarded operator-confirmed and optionally env-enabled deterministic
+  position management for agent-managed positions.
+- Keep manual positions, especially `BTWUSDT`, explicitly excluded from bot
+  management.
+- Reconcile and attribute live outcomes so symbol, side, factor, and hold-time
+  lessons can adjust future guard recommendations.
+- Deploy and verify all v1.26 changes on the isolated server while preserving
+  the live timer unless a safe deployment pause is required.
 
 ## Completed Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 
@@ -749,6 +781,7 @@ remains paused.
 | Paper observation before resume | Low-signal or zero-signal paper runs must show generated candidates, rejected setup reasons, factor snapshots, and source health before any promotion review. | Phase 57 complete |
 | Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 complete |
 | Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete; Phase 60 deployed |
+| Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | v1.26 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -772,4 +805,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 60 completion.*
+*Last updated: 2026-06-21 after v1.26 milestone start.*

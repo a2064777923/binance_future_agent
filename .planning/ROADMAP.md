@@ -24,6 +24,9 @@
 - ✅ **v1.25 Live Resume Clearance And Adaptive Pilot** — Phases 56-60,
   shipped 2026-06-21 ([archive](milestones/v1.25-ROADMAP.md)).
 
+- ◆ **v1.26 Live Position Management And Pilot Learning** — Phases 61-65,
+  active.
+
 ## Phases
 
 <details>
@@ -122,118 +125,117 @@
 
 </details>
 
+<details open>
+<summary>◆ v1.26 Live Position Management And Pilot Learning (Phases 61-65) — ACTIVE</summary>
+
+- [ ] Phase 61: Close-Review Exit Plan Repair (0/1 plan)
+- [ ] Phase 62: Guarded Position Exit Execution (0/1 plan)
+- [ ] Phase 63: Live Cycle Position Stewardship (0/1 plan)
+- [ ] Phase 64: Live Outcome Ledger And Guard Feedback (0/1 plan)
+- [ ] Phase 65: Server Canary And Pilot Learning Packet (0/1 plan)
+
+</details>
+
 ## Active Phase Details
 
-### Phase 56: Exposure Clearance And Manual Loss Intake
+### Phase 61: Close-Review Exit Plan Repair
 
-**Goal:** Make the current `resolve_exposure` blocker actionable and capture manual
-liquidation/failure cases as structured evidence before any live resume.
+**Goal:** Explain and repair why agent-managed `close_review` positions can be
+review-required but still fail to produce an executable close/reduce plan.
 
-**Requirements:** EXP-01, EXP-02, EXP-03, LOSS-01
+**Requirements:** POS-01, POS-02, POS-04
 
-**Plans:** 1/1 plans complete
-**Status:** Complete - 2026-06-21
-
-**Success criteria:**
-
-1. Read-only exposure clearance command/report classifies exchange positions,
-   normal orders, algo orders, and local intents as agent-managed, manual,
-   stale-attributed, or unknown.
-
-2. The report explains symbol-level blockers and non-mutating next actions.
-3. Operator resume decision can consume or align with exposure clearance state.
-4. Manual liquidation/failure incidents can be captured without secrets and
-   without changing exchange or server runtime state.
-
-### Phase 57: Adaptive Forward-Paper Observation
-
-**Goal:** Turn zero-signal guarded paper runs into diagnosable observation while
-keeping live trading disabled.
-
-**Requirements:** STRAT-02, STRAT-03, DATA-01, DATA-02
-
-**Plans:** 1/1 plans complete
-**Status:** Complete - 2026-06-21
+**Plans:** 0/1 plans complete
+**Status:** Not started
 
 **Success criteria:**
 
-1. Forward-paper runs record generated signals, skip reasons, guard blocks, and
-   setup factor snapshots for broad hot-symbol universes.
+1. `ops time-exit-plan` or a companion diagnostic reports exact failed
+   preconditions for each `close_review` position.
+2. Agent-managed positions can produce filter-aware close/reduce plan candidates
+   when Binance quantity/notional constraints allow.
+3. Manual positions such as `BTWUSDT` remain classified as `manual_hold` and
+   never become close/reduce candidates.
+4. Unprotected or deteriorating positions are surfaced with higher urgency than
+   normal hold-time expiry.
 
-2. Paper-only exploration can shadow rejected candidates without creating live
-   order intents.
+### Phase 62: Guarded Position Exit Execution
 
-3. Auto-hot observation covers at least 40 current USDT USD-M symbols while the
-   live allowlist remains separate.
+**Goal:** Make close/reduce execution safe for agent-managed positions through
+fresh tokens, live-service guards, post-action checks, and protective-order
+cleanup.
 
-4. Source-health evidence explains whether Square/manual/RSS/social fallback
-   sources contributed to hotness.
+**Requirements:** EXIT-01, EXIT-03, RISK-04
 
-### Phase 58: Promotion Matrix And Loss Review
-
-**Goal:** Re-test current strategy variants and compare manual loss incidents
-against deterministic guard/risk rules.
-
-**Requirements:** STRAT-01, STRAT-04, LOSS-02, RISK-02
-
-**Plans:** 1/1 plan complete
-**Status:** Complete - 2026-06-21
+**Plans:** 0/1 plans complete
+**Status:** Not started
 
 **Success criteria:**
 
-1. Current-data matrix runs with completed candles, next-candle entries, fees,
-   slippage, and small-account caps.
+1. Operator-confirmed close/reduce execution refuses to run without a fresh
+   matching plan token.
+2. Execution refuses manual symbols and refuses plans that violate Binance
+   filters, current risk caps, daily-loss limits, or live-service safety gates.
+3. Post-action checks verify the intended position side is flat or reduced
+   before canceling protective algo orders.
+4. All execution attempts persist secret-safe artifacts and trace IDs.
 
-2. Promotion check distinguishes collect-more-paper, forward-paper candidate,
-   and live-resume eligibility.
+### Phase 63: Live Cycle Position Stewardship
 
-3. Manual loss incidents are compared against setup and risk guards.
-4. Public Lana/Square/X claims remain design inputs, not promotion evidence.
+**Goal:** Run active-position stewardship before new-entry scanning in every
+live cycle, with optional env-gated deterministic auto-management.
 
-### Phase 59: Confirmation-Gated Live Resume Path
+**Requirements:** POS-03, EXIT-02
 
-**Goal:** Build the mutation path for live resume, but keep it locked behind
-readiness and confirmation.
-
-**Requirements:** LIVE-01, LIVE-02, RISK-01
-
-**Plans:** 1/1 plan complete
-**Status:** Complete - 2026-06-21
+**Plans:** 0/1 plans complete
+**Status:** Not started
 
 **Success criteria:**
 
-1. Operator can preview target profile, timer/service changes, readiness
-   artifact, and confirmation token without mutation.
+1. Every live cycle records lifecycle decisions for active positions before
+   candidate scanning or AI calls.
+2. Optional auto-management is disabled unless explicit env flags are enabled.
+3. When enabled, auto-management only touches agent-managed positions and stays
+   inside current caps and manual-symbol exclusions.
+4. New-entry scans still run when capacity remains after stewardship decisions.
 
-2. Confirmed resume refuses to mutate unless the operator packet is
-   `eligible_for_operator_resume`.
+### Phase 64: Live Outcome Ledger And Guard Feedback
 
-3. The `30u_10x_multi_dynamic` path remains bounded by portfolio, notional,
-   margin, concentration, per-trade risk, and daily-loss caps.
+**Goal:** Reconcile closed live outcomes quickly and turn live result
+attribution into recommendation-only guard feedback.
 
-### Phase 60: Server Evidence And Pilot Resume Packet
+**Requirements:** LEARN-01, LEARN-02, LEARN-03
 
-**Goal:** Deploy and verify the v1.25 controls on the isolated server, then produce
-an operator packet that either keeps live paused or prepares a separate
-operator-confirmed resume.
+**Plans:** 0/1 plans complete
+**Status:** Not started
 
-**Requirements:** LIVE-03, RISK-03
+**Success criteria:**
 
-**Plans:** 1/1 plan complete
+1. A single command or scheduled path reconciles recently closed live outcomes
+   idempotently with fills, commission, net PnL, and matching intent IDs.
+2. Operator can review live performance by symbol, side, setup profile, factors,
+   exit reason, and holding behavior.
+3. Losing or weak groups generate recommendation-only guard updates.
+4. Guard recommendations cannot raise risk or change live env by themselves.
 
-**Status:** Complete - 2026-06-21
+### Phase 65: Server Canary And Pilot Learning Packet
+
+**Goal:** Deploy v1.26 to the isolated server and produce a current pilot
+learning packet from live-cycle, exit, outcome, and guard evidence.
+
+**Requirements:** OPS-01, OPS-02
+
+**Plans:** 0/1 plans complete
+**Status:** Not started
 
 **Success criteria:**
 
 1. Server deployment is scoped to `/opt/binance-futures-agent` and
    `/etc/binance-futures-agent`.
-
 2. Local and server tests pass after deployment.
-3. Live service/timer state and paper timer state are recorded before and after
-   deployment.
-
-4. Any resumed live cycle records active-position review, adjustment-plan,
-   entry-capacity preflight, and trace identifiers.
+3. Live and paper timers are restored after any deployment pause.
+4. Server artifacts include lifecycle decisions, manual exclusions, cap usage,
+   exit-plan status, and entry/exit trace IDs.
 
 ## Progress
 
@@ -245,6 +247,7 @@ operator-confirmed resume.
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
 | v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
+| v1.26 Live Position Management And Pilot Learning | 61-65 | 0/5 | Active | - |
 
 ## Requirement Coverage
 
@@ -254,8 +257,10 @@ operator-confirmed resume.
 - v1.23 requirements: archived at `.planning/milestones/v1.23-REQUIREMENTS.md`
 - v1.24 requirements: archived at `.planning/milestones/v1.24-REQUIREMENTS.md`
 - v1.25 requirements: archived at `.planning/milestones/v1.25-REQUIREMENTS.md`
+- v1.26 requirements: `.planning/REQUIREMENTS.md`
 
 ## Next Step
 
-Start the next milestone for live pilot iteration, especially active-position
-handling and strategy improvement from the latest server evidence.
+Plan Phase 61 with `$gsd-plan-phase 61`. The immediate focus is to explain and
+repair the gap where `NEARUSDT` is `close_review` but the current time-exit
+plan is blocked.

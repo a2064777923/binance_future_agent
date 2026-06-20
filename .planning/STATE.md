@@ -1,27 +1,23 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.25
-milestone_name: Live Resume Clearance And Adaptive Pilot
-current_phase: null
-status: completed
-stopped_at: Phase 60 complete; live timer active; NEARUSDT needs review; v1.25 archived.
-last_updated: "2026-06-21T05:15:00+08:00"
+milestone: v1.26
+milestone_name: Live Position Management And Pilot Learning
+status: planning
+last_updated: "2026-06-21T05:25:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Milestone v1.25 completed and archived
 progress:
   total_phases: 5
-  completed_phases: 5
+  completed_phases: 0
   total_plans: 5
-  completed_plans: 5
-  percent: 100
-current_phase_name: null
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** None — v1.25 milestone complete
-**Status:** v1.25 milestone complete
+**Current phase:** Phase 61 — Close-Review Exit Plan Repair
+**Status:** v1.26 planning complete; Phase 61 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -32,8 +28,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Start the next milestone for live pilot iteration from the
-Phase 60 server evidence.
+**Current focus:** Explain and repair the gap where an agent-managed
+`close_review` position can fail to produce an executable close/reduce plan.
 
 ## Decisions
 
@@ -752,11 +748,11 @@ BTWUSDT marked manual; 10x/6-position/60U dynamic caps deployed and verified.
 
 ## Current Position
 
-Phase: Milestone v1.25 complete
+Phase: 61 — Close-Review Exit Plan Repair
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-21 — Milestone v1.25 completed and archived
+Status: Ready to plan
+Last activity: 2026-06-21 — Milestone v1.26 started
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`.
+- Plan Phase 61 with `$gsd-plan-phase 61`.
