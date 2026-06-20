@@ -4,7 +4,7 @@ milestone: v1.9
 milestone_name: Balance Preflight Gate
 current_phase: Phase 17 - Balance Preflight Gate
 status: completed
-stopped_at: Phase 17 deployed; USD-M futures account remains unfunded so live entries are balance-gated
+stopped_at: Phase 17 deployed; latest timer cycle failed closed on invalid AI JSON and USD-M futures account remains unfunded
 last_updated: "2026-06-20T10:10:45.000+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Phase 17 complete and deployed
@@ -108,7 +108,7 @@ attempt.
 
 Phase: Phase 17 - Balance Preflight Gate
 Plan: 17-01 complete
-Status: Balance preflight deployed; live timer active; account funding is the current blocker
+Status: Balance preflight deployed; live timer active; latest cycle had invalid AI JSON and no submission; account funding is the current blocker
 Last activity: 2026-06-20 — Phase 17 complete
 
 ## Operator Next Steps

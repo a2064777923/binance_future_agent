@@ -36,6 +36,7 @@ available balance is below the order intent's estimated initial margin.
 | Server read-only futures account balance | Passed; `availableBalance=0.00000000`, `totalWalletBalance=0.00000000`, `totalMarginBalance=0.00000000` |
 | Server safe preflight with real account payload and fake order methods | Passed; `status=rejected`, `submitted=false`, `risk_reasons=insufficient_available_balance`, `calls=account` |
 | Manual live service cycle after deployment | Exited 0 with `openai_backoff`, no submission |
+| Automatic live timer cycle after deployment | Exited 0 with `ai_rejected` invalid JSON from OpenAI endpoint, no submission |
 | `binance-futures-agent-live.timer` | Re-enabled and active |
 
 ## Human Verification Required

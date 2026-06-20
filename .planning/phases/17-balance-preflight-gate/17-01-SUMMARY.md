@@ -27,6 +27,8 @@
 - Server safe preflight using the real account payload and fake order methods
   returned `status=rejected`, `submitted=false`,
   `risk_reasons=insufficient_available_balance`, and `calls=account`.
+- Post-deploy live timer cycle exited 0 with `ai_rejected` invalid JSON from
+  the OpenAI-compatible endpoint and no submission.
 - Live timer was re-enabled and active after deployment.
 
 ## Follow-Up
