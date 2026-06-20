@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.24
 milestone_name: Server Readiness And Paper Promotion
-current_phase: 54 — Guarded Paper Evidence Promotion
-current_phase_name: Guarded Paper Evidence Promotion
+current_phase: 55 — Operator Resume Decision Packet
+current_phase_name: Operator Resume Decision Packet
 status: ready_to_plan
-stopped_at: Phase 53 complete; Phase 54 ready to plan.
-last_updated: "2026-06-21T02:12:15+08:00"
+stopped_at: Phase 54 completed with guarded evidence collected but not promoted.
+last_updated: "2026-06-21T02:23:45+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 53 complete, transitioned to Phase 54
+last_activity_desc: Phase 54 complete, transitioned to Phase 55
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 3
-  completed_plans: 1
-  percent: 33
+  completed_plans: 2
+  percent: 67
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 54 — Guarded Paper Evidence Promotion
+**Current phase:** 55 — Operator Resume Decision Packet
 **Status:** Ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 0
@@ -32,9 +32,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan and execute Phase 54: collect guarded
-`quant_setup_selective_guarded` paper evidence and provide matrix/paper inputs
-for the live-resume readiness gate.
+**Current focus:** Plan and execute Phase 55: produce one read-only operator
+resume decision packet that separates paper-evidence, manual exposure,
+risk-profile, provider-health, and confirmation blockers before any separate
+live resume flow.
 
 ## Decisions
 
@@ -581,10 +582,10 @@ for the live-resume readiness gate.
 
 ## Next Command
 
-Plan Phase 54 with `$gsd-plan-phase 54`, then execute it. Keep live automation
+Plan Phase 55 with `$gsd-plan-phase 55`, then execute it. Keep live automation
 disabled. Do not enable unattended live auto-hot, restore live automation,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while guarded paper
-evidence remains incomplete.
+execute adjustment orders, or apply `30u_10x_multi_dynamic` while the operator
+decision packet is incomplete and blockers remain unresolved.
 
 ## Session
 
@@ -594,11 +595,11 @@ evidence remains incomplete.
 
 ## Current Position
 
-Phase: 54 — Guarded Paper Evidence Promotion
-Plan: not started
+Phase: 55 — Operator Resume Decision Packet
+Plan: Not started
 Status: Ready to plan
-Last activity: 2026-06-21 - Phase 53 complete, transitioned to Phase 54
+Last activity: 2026-06-21 — Phase 54 complete, transitioned to Phase 55
 
 ## Operator Next Steps
 
-- Run `$gsd-plan-phase 54`.
+- Run `$gsd-plan-phase 55`.

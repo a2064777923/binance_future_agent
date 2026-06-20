@@ -134,6 +134,10 @@ control of downside.
   secret-safe server artifact showing `keep_live_paused`, live timer/service
   inactive, paper timer active, and manual ETHUSDT classified outside
   agent-managed evidence.
+- Phase 54 collects guarded `quant_setup_selective_guarded` evidence and keeps
+  the system fail-closed: the current matrix is weaker than Phase 50, server
+  guarded paper generated no post-change signals, and readiness remained
+  `keep_live_paused` with manual/unattributed exposure blockers.
 
 ### Active
 
@@ -194,8 +198,10 @@ control of downside.
   are both verified.
 - [x] Deploy and run the Phase 52 live-resume readiness command on the server
   as a read-only check, with manual ETH/ETHUSDT exposure classified separately.
-- [ ] Collect post-change paper evidence for the selected guarded setup variant
-  without creating live order intents or restoring live automation.
+- [x] Collect post-change paper evidence for the selected guarded setup variant
+  without creating live order intents or restoring live automation; Phase 54
+  collected the evidence and did not promote it because samples were missing
+  and readiness stayed fail-closed.
 - [ ] Produce a single operator-facing resume decision packet that separates
   "collect more paper evidence" from "eligible for separately confirmed live
   resume".
@@ -357,6 +363,14 @@ Phase 53 redeployed the current code to the isolated server and ran
 `paper.timer=active`, `live.timer=inactive`, `live.service=inactive`,
 manual/unattributed symbols `ETHUSDT`, agent-managed symbols none, and all
 read-only mutation flags false.
+Phase 54 reran the guarded matrix and server guarded-paper path. The Phase 54
+matrix for `quant_setup_selective_guarded` had `candidate_matrix_count=0`,
+total net PnL `1.33136338` USDT, and worst drawdown `1.3130757` USDT, weaker
+than Phase 50's `candidate_matrix_count=2`, total net PnL `7.1058786` USDT,
+and worst drawdown `0.92783188` USDT. The server guarded paper run generated
+`0` signals, the post-change performance check returned `no_paper_evidence`,
+and readiness remained `keep_live_paused` with manual/unattributed `ETHUSDT`
+and `BTWUSDT` exposure blockers.
 
 ## Previous Milestone: v1.8 Position Mode And Entry Fail-Closed
 
@@ -605,8 +619,10 @@ live resume.
   investigate exchange/manual exposure, or prepare a separate operator-confirmed
   live resume.
 
-**Status:** Planning. No server live automation, risk profile, or Binance order
-state has been changed for this milestone.
+**Status:** In progress. Phases 53 and 54 are complete. No server live
+automation, risk profile, or Binance order state has been changed for this
+milestone; Phase 55 now needs to turn the collected blockers into one operator
+decision packet.
 
 ## Key Decisions
 
@@ -655,7 +671,7 @@ state has been changed for this milestone.
 | Paper promotion needs profit factor | Post-change forward-paper evidence must pass PnL, win-rate, profit-factor, and drawdown gates before readiness reporting can consider it. | Phase 51 complete |
 | Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete; v1.23 archived |
 | Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | Phase 53 complete |
-| Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | v1.24 active |
+| Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | Phase 54 complete; evidence not promoted |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -679,4 +695,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after completing Phase 53 server readiness evidence.*
+*Last updated: 2026-06-21 after completing Phase 54 guarded paper evidence.*

@@ -24,15 +24,15 @@ projects or losing control of downside.
 
 ### Paper Evidence Promotion
 
-- [ ] **PEV-01**: Operator can rerun the current-data hot-symbol matrix suite on
+- [x] **PEV-01**: Operator can rerun the current-data hot-symbol matrix suite on
   the server or locally for `quant_setup_selective_guarded` and compare the
   result against the archived Phase 50 candidate evidence.
 
-- [ ] **PEV-02**: Server paper collection can run or preview the selected
+- [x] **PEV-02**: Server paper collection can run or preview the selected
   guarded variant without creating live order intents, restoring live
   automation, or changing exchange state.
 
-- [ ] **PEV-03**: Post-change forward-paper performance can be evaluated from a
+- [x] **PEV-03**: Post-change forward-paper performance can be evaluated from a
   clear variant/timestamp boundary with minimum outcomes, positive PnL,
   minimum win rate, minimum profit factor, and drawdown caps.
 
@@ -82,9 +82,9 @@ projects or losing control of downside.
 | SRV-01 | Phase 53 | Complete |
 | SRV-02 | Phase 53 | Complete |
 | SRV-03 | Phase 53 | Complete |
-| PEV-01 | Phase 54 | Pending |
-| PEV-02 | Phase 54 | Pending |
-| PEV-03 | Phase 54 | Pending |
+| PEV-01 | Phase 54 | Complete |
+| PEV-02 | Phase 54 | Complete |
+| PEV-03 | Phase 54 | Complete |
 | RDM-01 | Phase 55 | Pending |
 | RDM-02 | Phase 55 | Pending |
 | RDM-03 | Phase 55 | Pending |
@@ -97,4 +97,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after v1.24 milestone start.*
+*Last updated: 2026-06-21 after Phase 54 guarded paper evidence.*
