@@ -1,8 +1,8 @@
 # Milestones
 
-## v1.22 Portfolio Risk And Multi-Position (Local complete: 2026-06-20)
+## v1.22 Portfolio Risk And Multi-Position (Active: 2026-06-20)
 
-**Phases completed:** 1 phase, 1 plan
+**Phases completed:** 2 phases, 2 plans; Phase 32 local implementation in progress
 
 **Key accomplishments:**
 
@@ -17,10 +17,13 @@
 - Allowed risk-profile readiness to carry protected active exposure into the
   target profile only when portfolio caps can absorb it.
 - Extended exposure status with portfolio budget context.
+- Added read-only active-position review and local active-position adjustment
+  planning for partial take-profit/full-close actions.
 
 **Known deferred items at close:**
 
-- Server deployment and any live env switch remain pending operator review.
+- Active-position adjustment execution and any live env switch remain
+  confirmation-token gated.
 
 ---
 

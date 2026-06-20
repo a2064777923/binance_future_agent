@@ -103,6 +103,7 @@ hold window without changing exchange state:
 ```bash
 python -m bfa.cli ops position-hold-check --env-file .env --db runtime/agent.sqlite
 python -m bfa.cli ops position-review --env-file .env --db runtime/agent.sqlite
+python -m bfa.cli ops position-adjustment-plan --env-file .env --db runtime/agent.sqlite
 python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 ```
 
@@ -110,6 +111,12 @@ python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 the matching submitted trade plan into hold/watch/trail-or-reduce/close-review
 recommendations with PnL percent, R multiple, target progress, hold-time
 progress, protection count, and matching intent evidence.
+
+`ops position-adjustment-plan` is read-only. It maps near-target or >=1R
+positions to a partial take-profit plan and overdue or unsafe positions to a
+full-close plan. `ops position-adjustment-execute` requires live mode, an
+inactive live service, and the exact confirmation token before it submits any
+reduce-only or hedge reduce order.
 
 Use the exposure status command when reviewing why the bot can or cannot open a
 new position under the current live caps. It is read-only and reports current

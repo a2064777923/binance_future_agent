@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 31
+current_phase: 32
 status: active
-stopped_at: Phase 31 active-position review implemented locally; server deployment pending
-last_updated: "2026-06-20T17:35:50+08:00"
+stopped_at: Phase 32 active-position adjustment implementation in progress locally
+last_updated: "2026-06-20T19:20:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
@@ -19,8 +19,8 @@ progress:
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 31 — Active Position Review
-**Status:** Phase 31 local implementation in progress; server deployment pending
+**Current phase:** Phase 32 — Active Position Adjustment Plan
+**Status:** Phase 32 local implementation in progress; server deployment pending
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Add deterministic active-position review before building
-execution-capable staged exits or trailing-stop management.
+**Current focus:** Convert deterministic active-position review into
+confirmation-gated partial take-profit or full-close adjustment plans.
 
 ## Decisions
 
@@ -268,30 +268,43 @@ execution-capable staged exits or trailing-stop management.
   `trail_or_reduce`, or `close_review`. It does not place, cancel, or modify
   exchange orders.
 
+- Server root SSH key access has been added for this workstation using
+  `C:\Users\KingHong\.ssh\id_ed25519_bfa.pub`; password login was not disabled
+  or modified. The previously stopped live timer was restored. Latest check:
+  live service inactive, live timer active, next run scheduled, and the last
+  live cycle exited with `entry_capacity_blocked` and no submission.
+
+- Phase 32 local implementation adds `ops position-adjustment-plan` and
+  `ops position-adjustment-execute`. It maps `trail_or_reduce` to partial
+  take-profit reduce orders, maps `close_review` to full-close reduce orders,
+  and requires live mode, inactive live service, and an exact confirmation token
+  before submitting any live adjustment order. The live runner now includes
+  position-review and adjustment-plan summaries in every live cycle result.
+
 ## Next Command
 
-Run full local tests for Phase 31, then deploy to the isolated server and run a
-read-only `ops position-review` preview. Do not place trailing-stop or staged
-exit orders in this phase.
+Run full local tests for Phase 32, then deploy to the isolated server and run a
+read-only `ops position-adjustment-plan` preview. Do not execute adjustment
+orders or apply `30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 31 local implementation; server deployment pending
-**Resume file:** .planning/phases/31-active-position-review/31-01-SUMMARY.md
+**Stopped at:** Phase 32 local implementation; server deployment pending
+**Resume file:** .planning/phases/32-active-position-adjustment-plan/32-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 31 — Active Position Review
-Plan: 31-01 local implementation
+Phase: 32 — Active Position Adjustment Plan
+Plan: 32-01 local implementation
 Status: Local verification pending; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — read-only active-position review command added locally
+Last activity: 2026-06-20 — active-position adjustment plan/execute added locally
 
 ## Operator Next Steps
 
 - Run full local tests and `git diff --check`.
-- Deploy Phase 31 to `/opt/binance-futures-agent/app` after local verification.
+- Deploy Phase 32 to `/opt/binance-futures-agent/app` after local verification.
 - Run server focused/full tests and secret-safe health check.
-- Preview `ops position-review` on the server.
-- Next strategy milestone should add confirmation-gated staged exit/trailing
-  stop management.
+- Preview `ops position-adjustment-plan` on the server.
+- Do not run `ops position-adjustment-execute --confirm-token ...` unless the
+  operator explicitly approves the fresh token.

@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-31, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-32, active.
 
 ## Phases
 
@@ -93,7 +93,7 @@ recommendations.
 
 **Requirements:** APR-01, APR-02, APR-03
 
-**Status:** Planned and implemented locally; server deployment pending.
+**Status:** Complete locally and deployed; read-only server preview verified.
 
 **Plans:** 1 plan
 
@@ -107,13 +107,37 @@ recommendations.
    `close_review`; near-target or >=1R positions produce `trail_or_reduce`.
 4. Full local test suite passes.
 
+### Phase 32: Active Position Adjustment Plan
+
+**Goal:** Convert active-position review recommendations into deterministic
+partial take-profit or full-close plans, and expose confirmation-gated execution
+for live reduce orders.
+
+**Requirements:** APR-04
+
+**Status:** In progress locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. `ops position-adjustment-plan` is read-only and maps `trail_or_reduce` to a
+   partial take-profit plan.
+2. `ops position-adjustment-plan` maps overdue or unsafe `close_review`
+   positions to a full-close plan.
+3. `ops position-adjustment-execute` refuses live mutation without the exact
+   confirmation token and an inactive live service.
+4. The automated live runner includes active-position review and adjustment
+   plan summaries in each live cycle result before scanning new entries.
+5. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-31 | 2/2 | Phase 31 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-32 | 2/3 | Phase 32 local | Pending |
 
 ## Requirement Coverage
 
@@ -123,7 +147,6 @@ recommendations.
 
 ## Next Step
 
-Deploy Phase 30 code to the isolated server, run focused/full tests there, then
-preview `30u_10x_multi_dynamic` with `ops risk-profile-plan`. Do not apply any
-live env switch until the operator explicitly confirms the profile token and
-accepts the portfolio caps.
+Finish Phase 32 local implementation, run full tests, deploy to the isolated
+server, and preview `ops position-adjustment-plan`. Do not execute adjustment
+orders or apply `30u_10x_multi_dynamic` without an explicit confirmation token.

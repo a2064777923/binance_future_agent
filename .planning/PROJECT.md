@@ -528,9 +528,9 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 - Do not silently switch the live env; apply `30u_10x_multi_dynamic` only after
   the operator confirms the fresh token and accepts the 30U/10x/two-position
   portfolio caps.
-- Next strategy milestone should add periodic active-position review and staged
-  exit/trailing-stop logic inspired by public Lana-style workflows, backed by
-  tests and backtests rather than public profit claims.
+- Phase 32 adds active-position adjustment planning and confirmation-gated
+  execution so periodic review can produce partial take-profit or full-close
+  reduce orders before the bot scans for new entries.
 
 ## Key Decisions
 
@@ -568,10 +568,11 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 | Profile switches need confirmation | Moving to 8x/dynamic sizing should be a token-confirmed env diff, not a manual edit. | Phase 29 complete and deployed |
 | Open positions should not freeze scanning | A mature hot-coin system must keep evaluating new candidates while active exposure is protected and capacity remains. | Phase 30 complete locally |
 | High leverage needs portfolio caps | 10x on 30 USDT is possible only when total margin, total notional, and same-direction concentration are bounded. | Phase 30 complete locally |
-| Protected active positions may be carried forward | Profile changes can accept existing exposure only if exchange protection is present, unreconciled intents match active positions, and target caps absorb the exposure. | Phase 30 complete locally |
+| Protected active positions may be carried forward | Profile changes can accept existing exposure only if exchange protection is present, unreconciled intents match active positions, and target caps absorb the exposure. | Phase 30 complete |
+| Manage active positions before new entries | Each live cycle should inspect active positions and expose deterministic adjustment plans before scanning for new trades. | Phase 32 complete locally |
 | Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after Phase 30 portfolio risk and multi-position implementation.*
+*Last updated: 2026-06-20 after Phase 32 active-position adjustment implementation.*

@@ -36,6 +36,10 @@ from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.live_status import build_live_status_report
+from bfa.ops.position_adjustment import (
+    build_position_adjustment_execute_report,
+    build_position_adjustment_plan_report,
+)
 from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
 from bfa.ops.position_review import build_position_review_report
 from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
@@ -353,6 +357,36 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-binance",
         action="store_true",
         help="use only local event-store evidence instead of signed Binance reads",
+    )
+
+    position_adjustment_plan = ops_subparsers.add_parser(
+        "position-adjustment-plan",
+        help="read-only plan for partial take-profit or close adjustments from active-position review",
+    )
+    position_adjustment_plan.add_argument("--env-file", help="optional env file to load before environment overrides")
+    position_adjustment_plan.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    position_adjustment_plan.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    position_adjustment_plan.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
+
+    position_adjustment_execute = ops_subparsers.add_parser(
+        "position-adjustment-execute",
+        help="operator-approved execution of a ready active-position adjustment plan",
+    )
+    position_adjustment_execute.add_argument("--env-file", help="optional env file to load before environment overrides")
+    position_adjustment_execute.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    position_adjustment_execute.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    position_adjustment_execute.add_argument(
+        "--confirm-token",
+        help="confirmation token from a prior position-adjustment-execute preview",
+    )
+    position_adjustment_execute.add_argument(
+        "--service-active",
+        action="store_true",
+        help="fail closed when the live systemd service is currently active",
     )
 
     time_exit_plan = ops_subparsers.add_parser(
@@ -938,6 +972,27 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 1 if report.action_required else 0
+    if args.ops_command == "position-adjustment-plan":
+        report = build_position_adjustment_plan_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.adjustment_allowed else 1
+    if args.ops_command == "position-adjustment-execute":
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=args.db,
+            confirm_token=args.confirm_token,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+            service_active=args.service_active,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.adjustment_executed else 1
     if args.ops_command == "time-exit-plan":
         report = build_time_exit_plan_report(
             config,

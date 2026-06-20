@@ -28,6 +28,7 @@ from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
+from bfa.ops.position_adjustment import build_position_adjustment_plan_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
 
@@ -49,6 +50,8 @@ class AgentRunResult:
     validation_errors: list[str] = field(default_factory=list)
     risk_reasons: list[str] = field(default_factory=list)
     persisted: dict[str, int] = field(default_factory=dict)
+    position_review: dict[str, Any] | None = None
+    position_adjustment_plan: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -82,6 +85,8 @@ class AgentRunResult:
             "validation_errors": list(self.validation_errors),
             "risk_reasons": list(self.risk_reasons),
             "persisted": dict(self.persisted),
+            "position_review": self.position_review,
+            "position_adjustment_plan": self.position_adjustment_plan,
         }
 
 
@@ -126,6 +131,11 @@ def run_agent_once(
 
     signed_client = signed_client or _build_signed_client(config, mode)
     preflight_risk_state = _risk_state_from_exchange(signed_client) if mode is RuntimeMode.LIVE else None
+    position_adjustment_plan = (
+        _live_position_adjustment_plan(config, db_path=db_path, signed_client=signed_client)
+        if mode is RuntimeMode.LIVE and preflight_risk_state is not None
+        else None
+    )
     if mode is RuntimeMode.LIVE and preflight_risk_state is None:
         return AgentRunResult(
             status="position_risk_failed",
@@ -140,6 +150,8 @@ def run_agent_once(
             mode=mode.value,
             started_at=started_at,
             risk_reasons=preflight_reasons,
+            position_review=_position_review_summary(position_adjustment_plan),
+            position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
         )
 
     market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
@@ -195,6 +207,8 @@ def run_agent_once(
                 narrative_record_count=len(narrative_records),
                 candidate_count=0,
                 rejected_count=len(candidates.rejected),
+                position_review=_position_review_summary(position_adjustment_plan),
+                position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 persisted={"candidates": persisted_candidate_count},
             )
 
@@ -211,6 +225,8 @@ def run_agent_once(
                 rejected_count=len(candidates.rejected),
                 ai_accepted=True,
                 validation_errors=["unable to read live position risk"],
+                position_review=_position_review_summary(position_adjustment_plan),
+                position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 persisted={"candidates": persisted_candidate_count},
             )
 
@@ -230,6 +246,7 @@ def run_agent_once(
             candidate_count=len(candidates.candidates),
             rejected_count=len(candidates.rejected),
             persisted_candidate_count=persisted_candidate_count,
+            position_adjustment_plan=position_adjustment_plan,
         )
     finally:
         connection.close()
@@ -283,6 +300,7 @@ def _evaluate_candidate_queue(
     candidate_count: int,
     rejected_count: int,
     persisted_candidate_count: int,
+    position_adjustment_plan,
 ) -> AgentRunResult:
     evaluated_symbols: list[str] = []
     ai_decisions_persisted = 0
@@ -324,6 +342,8 @@ def _evaluate_candidate_queue(
                 evaluated_symbols=evaluated_symbols,
                 validation_errors=[_safe_ai_error(exc)],
                 risk_reasons=_dedupe(skipped_risk_reasons),
+                position_review=_position_review_summary(position_adjustment_plan),
+                position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_decisions_persisted},
             )
         _clear_openai_backoff(config)
@@ -378,6 +398,8 @@ def _evaluate_candidate_queue(
             execution_status=execution.status,
             submitted=execution.submitted,
             risk_reasons=_dedupe([*skipped_risk_reasons, *execution.risk.reason_codes]),
+            position_review=_position_review_summary(position_adjustment_plan),
+            position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
             persisted={
                 "candidates": persisted_candidate_count,
                 "ai_decisions": ai_decisions_persisted,
@@ -400,6 +422,8 @@ def _evaluate_candidate_queue(
         submitted=False,
         validation_errors=last_validation_errors,
         risk_reasons=_dedupe([*skipped_risk_reasons, *last_risk_reasons]),
+        position_review=_position_review_summary(position_adjustment_plan),
+        position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
         persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_decisions_persisted},
     )
 
@@ -422,6 +446,66 @@ def _should_try_next_candidate(reason_codes: list[str]) -> bool:
         "symbol_filters_missing",
     }
     return bool(reason_codes) and all(reason in retryable for reason in reason_codes)
+
+
+def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, signed_client):
+    if signed_client is None:
+        return None
+    try:
+        return build_position_adjustment_plan_report(
+            config,
+            db_path=db_path,
+            check_binance=True,
+            signed_client=signed_client,
+        )
+    except Exception:
+        return None
+
+
+def _position_review_summary(adjustment_plan) -> dict[str, Any] | None:
+    if adjustment_plan is None or adjustment_plan.position_review is None:
+        return None
+    review = adjustment_plan.position_review
+    return {
+        "status": review.status,
+        "action_required": review.action_required,
+        "reasons": list(review.reasons),
+        "positions": [
+            {
+                "symbol": item.symbol,
+                "position_side": item.position_side,
+                "recommendation": item.recommendation,
+                "urgency": item.urgency,
+                "pnl_percent": item.pnl_percent,
+                "stop_r_multiple": item.stop_r_multiple,
+                "target_progress": item.target_progress,
+                "hold_elapsed_fraction": item.hold_elapsed_fraction,
+            }
+            for item in review.positions
+        ],
+    }
+
+
+def _position_adjustment_summary(adjustment_plan) -> dict[str, Any] | None:
+    if adjustment_plan is None:
+        return None
+    return {
+        "status": adjustment_plan.status,
+        "adjustment_allowed": adjustment_plan.adjustment_allowed,
+        "reasons": list(adjustment_plan.reasons),
+        "plans": [
+            {
+                "symbol": item.order_plan.symbol,
+                "action": item.order_plan.action,
+                "quantity": item.order_plan.quantity,
+                "side": item.order_plan.side,
+                "position_side": item.order_plan.position_side,
+                "reasons": list(item.reasons),
+            }
+            for item in adjustment_plan.plans
+            if item.order_plan is not None
+        ],
+    }
 
 
 def _build_signed_client(config: AppConfig, mode: RuntimeMode):

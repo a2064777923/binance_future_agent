@@ -63,8 +63,9 @@ projects or losing control of downside.
   missing-plan, overdue, or near-stop positions, while near-target or >=1R
   positions are recommended for future trail/reduce handling.
 
-- **APR-04**: Add staged take-profit / trailing-stop order management for live
-  positions after the exchange-order lifecycle is fully reconciled.
+- [x] **APR-04**: Add confirmation-gated active-position adjustment planning
+  for live positions, including partial take-profit and full-close reduce
+  orders derived from deterministic review recommendations.
 
 ## Out of Scope
 
@@ -91,12 +92,13 @@ projects or losing control of downside.
 | APR-01 | Phase 31 | Complete locally |
 | APR-02 | Phase 31 | Complete locally |
 | APR-03 | Phase 31 | Complete locally |
+| APR-04 | Phase 32 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 13 total
-- Mapped to phases: 13
+- v1.22 requirements: 14 total
+- Mapped to phases: 14
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 30 implementation*
+*Last updated: 2026-06-20 after Phase 32 active-position adjustment implementation*
