@@ -5,9 +5,9 @@ milestone_name: Live Pilot Risk Controls
 current_phase: Milestone v1.21 archived
 status: completed
 stopped_at: HYPEUSDT open/protected and within hold window; 8x/dynamic profile still blocked
-last_updated: "2026-06-20T14:37:00+08:00"
+last_updated: "2026-06-20T14:58:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Live HYPEUSDT gate checked read-only
+last_activity_desc: Exposure-status diagnostics deployed and HYPEUSDT gate checked
 progress:
   total_phases: 21
   completed_phases: 21
@@ -155,6 +155,27 @@ any profile switch.
   `keep_current_profile` because an active protected position and unreconciled
   submitted intent remain.
 
+- Post-archive ops enhancement `d7f7277` is deployed on the server. It adds
+  read-only `ops exposure-status`, which explains current sizing, long/short
+  entry support, entry-capacity blockers, and the `30u_8x_dynamic` preview
+  without modifying env or exchange state. Local tests passed (`269` tests);
+  server focused tests passed (`3` tests), server full suite passed (`269`
+  tests), and server secret-safe health-check passed after deployment. The live
+  timer was paused during the code-only deploy and restored afterwards.
+
+- Latest exposure-status check after restore: HYPEUSDT remains a `0.16` LONG,
+  protected by two algo orders. The current profile is still 30U/5x with fixed
+  `12` USDT max notional, dynamic sizing disabled, one max open position, and
+  multi-position disabled. The command reports both long and short entries as
+  supported by strategy/execution plumbing (`BUY`/`LONG` and `SELL`/`SHORT` in
+  hedge mode), but a new hypothetical HYPEUSDT long is blocked by
+  `multi_position_disabled`, `max_open_positions_reached`, and
+  `duplicate_symbol_direction_exposure`. The 8x dynamic preview remains only a
+  preview: target sizing would currently cap around `17.85` USDT notional from
+  available balance and the 8% margin fraction, while `risk-change-check` still
+  blocks the profile switch because the active protected HYPEUSDT position and
+  unreconciled submitted intent remain.
+
 ## Next Command
 
 Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
@@ -173,7 +194,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 Phase: Milestone v1.21 complete
 Plan: —
 Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — Live HYPEUSDT gate checked read-only
+Last activity: 2026-06-20 — Exposure-status diagnostics deployed and HYPEUSDT gate checked
 
 ## Operator Next Steps
 
@@ -185,6 +206,9 @@ Last activity: 2026-06-20 — Live HYPEUSDT gate checked read-only
 - Use `ops time-exit-execute` without `--confirm-token` only to fetch the
   current confirmation token; do not provide the token unless explicitly
   approving a live close.
+- Use `ops exposure-status --hypothetical-symbol HYPEUSDT --hypothetical-side
+  long` to explain current sizing, direction support, and why new entries are
+  blocked or allowed.
 - Run `ops reconcile-outcomes --persist-closed` after HYPEUSDT closes.
 - Rerun `ops risk-change-check --target-leverage 8` before any leverage or
   dynamic-sizing profile change.
