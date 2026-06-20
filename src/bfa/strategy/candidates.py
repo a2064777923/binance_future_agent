@@ -16,6 +16,7 @@ class StrategyConfig:
     min_quote_volume: float = 1_000_000.0
     max_kline_range_percent: float = 20.0
     require_market_confirmation: bool = True
+    max_position_notional_usdt: float | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,12 @@ def _reject_reasons(
         reasons.append("insufficient_liquidity")
     if item.kline_range_percent is not None and item.kline_range_percent > config.max_kline_range_percent:
         reasons.append("excessive_volatility")
+    if (
+        config.max_position_notional_usdt is not None
+        and item.min_executable_notional is not None
+        and item.min_executable_notional > config.max_position_notional_usdt
+    ):
+        reasons.append("min_executable_notional_exceeds_cap")
     return reasons
 
 
@@ -157,6 +164,12 @@ def _score_candidate(item: SymbolFeatures, config: StrategyConfig) -> CandidateS
     if item.kline_range_percent is not None:
         market_score += max(5.0 - item.kline_range_percent / 5.0, -5.0)
         reason_codes.append("volatility_checked")
+    if (
+        config.max_position_notional_usdt is not None
+        and item.min_executable_notional is not None
+        and item.min_executable_notional <= config.max_position_notional_usdt
+    ):
+        reason_codes.append("pilot_tradable")
 
     if item.mention_count > 0:
         reason_codes.append("narrative_heat")
@@ -185,4 +198,3 @@ def _dedupe(values: list[str]) -> list[str]:
         if value not in deduped:
             deduped.append(value)
     return deduped
-

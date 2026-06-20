@@ -162,6 +162,7 @@ def run_agent_once(
                 allowed_symbols=market_symbols(config),
                 generated_at=started_at,
                 top_n=top_n,
+                max_position_notional_usdt=float(config.get("BFA_MAX_POSITION_NOTIONAL_USDT")),
             ),
         )
         persisted_candidate_count = len(persist_candidates(store, candidates.candidates))

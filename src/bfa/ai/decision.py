@@ -25,9 +25,11 @@ If you choose decision=trade, you MUST provide non-null entry_price, stop_price,
 target_price, notional_usdt, hold_time_minutes, and side long/short. Use the
 candidate features.reference_price as the market reference when present: entry
 should be close to that reference price, stop/target must form valid long or
-short geometry, and stop risk must fit max_risk_per_trade_usdt. If you cannot
-derive a complete executable setup from the provided context, return
-decision=pass with side=flat and null trade fields."""
+short geometry, notional_usdt must fit both features.min_executable_notional and
+max_position_notional_usdt when present, and stop risk must fit
+max_risk_per_trade_usdt. If you cannot derive a complete executable setup from
+the provided context, return decision=pass with side=flat and null trade
+fields."""
 
 
 @dataclass(frozen=True)
@@ -244,6 +246,13 @@ def _validate_trade(
     reference_price = _reference_price(context)
     if reference_price is not None and _entry_deviation_percent(decision.entry_price, reference_price) > 1.5:
         errors.append("entry_too_far_from_reference_price")
+    min_executable_notional = _min_executable_notional(context)
+    if (
+        min_executable_notional is not None
+        and decision.notional_usdt is not None
+        and decision.notional_usdt < min_executable_notional
+    ):
+        errors.append("notional_below_min_executable")
 
 
 def estimate_stop_risk_usdt(decision: AiTradeDecision) -> float:
@@ -261,6 +270,16 @@ def _reference_price(context: AiDecisionContext) -> float | None:
     if reference is None or reference <= 0:
         return None
     return reference
+
+
+def _min_executable_notional(context: AiDecisionContext) -> float | None:
+    features = context.candidate.get("features")
+    if not isinstance(features, Mapping):
+        return None
+    value = _float(features.get("min_executable_notional"))
+    if value is None or value <= 0:
+        return None
+    return value
 
 
 def _entry_deviation_percent(entry_price: float | None, reference_price: float) -> float:

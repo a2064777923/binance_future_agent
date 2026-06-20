@@ -515,6 +515,7 @@ def _run_strategy(
                 allowed_symbols=market_symbols(config),
                 generated_at=args.generated_at,
                 top_n=args.top_n,
+                max_position_notional_usdt=float(config.get("BFA_MAX_POSITION_NOTIONAL_USDT")),
             ),
         )
         persisted = 0

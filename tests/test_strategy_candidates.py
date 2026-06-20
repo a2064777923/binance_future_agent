@@ -40,6 +40,42 @@ class StrategyCandidateTests(unittest.TestCase):
         self.assertIn("symbol_not_allowed", rejected["DOGEUSDT"].reason_codes)
         self.assertIn("missing_market_confirmation", rejected["DOGEUSDT"].reason_codes)
 
+    def test_rejects_symbols_that_cannot_fit_notional_cap(self):
+        packet = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        packet["records"].append(
+            {
+                "id": 9,
+                "event_type": "market_snapshot",
+                "occurred_at": "2026-06-19T09:08:30Z",
+                "source": "binance_usdm",
+                "symbol": "BTCUSDT",
+                "ref_id": "exchange_symbol:BTCUSDT",
+                "payload": {
+                    "event_type": "exchange_symbol",
+                    "symbol": "BTCUSDT",
+                    "payload": {
+                        "filters": {
+                            "MARKET_LOT_SIZE": {"minQty": "0.001", "stepSize": "0.001"},
+                            "MIN_NOTIONAL": {"notional": "50"},
+                        }
+                    },
+                },
+            }
+        )
+        config = StrategyConfig(
+            allowed_symbols=["BTCUSDT"],
+            generated_at="2026-06-19T09:30:00Z",
+            min_quote_volume=1000000,
+            max_position_notional_usdt=20,
+        )
+
+        result = generate_candidates(packet, config)
+        rejected = {item.symbol: item for item in result.rejected}
+
+        self.assertEqual(result.candidates, [])
+        self.assertIn("min_executable_notional_exceeds_cap", rejected["BTCUSDT"].reason_codes)
+        self.assertGreater(rejected["BTCUSDT"].features["min_executable_notional"], 20)
+
     def test_generation_is_deterministic(self):
         packet = json.loads(FIXTURE.read_text(encoding="utf-8"))
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_UP
 from typing import Any, Mapping
 
 
@@ -26,6 +27,10 @@ class SymbolFeatures:
     funding_rate: float | None = None
     kline_range_percent: float | None = None
     reference_price: float | None = None
+    min_qty: float | None = None
+    step_size: float | None = None
+    min_notional: float | None = None
+    min_executable_notional: float | None = None
     quality_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,6 +52,10 @@ class SymbolFeatures:
             "funding_rate": self.funding_rate,
             "kline_range_percent": self.kline_range_percent,
             "reference_price": self.reference_price,
+            "min_qty": self.min_qty,
+            "step_size": self.step_size,
+            "min_notional": self.min_notional,
+            "min_executable_notional": self.min_executable_notional,
             "quality_notes": list(self.quality_notes),
         }
 
@@ -63,6 +72,7 @@ def extract_features(replay_packet: Mapping[str, Any]) -> dict[str, SymbolFeatur
         elif event_type == "market_snapshot":
             _apply_market(features, record, payload)
     for item in features.values():
+        _set_min_executable_notional(item)
         _add_missing_feature_notes(item)
     return features
 
@@ -116,6 +126,36 @@ def _apply_market(
     elif "kline" in snapshot_type:
         item.kline_range_percent = _kline_range(snapshot_payload)
         item.reference_price = _number(snapshot_payload.get("close") or snapshot_payload.get("open"))
+    elif "exchange_symbol" in snapshot_type:
+        _apply_execution_filters(item, snapshot_payload)
+
+
+def _apply_execution_filters(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
+    filters = payload.get("filters")
+    if not isinstance(filters, Mapping):
+        return
+    lot_filter = _mapping(filters.get("MARKET_LOT_SIZE")) or _mapping(filters.get("LOT_SIZE")) or {}
+    notional_filter = _mapping(filters.get("MIN_NOTIONAL")) or _mapping(filters.get("NOTIONAL")) or {}
+    item.min_qty = _number(lot_filter.get("minQty"))
+    item.step_size = _number(lot_filter.get("stepSize"))
+    item.min_notional = _number(notional_filter.get("notional") or notional_filter.get("minNotional"))
+
+
+def _set_min_executable_notional(item: SymbolFeatures) -> None:
+    price = _decimal_or_none(item.reference_price)
+    if price is None:
+        return
+    min_qty = _decimal_or_zero(item.min_qty)
+    min_notional = _decimal_or_zero(item.min_notional)
+    step_size = _decimal_or_zero(item.step_size)
+    required_qty = min_qty
+    if min_notional > 0:
+        required_qty = max(required_qty, min_notional / price)
+    if required_qty <= 0:
+        return
+    if step_size > 0:
+        required_qty = _round_up(required_qty, step_size)
+    item.min_executable_notional = float(required_qty * price)
 
 
 def _add_missing_feature_notes(item: SymbolFeatures) -> None:
@@ -128,6 +168,7 @@ def _add_missing_feature_notes(item: SymbolFeatures) -> None:
         "missing_funding": item.funding_rate is None,
         "missing_volatility_proxy": item.kline_range_percent is None,
         "missing_reference_price": item.reference_price is None,
+        "missing_min_executable_notional": item.min_executable_notional is None,
     }
     for note, missing in checks.items():
         if missing:
@@ -157,6 +198,27 @@ def _number(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _mapping(value: Any) -> Mapping[str, Any] | None:
+    return value if isinstance(value, Mapping) else None
+
+
+def _decimal_or_none(value: float | None) -> Decimal | None:
+    if value is None or value <= 0:
+        return None
+    return Decimal(str(value))
+
+
+def _decimal_or_zero(value: float | None) -> Decimal:
+    if value is None or value <= 0:
+        return Decimal("0")
+    return Decimal(str(value))
+
+
+def _round_up(value: Decimal, increment: Decimal) -> Decimal:
+    units = (value / increment).to_integral_value(rounding=ROUND_UP)
+    return units * increment
 
 
 def _note(item: SymbolFeatures, note: str) -> None:

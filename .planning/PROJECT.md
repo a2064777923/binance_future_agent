@@ -67,6 +67,12 @@ control of downside.
   evidence.
 - Phase 10 validated a local short-window backtest harness and hot matrix
   reporting before any live risk-limit increase.
+- Phase 11 validated reference-price AI context, complete trade-geometry
+  prompting, and deterministic rejection of entry prices too far from market.
+- Phase 12 validated pilot tradability filtering: Binance execution filters are
+  converted into `min_executable_notional`, cap-incompatible hot symbols are
+  rejected before AI calls, and AI notional below executable minimum fails
+  closed.
 
 ### Active
 
@@ -82,8 +88,10 @@ control of downside.
 - [x] Implement risk-capped Binance live execution for a 100 USDT pilot account.
 - [x] Deploy on server `64.83.34.222` under a project-isolated directory and
   systemd unit without modifying existing services.
-- [ ] Improve live AI decision quality so `trade` decisions include executable
+- [x] Improve live AI decision quality so `trade` decisions include executable
   entry, stop, and target prices derived from market reference data.
+- [x] Avoid spending AI/live execution cycles on hot symbols whose Binance
+  minimum executable notional exceeds the 100 USDT pilot position cap.
 - [ ] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
 
@@ -149,7 +157,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 10 are complete and verified. The project is installable as an
+Phases 1 through 12 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -159,29 +167,26 @@ execution helpers, reconciliation reports, deployment health checks, CLI smoke
 commands, automated one-cycle trading runner, live systemd timer assets,
 exchange-side protective order submission, OpenAI-compatible base URL
 configuration, AI timeout/backoff behavior, market-heat fallback narratives, and
-158 passing unit tests. The server deployment is installed under
+pilot tradability filtering. The server deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
 and OpenAI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
 pass/no submission. The OpenAI-compatible endpoint is intermittent under the
 5 second timeout; timeouts enter `openai_backoff` and skip execution.
-Recent live cycles also show a second quality issue: the model can return
-`decision=trade` while leaving entry, stop, and target null. Local validation
-correctly rejects those decisions, but the prompt/context should be improved so
-the model either returns an executable decision with complete prices or returns
-`pass`.
+Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
+be cap-incompatible under the 20 USDT max-position-notional pilot setting, while
+SOLUSDT can currently fit. Candidate generation now rejects cap-incompatible
+symbols before AI calls instead of relying only on later order-intent rejection.
 
-## Current Milestone: v1.3 Decision Robustness
+## Current Milestone: v1.4 Pilot Tradability Filter
 
-**Goal:** Improve the live AI decision layer so executable trades carry complete
-reference-price-based entry, stop, and target data, while non-executable model
-outputs fail closed without polluting live evidence.
+**Goal:** Keep the live pilot inside 100 USDT caps while avoiding hot-symbol
+selection that cannot satisfy current Binance minimum quantity/notional filters.
 
 **Target features:**
-- Include latest market reference price in AI decision context.
-- Tighten decision instructions around complete trade geometry versus pass.
-- Classify incomplete trade outputs as fail-closed AI validation, not live trade
-  evidence.
+- Include minimum executable notional in candidate and AI context.
+- Reject cap-incompatible candidates before AI calls.
+- Reject AI trade notional below Binance executable minimum.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
 ## Key Decisions
@@ -199,9 +204,10 @@ outputs fail closed without polluting live evidence.
 | Deploy dry-run-first | Server deployment should prove isolation and health before any live trading mode is enabled. | Phase 8 complete |
 | Keep LLM slow-path with backoff | API outages or slow responses should skip trading rather than block deterministic safety logic. | Phase 9 complete for activation |
 | Track margin vs notional explicitly | Futures UI can show small margin such as 1 USDT, while Binance order filters validate contract notional and quantity. | Phase 9 follow-up |
-| Require market reference price for AI trade geometry | The model should not invent executable prices from summaries alone. | Phase 11 active |
+| Require market reference price for AI trade geometry | The model should not invent executable prices from summaries alone. | Phase 11 complete |
+| Filter for pilot tradability before AI | Hot symbols that cannot fit Binance minimum executable notional under the pilot cap should not consume AI/execution cycles. | Phase 12 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 after starting v1.3 decision robustness.*
+*Last updated: 2026-06-20 after completing v1.4 pilot tradability filtering.*

@@ -11,7 +11,11 @@ class AiDecisionTests(unittest.TestCase):
                 "symbol": "BTCUSDT",
                 "score": 50.0,
                 "reason_codes": ["narrative_heat", "price_momentum"],
-                "features": {"quote_volume": 5_000_000, "reference_price": 100.0},
+                "features": {
+                    "quote_volume": 5_000_000,
+                    "reference_price": 100.0,
+                    "min_executable_notional": 5.0,
+                },
             },
             risk_limits=RiskLimits(
                 account_capital_usdt=100,
@@ -95,6 +99,16 @@ class AiDecisionTests(unittest.TestCase):
         context = self.context().to_dict()
 
         self.assertEqual(context["candidate"]["features"]["reference_price"], 100.0)
+        self.assertEqual(context["candidate"]["features"]["min_executable_notional"], 5.0)
+
+    def test_notional_below_min_executable_is_rejected(self):
+        payload = self.valid_trade()
+        payload["notional_usdt"] = 4.5
+
+        result = validate_decision_payload(payload, self.context())
+
+        self.assertFalse(result.accepted)
+        self.assertIn("notional_below_min_executable", result.validation_errors)
 
     def test_unexpected_fields_are_rejected(self):
         payload = self.valid_trade()

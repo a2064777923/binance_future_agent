@@ -69,6 +69,28 @@ class FakeCollector:
         ]
 
 
+class UntradableBtcCollector(FakeCollector):
+    def collect_rest_snapshots(self):
+        return [
+            *super().collect_rest_snapshots(),
+            NormalizedMarketSnapshot(
+                source="binance_usdm",
+                event_type="exchange_symbol",
+                symbol="BTCUSDT",
+                event_time=1700000000005,
+                received_at="2026-06-20T10:00:00Z",
+                payload={
+                    "status": "TRADING",
+                    "contract_type": "PERPETUAL",
+                    "filters": {
+                        "MARKET_LOT_SIZE": {"minQty": "0.001", "stepSize": "0.001"},
+                        "MIN_NOTIONAL": {"notional": "50"},
+                    },
+                },
+            ),
+        ]
+
+
 class FakeNarrativeRunner:
     def collect(self):
         return [
@@ -185,6 +207,36 @@ class AgentRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "dry_run")
         self.assertEqual(ai_client.contexts[0]["candidate"]["features"]["reference_price"], 100.0)
+
+    def test_run_once_skips_ai_when_candidate_cannot_fit_notional_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MAX_POSITION_NOTIONAL_USDT": "20",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+            ai_client = FakeAiClient()
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=UntradableBtcCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+            )
+
+        self.assertEqual(result.status, "no_candidate")
+        self.assertEqual(result.rejected_count, 1)
+        self.assertEqual(ai_client.calls, 0)
 
     def test_run_once_uses_market_heat_when_narratives_are_empty(self):
         with tempfile.TemporaryDirectory() as tmp:

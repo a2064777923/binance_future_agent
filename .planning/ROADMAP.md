@@ -12,7 +12,8 @@
 - ✅ **v1.1 Live Activation** — Phase 9, live timer active under pilot caps;
   LVA-05 remains a future-entry evidence gate.
 - ✅ **v1.2 Backtest Calibration** — Phase 10, completed 2026-06-20.
-- 🚧 **v1.3 Decision Robustness** — Phase 11, in progress.
+- ✅ **v1.3 Decision Robustness** — Phase 11, completed 2026-06-20.
+- ✅ **v1.4 Pilot Tradability Filter** — Phase 12, completed 2026-06-20.
 
 ## Phases
 
@@ -118,6 +119,28 @@ outputs fail closed.
    not create submitted order intents.
 5. Full test suite and server health checks pass after deployment.
 
+### Phase 12: Pilot Tradability Filter
+
+**Goal:** Stop the 100 USDT pilot from selecting hot symbols whose Binance
+minimum executable notional cannot fit the configured max position notional cap.
+
+**Requirements:** PTF-01, PTF-02, PTF-03, PTF-04
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. Candidate features include Binance `minQty`, `stepSize`, `minNotional`, and
+   computed `min_executable_notional` when exchange filters and reference price
+   are available.
+2. Candidate generation rejects symbols whose `min_executable_notional` exceeds
+   `BFA_MAX_POSITION_NOTIONAL_USDT`.
+3. AI context includes `min_executable_notional`, and local AI validation
+   rejects trade notional below that value.
+4. The live runner skips AI for cap-incompatible candidates rather than
+   spending model calls on impossible trades.
+5. Full tests and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -133,15 +156,16 @@ outputs fail closed.
 | 9 | v1.1 | 1/1 | Complete    | 2026-06-20 |
 | 10 | v1.2 | 1/1 | Complete    | 2026-06-20 |
 | 11 | v1.3 | 1/1 | Complete | 2026-06-20 |
+| 12 | v1.4 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.3 requirements: 13
-- Mapped: 13
+- v1.1-v1.4 requirements: 17
+- Mapped: 17
 - Unmapped: 0
 
 ## Next Step
 
-Decision robustness is complete. Keep 100 USDT pilot caps unchanged and observe
-live timer cycles; after the first submitted live entry, verify protective-order
-evidence with `ops live-status`.
+Pilot tradability filtering is complete. Keep 100 USDT pilot caps unchanged and
+observe live timer cycles; after the first submitted live entry, verify
+protective-order evidence with `ops live-status`.

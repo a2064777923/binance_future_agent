@@ -70,6 +70,22 @@ v1.0 requirements are archived at
 - [x] **AIR-04**: Live runner evidence distinguishes fail-closed incomplete AI
   trade outputs from submitted or protective-order evidence.
 
+### Pilot Tradability
+
+- [x] **PTF-01**: Candidate feature extraction includes Binance execution
+  filter facts needed to estimate the minimum executable notional under current
+  symbol quantity and notional rules.
+
+- [x] **PTF-02**: Candidate generation rejects symbols whose minimum executable
+  notional exceeds the configured 100 USDT pilot position cap.
+
+- [x] **PTF-03**: AI decision context and validation include the candidate's
+  minimum executable notional so trade decisions below Binance minimums fail
+  closed before order intent submission.
+
+- [x] **PTF-04**: Live pilot keeps existing 100 USDT caps unchanged while
+  avoiding AI calls for cap-incompatible hot symbols.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -96,13 +112,17 @@ v1.0 requirements are archived at
 | AIR-02 | Phase 11 | Complete - prompt requires full trade geometry or pass |
 | AIR-03 | Phase 11 | Complete - entry/reference validation added |
 | AIR-04 | Phase 11 | Complete - incomplete model trades remain fail-closed |
+| PTF-01 | Phase 12 | Complete - min executable notional features added |
+| PTF-02 | Phase 12 | Complete - cap-incompatible candidates rejected |
+| PTF-03 | Phase 12 | Complete - AI context and validation include min executable notional |
+| PTF-04 | Phase 12 | Complete - pilot caps unchanged; AI skipped for impossible candidates |
 
 **Coverage:**
 
-- v1.1-v1.3 requirements: 13 total
-- Mapped to phases: 13
+- v1.1-v1.4 requirements: 17 total
+- Mapped to phases: 17
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after starting v1.3 decision robustness*
+*Last updated: 2026-06-20 after completing v1.4 pilot tradability filtering*

@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.3
-milestone_name: Decision Robustness
-current_phase: Phase 11 - AI Decision Robustness
+milestone: v1.4
+milestone_name: Pilot Tradability Filter
+current_phase: Phase 12 - Pilot Tradability Filter
 status: completed
-stopped_at: Phase 11 complete; awaiting future submitted entry for LVA-05 evidence
-last_updated: "2026-06-20T00:45:00.000Z"
+stopped_at: Phase 12 complete; awaiting future submitted entry for LVA-05 evidence
+last_updated: "2026-06-20T01:15:00.000Z"
 last_activity: 2026-06-20
-last_activity_desc: Phase 11 complete
+last_activity_desc: Phase 12 complete
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
+  total_phases: 4
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 11 - AI Decision Robustness
-**Status:** v1.3 complete; live timer remains under pilot caps
+**Current phase:** Phase 12 - Pilot Tradability Filter
+**Status:** v1.4 complete; live timer remains under pilot caps
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -71,6 +71,10 @@ projects or losing control of downside.
   backtest layer validates a market-heat proxy rather than claiming to reproduce
   a private Lana-style social alpha system.
 
+- Current Binance filters can make BTCUSDT/ETHUSDT incompatible with a 20 USDT
+  max-position-notional cap, so pilot tradability filtering must remain active
+  until risk caps are explicitly changed.
+
 ## Next Command
 
 Keep live caps unchanged and observe timer cycles. After the first submitted
@@ -84,15 +88,15 @@ live entry, use `ops live-status` to verify protective-order evidence.
 
 ## Current Position
 
-Phase: Phase 11 - AI Decision Robustness
-Plan: 11-01 complete
-Status: Reference-price context and stricter AI trade validation deployed locally
-Last activity: 2026-06-20 — Phase 11 complete
+Phase: Phase 12 - Pilot Tradability Filter
+Plan: 12-01 complete
+Status: Min executable notional is included in candidate/AI context and cap-incompatible candidates are rejected before AI
+Last activity: 2026-06-20 — Phase 12 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
-- Confirm deployed AI decision context/instructions continue to produce either complete trade geometry or fail-closed `pass`/validation results.
+- Confirm live cycles skip AI when all hot candidates are cap-incompatible, or send only pilot-tradable candidates to AI.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.
