@@ -435,7 +435,8 @@ target the losing conditions instead of guessing.
 
 **Depends on:** Phase 42
 
-**Status:** In progress locally.
+**Status:** Complete and deployed; attribution points to short-side, stop-loss,
+and worst-symbol recalibration.
 
 **Plans:** 1 plan
 
@@ -456,7 +457,7 @@ target the losing conditions instead of guessing.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-43 | 13/14 | Phase 43 in progress, paper loss attribution local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-43 | 14/14 | Phase 43 deployed, recalibration evidence ready | Pending |
 
 ## Requirement Coverage
 
@@ -476,9 +477,10 @@ on the server. The paper timer uses auto-hot symbol selection rather than the
 10-symbol live pilot allowlist. `ops forward-paper-performance-check` is now
 deployed and the latest server gate returns `keep_live_paused` from negative
 5m paper performance: 57 signals, 35 settled outcomes, win rate 0.34285714,
-total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Current
-work should attribute those losses by symbol, side, exit reason, and setup
-evidence before changing strategy filters. Monitor any active position through
+total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Phase 43
+attribution is deployed and shows the clearest recalibration targets are
+short-side setups, stop-loss-heavy entries, and worst symbols such as
+`BICOUSDT`, `BEATUSDT`, and `SLXUSDT`. Monitor any active position through
 filter-aware `ops position-adjustment-plan` and use
 `ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
 adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`

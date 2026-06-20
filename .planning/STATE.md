@@ -4,23 +4,23 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 43
 status: active
-stopped_at: Phase 43 in progress; attributing negative forward-paper evidence
-last_updated: "2026-06-20T22:58:00+08:00"
+stopped_at: Phase 43 deployed; recalibration evidence ready
+last_updated: "2026-06-20T23:12:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Started forward-paper loss attribution and recalibration phase
+last_activity_desc: Deployed forward-paper loss attribution and identified recalibration targets
 progress:
   total_phases: 39
-  completed_phases: 38
+  completed_phases: 39
   total_plans: 60
-  completed_plans: 59
-  percent: 98
+  completed_plans: 60
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 43 — Forward-Paper Loss Attribution And Recalibration
-**Status:** Phase 43 in progress; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
+**Status:** Phase 43 deployed; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -514,43 +514,56 @@ gated by all-interval strategy evidence.
   `paper_worst_drawdown_exceeds_cap`. Python sqlite count check showed
   `paper_signals=57`, `paper_outcomes=35`, and `order_intents=18`.
 
-- Phase 43 has been added to turn the negative paper evidence into actionable
-  diagnostics. The target is a read-only attribution report that joins paper
-  outcomes back to their original setup payloads and ranks losing conditions by
-  symbol, side, exit reason, setup reasons/warnings, and factor evidence before
-  any filter or live-resume change.
+- Phase 43 is deployed. Read-only `ops forward-paper-loss-attribution` joins
+  settled paper outcomes to their originating signal setup payloads and ranks
+  losing conditions by symbol, side, exit reason, setup reasons/warnings, and
+  factor evidence before any filter or live-resume change.
+
+- Latest server Phase 43 attribution evidence: focused tests passed with `3`
+  tests, full suite passed with `330` tests, health-check passed with network
+  checks skipped, paper timer is active, and live service/timer remain
+  inactive. `ops forward-paper-loss-attribution --min-group-outcomes 1
+  --worst-limit 5` returned `loss_attribution_ready` with `signal_count=74`,
+  `outcome_count=49`, `matched_outcome_count=49`,
+  `total_net_pnl_usdt=-0.93131071`, and `win_rate=0.36734694`. Worst groups:
+  `BICOUSDT` (`3` outcomes, `-0.89590149` USDT, `0.0` win rate), `BEATUSDT`
+  (`2`, `-0.47163963`), `SLXUSDT` (`2`, `-0.46805458`), short side (`34`,
+  `-1.1316274`, win rate `0.32352941`), and stop-loss exits (`11`,
+  `-2.99528982`, win rate `0.0`). Worst setup/factor associations include
+  `rsi_bearish_momentum`, `taker_flow_acceleration`, `quant_short_setup`,
+  `volume_neutral`, `ema_trend_down`, and `close_near_range_low`.
 
 ## Next Command
 
-Implement and verify Phase 43 forward-paper loss attribution. Use it to decide
-which `quant_setup_selective` 5m conditions need stricter filtering before any
-live resume. Keep collecting out-of-sample `ops forward-paper-run` evidence
-from the active paper-only timer, then rerun
-`ops forward-paper-performance-check`. Do not restore the live timer, execute
-adjustment orders, or apply `30u_10x_multi_dynamic` while the default
-all-interval promotion gate returns `keep_live_paused` and paper performance is
-negative.
+Plan and implement targeted recalibration for `quant_setup_selective` 5m:
+tighten or quarantine short-side setups, stop-loss-heavy entries, and the worst
+symbols (`BICOUSDT`, `BEATUSDT`, `SLXUSDT`) before any live resume. Keep
+collecting out-of-sample `ops forward-paper-run` evidence from the active
+paper-only timer, then rerun `ops forward-paper-performance-check`. Do not
+restore the live timer, execute adjustment orders, or apply
+`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
+`keep_live_paused` and paper performance is negative.
 
 ## Session
 
-**Last session:** 2026-06-20T22:58:00+08:00
-**Stopped at:** Phase 43 in progress; attributing negative paper evidence
-**Resume file:** .planning/phases/43-forward-paper-loss-attribution-and-recalibration/43-01-PLAN.md
+**Last session:** 2026-06-20T23:12:00+08:00
+**Stopped at:** Phase 43 deployed; recalibration evidence ready
+**Resume file:** .planning/phases/43-forward-paper-loss-attribution-and-recalibration/43-01-SUMMARY.md
 
 ## Current Position
 
 Phase: 43 — Forward-Paper Loss Attribution And Recalibration
 Plan: 43-01 local implementation
-Status: In progress locally; deployment pending
-Last activity: 2026-06-20 — phase added and loss attribution work started
+Status: Complete and deployed; recalibration targets identified
+Last activity: 2026-06-20 — loss attribution deployed and verified on server
 
 ## Operator Next Steps
 
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
-- Use Phase 43 loss attribution to identify which symbols, sides, exit reasons,
-  and setup factors are driving the negative 5m paper evidence.
+- Use Phase 43 loss attribution to recalibrate short-side filters, stop-loss
+  geometry, and worst-symbol quarantine before live resume.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

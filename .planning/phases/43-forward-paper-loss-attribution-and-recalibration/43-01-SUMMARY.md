@@ -28,6 +28,31 @@ The project can now explain the negative paper-performance gate in a more
 actionable way. Instead of only seeing total PnL and win rate, operators can
 see which symbols, sides, exits, and setup evidence are associated with losses.
 
+## Server Result
+
+- Deployed to `/opt/binance-futures-agent/app`.
+- Server focused tests passed with `3` tests.
+- Server full suite passed with `330` tests.
+- Secret-safe health-check passed with network checks skipped.
+- `binance-futures-agent-live.service` and
+  `binance-futures-agent-live.timer` remained `inactive`.
+- `binance-futures-agent-paper.timer` was paused during deployment and restored
+  afterwards.
+- Latest server attribution report over `quant_setup_selective` `5m` returned
+  `loss_attribution_ready` with `74` paper signals, `49` matched settled
+  outcomes, total net PnL `-0.93131071` USDT, and win rate `0.36734694`.
+- Worst symbol groups were `BICOUSDT` (`3` outcomes, `-0.89590149` USDT,
+  `0.0` win rate), `BEATUSDT` (`2`, `-0.47163963`), and `SLXUSDT` (`2`,
+  `-0.46805458`).
+- Worst side group was `short`: `34` outcomes, total net PnL `-1.1316274`
+  USDT, win rate `0.32352941`; `long` was slightly positive at `0.20031669`
+  USDT.
+- Worst exit group was `stop_loss`: `11` outcomes, total net PnL
+  `-2.99528982` USDT, win rate `0.0`.
+- Worst setup/factor associations included `rsi_bearish_momentum`,
+  `taker_flow_acceleration`, `quant_short_setup`, `volume_neutral`,
+  `ema_trend_down`, and `close_near_range_low`.
+
 ## Not Changed
 
 - Live timer is not restored by this phase.
@@ -37,5 +62,5 @@ see which symbols, sides, exits, and setup evidence are associated with losses.
 
 ## Next
 
-Deploy the attribution report, run it against the server paper DB, and use the
-result to plan targeted setup recalibration.
+Plan targeted recalibration around short-side filtering, stop-loss geometry,
+and symbol quarantine for the worst paper symbols before any live resume.
