@@ -140,6 +140,18 @@ v1.0 requirements are archived at
   the current Binance account position-side setting without changing risk caps
   or other services.
 
+### Balance Preflight Gate
+
+- [x] **BPG-01**: Live execution checks Binance account available balance before
+  margin setup or entry order submission.
+
+- [x] **BPG-02**: If available balance is below the order intent's estimated
+  initial margin, execution rejects with `insufficient_available_balance` and
+  submits no order.
+
+- [x] **BPG-03**: Account balance API errors fail closed before entry order
+  submission.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -184,13 +196,16 @@ v1.0 requirements are archived at
 | PME-02 | Phase 16 | Complete - hedge positionSide sent on execution orders |
 | PME-03 | Phase 16 | Complete - entry order errors fail closed and persist evidence |
 | PME-04 | Phase 16 | Complete - server can be explicitly configured for hedge mode |
+| BPG-01 | Phase 17 | Complete - live account balance checked before entry |
+| BPG-02 | Phase 17 | Complete - insufficient balance rejects before order calls |
+| BPG-03 | Phase 17 | Complete - account balance read errors fail closed |
 
 **Coverage:**
 
-- v1.1-v1.8 requirements: 31 total
-- Mapped to phases: 31
+- v1.1-v1.9 requirements: 34 total
+- Mapped to phases: 34
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.8 position mode entry fail-closed*
+*Last updated: 2026-06-20 after completing v1.9 balance preflight gate*

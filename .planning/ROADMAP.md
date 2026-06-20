@@ -18,6 +18,7 @@
 - ✅ **v1.6 Margin Setup Fail-Closed** — Phase 14, completed 2026-06-20.
 - ✅ **v1.7 Configurable Margin Mode** — Phase 15, completed 2026-06-20.
 - ✅ **v1.8 Position Mode Entry Fail-Closed** — Phase 16, completed 2026-06-20.
+- ◆ **v1.9 Balance Preflight Gate** — Phase 17, deployment verification in progress.
 
 ## Phases
 
@@ -109,7 +110,7 @@ outputs fail closed.
 
 **Requirements:** AIR-01, AIR-02, AIR-03, AIR-04
 
-**Status:** Complete.
+**Status:** Local implementation complete; deployment verification in progress.
 
 **Success Criteria:**
 
@@ -223,6 +224,24 @@ settings and fail closed if entry order placement is rejected.
    credentials, risk caps, or other services.
 5. Full tests and server health checks pass after deployment.
 
+### Phase 17: Balance Preflight Gate
+
+**Goal:** Avoid repeated live order attempts when Binance futures available
+balance is below the order intent's estimated initial margin.
+
+**Requirements:** BPG-01, BPG-02, BPG-03
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. Live execution reads account available balance before margin setup or entry
+   order placement.
+2. Insufficient available balance rejects with `insufficient_available_balance`.
+3. Account-balance read errors reject before entry order placement.
+4. No order is submitted when futures account available balance is insufficient.
+5. Full tests and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -243,16 +262,17 @@ settings and fail closed if entry order placement is rejected.
 | 14 | v1.6 | 1/1 | Complete | 2026-06-20 |
 | 15 | v1.7 | 1/1 | Complete | 2026-06-20 |
 | 16 | v1.8 | 1/1 | Complete | 2026-06-20 |
+| 17 | v1.9 | 1/1 | In Progress | - |
 
 ## Requirement Coverage
 
-- v1.1-v1.8 requirements: 31
-- Mapped: 31
+- v1.1-v1.9 requirements: 34
+- Mapped: 34
 - Unmapped: 0
 
 ## Next Step
 
-Position mode support is ready. Deploy with `BFA_POSITION_MODE=hedge` on the
-server, keep 100 USDT pilot caps unchanged, and observe live timer cycles; after
-the first submitted live entry, verify protective-order evidence with
-`ops live-status`.
+Deploy the balance preflight gate, keep 100 USDT pilot caps unchanged, and
+observe live timer cycles. Funding the USD-M futures account is required before
+the bot can submit a real entry; after the first submitted live entry, verify
+protective-order evidence with `ops live-status`.

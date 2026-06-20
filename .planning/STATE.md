@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.8
-milestone_name: Position Mode And Entry Fail-Closed
-current_phase: Phase 16 - Position Mode And Entry Fail-Closed
-status: completed
-stopped_at: Phase 16 deployed with hedge position mode; awaiting future submitted entry for LVA-05 evidence
-last_updated: "2026-06-20T02:15:00.000Z"
+milestone: v1.9
+milestone_name: Balance Preflight Gate
+current_phase: Phase 17 - Balance Preflight Gate
+status: in_progress
+stopped_at: Phase 17 local implementation ready; final verification and deployment pending
+last_updated: "2026-06-20T10:30:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Phase 16 complete
+last_activity_desc: Phase 17 balance preflight implementation in progress
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 8
-  total_plans: 8
+  total_plans: 9
   completed_plans: 8
-  percent: 100
+  percent: 89
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 16 - Position Mode And Entry Fail-Closed
-**Status:** v1.8 complete and deployed; live timer active under pilot caps
+**Current phase:** Phase 17 - Balance Preflight Gate
+**Status:** v1.9 implementation in progress; final verification and deployment pending
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -87,11 +87,15 @@ projects or losing control of downside.
 - Binance position-side mode expects explicit `positionSide`; execution must
   send hedge position sides when configured and fail closed on entry rejections.
 
+- The current USD-M futures account has 0 available balance, so live execution
+  must reject locally before margin setup or entry order placement until the
+  account is funded.
+
 ## Next Command
 
-Keep live timer active under `BFA_MARGIN_MODE=cross` and
-`BFA_POSITION_MODE=hedge`. After the first submitted live entry, use
-`ops live-status` to verify protective-order evidence.
+Complete Phase 17 verification, deploy the balance preflight gate, and observe a
+live timer cycle. With the current unfunded USD-M futures account, expect
+`insufficient_available_balance` and no entry order attempt.
 
 ## Session
 
@@ -101,10 +105,10 @@ Keep live timer active under `BFA_MARGIN_MODE=cross` and
 
 ## Current Position
 
-Phase: Phase 16 - Position Mode And Entry Fail-Closed
-Plan: 16-01 complete
-Status: Hedge position mode and entry order fail-closed handling are deployed on server
-Last activity: 2026-06-20 — Phase 16 complete
+Phase: Phase 17 - Balance Preflight Gate
+Plan: 17-01 in progress
+Status: Balance preflight implementation ready for final verification and deployment
+Last activity: 2026-06-20 — Phase 17 implementation in progress
 
 ## Operator Next Steps
 
@@ -116,3 +120,5 @@ Last activity: 2026-06-20 — Phase 16 complete
 
 - If a future entry is submitted, verify protective stop-loss and take-profit
   exchange orders with `ops live-status` before changing risk limits.
+- Fund or transfer USDT into the Binance USD-M futures account before expecting
+  a real live entry submission.

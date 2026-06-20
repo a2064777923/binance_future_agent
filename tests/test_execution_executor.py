@@ -18,8 +18,9 @@ EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchang
 
 
 class FakeSignedClient:
-    def __init__(self):
+    def __init__(self, *, available_balance="100"):
         self.calls = []
+        self.available_balance = available_balance
 
     def change_margin_type(self, symbol, *, margin_type="ISOLATED"):
         self.calls.append(("margin", symbol, margin_type))
@@ -40,6 +41,10 @@ class FakeSignedClient:
     def test_order(self, **kwargs):
         self.calls.append(("test_order", kwargs))
         return {}
+
+    def account(self):
+        self.calls.append(("account",))
+        return {"availableBalance": self.available_balance}
 
 
 class MarginFailingSignedClient(FakeSignedClient):
@@ -64,6 +69,19 @@ class EntryFailingSignedClient(FakeSignedClient):
             status_code=400,
             binance_code=-4061,
             binance_message="Order's position side does not match user's setting.",
+            headers={},
+        )
+
+
+class AccountFailingSignedClient(FakeSignedClient):
+    def account(self):
+        self.calls.append(("account",))
+        raise BinanceSignedError(
+            endpoint="/fapi/v3/account",
+            params={},
+            status_code=400,
+            binance_code=-1021,
+            binance_message="Timestamp for this request is outside of the recvWindow.",
             headers={},
         )
 
@@ -195,15 +213,16 @@ class ExecutionEngineTests(unittest.TestCase):
 
         self.assertEqual(result.status, "submitted")
         self.assertTrue(result.submitted)
-        self.assertEqual(fake_client.calls[0], ("margin", "BTCUSDT", "ISOLATED"))
-        self.assertEqual(fake_client.calls[1], ("leverage", "BTCUSDT", 3))
-        self.assertEqual(fake_client.calls[2][0], "new_order")
-        self.assertEqual(fake_client.calls[3][0], "new_algo_order")
-        self.assertEqual(fake_client.calls[3][1]["order_type"], "STOP_MARKET")
-        self.assertEqual(fake_client.calls[3][1]["side"], "SELL")
+        self.assertEqual(fake_client.calls[0], ("account",))
+        self.assertEqual(fake_client.calls[1], ("margin", "BTCUSDT", "ISOLATED"))
+        self.assertEqual(fake_client.calls[2], ("leverage", "BTCUSDT", 3))
+        self.assertEqual(fake_client.calls[3][0], "new_order")
         self.assertEqual(fake_client.calls[4][0], "new_algo_order")
-        self.assertEqual(fake_client.calls[4][1]["order_type"], "TAKE_PROFIT_MARKET")
+        self.assertEqual(fake_client.calls[4][1]["order_type"], "STOP_MARKET")
         self.assertEqual(fake_client.calls[4][1]["side"], "SELL")
+        self.assertEqual(fake_client.calls[5][0], "new_algo_order")
+        self.assertEqual(fake_client.calls[5][1]["order_type"], "TAKE_PROFIT_MARKET")
+        self.assertEqual(fake_client.calls[5][1]["side"], "SELL")
         self.assertEqual(
             connection.execute("SELECT COUNT(*) AS count FROM exchange_responses").fetchone()["count"],
             1,
@@ -230,8 +249,8 @@ class ExecutionEngineTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "submitted")
-        self.assertEqual(fake_client.calls[0], ("margin", "BTCUSDT", "CROSSED"))
-        self.assertEqual(fake_client.calls[1], ("leverage", "BTCUSDT", 3))
+        self.assertEqual(fake_client.calls[1], ("margin", "BTCUSDT", "CROSSED"))
+        self.assertEqual(fake_client.calls[2], ("leverage", "BTCUSDT", 3))
 
     def test_live_hedge_position_mode_sends_position_side(self):
         fake_client = FakeSignedClient()
@@ -254,9 +273,57 @@ class ExecutionEngineTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "submitted")
-        self.assertEqual(fake_client.calls[2][1]["position_side"], "LONG")
         self.assertEqual(fake_client.calls[3][1]["position_side"], "LONG")
         self.assertEqual(fake_client.calls[4][1]["position_side"], "LONG")
+        self.assertEqual(fake_client.calls[5][1]["position_side"], "LONG")
+
+    def test_live_insufficient_available_balance_rejects_before_exchange_order_calls(self):
+        fake_client = FakeSignedClient(available_balance="0")
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.submitted)
+        self.assertIn("insufficient_available_balance", result.risk.reason_codes)
+        self.assertEqual(fake_client.calls, [("account",)])
+
+    def test_live_account_balance_error_rejects_before_exchange_order_calls(self):
+        fake_client = AccountFailingSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.submitted)
+        self.assertIn("account_balance_check_failed:-1021", result.risk.reason_codes)
+        self.assertEqual(fake_client.calls, [("account",)])
 
     def test_entry_order_error_fails_closed_before_submission(self):
         fake_client = EntryFailingSignedClient()
@@ -284,7 +351,7 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
         self.assertFalse(result.submitted)
         self.assertIn("entry_order_failed", result.risk.reason_codes)
-        self.assertEqual([call[0] for call in fake_client.calls], ["margin", "leverage", "new_order"])
+        self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order"])
         self.assertEqual(
             connection.execute("SELECT COUNT(*) AS count FROM order_intents").fetchone()["count"],
             1,
@@ -320,7 +387,7 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
         self.assertFalse(result.submitted)
         self.assertIn("margin_setup_failed", result.risk.reason_codes)
-        self.assertEqual(fake_client.calls, [("margin", "BTCUSDT", "ISOLATED")])
+        self.assertEqual(fake_client.calls, [("account",), ("margin", "BTCUSDT", "ISOLATED")])
         self.assertEqual(
             connection.execute("SELECT COUNT(*) AS count FROM order_intents").fetchone()["count"],
             1,

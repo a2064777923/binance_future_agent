@@ -90,6 +90,7 @@ class ExecutionEngine:
                 side=intent.side,
                 order_type=intent.order_type,
                 quantity=intent.quantity,
+                position_side=_position_side(intent, self.config),
             )
             return self._finish(
                 status="test_order_checked",
@@ -100,6 +101,14 @@ class ExecutionEngine:
                 exchange_response_type="test_order",
             )
 
+        balance_risk = self._check_live_available_balance(intent)
+        if not balance_risk.accepted:
+            return self._finish(
+                status="rejected",
+                submitted=False,
+                intent=intent,
+                risk=balance_risk,
+            )
         try:
             self._ensure_live_margin(intent)
         except BinanceSignedError as exc:
@@ -186,6 +195,24 @@ class ExecutionEngine:
             risk=risk,
             exchange_response=response,
         )
+
+    def _check_live_available_balance(self, intent: OrderIntent) -> RiskDecision:
+        assert self.signed_client is not None
+        try:
+            account = self.signed_client.account()
+        except BinanceSignedError as exc:
+            return RiskDecision(False, [f"account_balance_check_failed:{exc.binance_code or 'unknown'}"])
+        available = _float(account.get("availableBalance"))
+        required = intent.estimated_initial_margin_usdt
+        if available is None:
+            return RiskDecision(False, ["account_available_balance_unknown"])
+        if available < required:
+            return RiskDecision(
+                False,
+                ["insufficient_available_balance"],
+                [f"available_balance:{available:.8f}", f"required_initial_margin:{required:.8f}"],
+            )
+        return RiskDecision(True, ["available_balance_ok"])
 
     def _finish(
         self,
@@ -294,6 +321,13 @@ def _position_side(intent: OrderIntent, config: AppConfig) -> str | None:
 
 def _reduce_only_supported(config: AppConfig) -> bool:
     return config.get("BFA_POSITION_MODE", "one_way").strip().lower() != "hedge"
+
+
+def _float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _activate_kill_switch(config: AppConfig) -> bool:
