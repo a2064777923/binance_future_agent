@@ -152,6 +152,22 @@ projects or losing control of downside.
 - [x] **QSC-04**: Recent hot-symbol matrix evidence is generated for baseline,
   selective, and scalp variants, and checked through the promotion gate.
 
+### Interval-Aware Forward Paper Gate
+
+- [x] **IFP-01**: The strategy promotion check can evaluate explicitly selected
+  matrix intervals without treating a passing interval as full live-resume
+  evidence.
+
+- [x] **IFP-02**: Selected-interval checks report selected interval summaries,
+  selected interval cell checks, scope, and `live_resume_allowed=false`.
+
+- [x] **IFP-03**: The default strategy promotion behavior remains all-interval
+  strict and continues to block mixed evidence where any interval fails.
+
+- [x] **IFP-04**: The latest Phase 38 matrix can mark
+  `quant_setup_selective` on `5m` as `forward_paper_allowed` while the default
+  all-interval check still returns `keep_live_paused`.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -199,12 +215,16 @@ projects or losing control of downside.
 | QSC-02 | Phase 38 | Complete locally |
 | QSC-03 | Phase 38 | Complete locally |
 | QSC-04 | Phase 38 | Complete locally |
+| IFP-01 | Phase 39 | Complete locally |
+| IFP-02 | Phase 39 | Complete locally |
+| IFP-03 | Phase 39 | Complete locally |
+| IFP-04 | Phase 39 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 35 total
-- Mapped to phases: 35
+- v1.22 requirements: 39 total
+- Mapped to phases: 39
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 38 quant setup calibration variants*
+*Last updated: 2026-06-20 after Phase 39 interval-aware forward-paper gate*

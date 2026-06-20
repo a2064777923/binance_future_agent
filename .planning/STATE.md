@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 38
+current_phase: 39
 status: active
-stopped_at: Phase 38 complete locally; selective variant promising on 5m but total promotion still blocked
-last_updated: "2026-06-20T23:15:00+08:00"
+stopped_at: Phase 39 complete locally; 5m selective forward-paper gate allowed but live resume still blocked
+last_updated: "2026-06-20T23:45:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 35
-  completed_phases: 35
-  total_plans: 56
-  completed_plans: 56
+  total_phases: 36
+  completed_phases: 36
+  total_plans: 57
+  completed_plans: 57
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 38 — Quant Setup Calibration Variants
-**Status:** Phase 38 complete locally; live timer remains paused while total strategy promotion fails
+**Current phase:** Phase 39 — Interval-Aware Forward Paper Gate
+**Status:** Phase 39 complete locally; live timer remains paused while default all-interval strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Decide whether to promote only passing intervals or further
-calibrate failed intervals before any forward-paper or live resumption.
+**Current focus:** Collect forward-paper evidence for passing intervals while
+keeping live resume gated by all-interval strategy evidence.
 
 ## Decisions
 
@@ -431,35 +431,49 @@ calibrate failed intervals before any forward-paper or live resumption.
   negative (`-0.69422935` USDT). Promotion checks for all three variants still
   returned `keep_live_paused`.
 
+- Phase 39 local implementation adds interval-aware promotion scope to
+  `ops strategy-promotion-check`. Default `all-intervals` behavior remains
+  strict and continues to require the whole selected variant to pass. Explicit
+  `--scope selected-intervals --intervals 5m` checks only the selected cell and
+  can return `status=forward_paper_allowed`, but always reports
+  `live_resume_allowed=false`.
+
+- Running Phase 39 against `runtime/quant_setup_matrix_phase38.json` marks
+  `quant_setup_selective` on `5m` as forward-paper allowed:
+  `+1.62468567` USDT, `51` trades, positive-window-rate `1.0`, worst drawdown
+  `1.27227818` USDT under a `1.5` USDT cap. The default all-interval check on
+  the same variant still returns `keep_live_paused` because `15m` remains
+  negative and over drawdown cap.
+
 ## Next Command
 
-Choose whether to add interval-aware promotion for `5m`-only forward-paper
-testing or further calibrate/disable failed `15m` behavior, then rerun matrix
-plus `ops strategy-promotion-check`. Do not restore the live timer, execute
-adjustment orders, or apply `30u_10x_multi_dynamic` while total promotion gate
-returns `keep_live_paused`.
+Collect forward-paper evidence for `quant_setup_selective` on `5m`, or further
+calibrate/disable failed `15m` behavior, then rerun matrix plus both selected
+and all-interval `ops strategy-promotion-check`. Do not restore the live timer,
+execute adjustment orders, or apply `30u_10x_multi_dynamic` while the default
+all-interval promotion gate returns `keep_live_paused`.
 
 ## Session
 
-**Last session:** 2026-06-20T23:15:00+08:00
-**Stopped at:** Phase 38 complete locally; selective variant promising on 5m but total promotion still blocked
-**Resume file:** .planning/phases/38-quant-setup-calibration-variants/38-01-SUMMARY.md
+**Last session:** 2026-06-20T23:45:00+08:00
+**Stopped at:** Phase 39 complete locally; 5m selective forward-paper gate allowed but live resume still blocked
+**Resume file:** .planning/phases/39-interval-aware-forward-paper-gate/39-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 38 — Quant Setup Calibration Variants
-Plan: 38-01 local implementation
+Phase: 39 — Interval-Aware Forward Paper Gate
+Plan: 39-01 local implementation
 Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — calibrated setup variants implemented and latest matrix checked
+Last activity: 2026-06-20 — selected-interval forward-paper gate implemented and latest matrix checked
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Decide whether to pursue `5m`-only forward-paper promotion for
-  `quant_setup_selective`, or further calibrate/disable `15m` behavior first.
-- Rerun recent hot-symbol matrix sweeps and require `ops strategy-promotion-check`
-  to pass before using any setup live.
+- Collect forward-paper evidence for `quant_setup_selective` on `5m`, while
+  keeping `live_resume_allowed=false` until all-interval evidence passes.
+- Rerun recent hot-symbol matrix sweeps and require default all-interval
+  `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
 - Review the old SOLUSDT decision chain through read-only

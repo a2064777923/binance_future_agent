@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-38, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-39, active.
 
 ## Phases
 
@@ -278,13 +278,40 @@ without changing live defaults.
    paused.
 7. Full local test suite passes.
 
+### Phase 39: Interval-Aware Forward Paper Gate
+
+**Goal:** Allow explicitly selected matrix intervals to be promoted only toward
+forward-paper observation while preserving strict all-interval gates for live
+resume or risk-profile changes.
+
+**Requirements:** IFP-01, IFP-02, IFP-03, IFP-04
+
+**Status:** Complete locally; 5m selective is forward-paper allowed, live resume
+remains blocked.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. `ops strategy-promotion-check` supports `--scope selected-intervals` and
+   `--intervals ...`.
+2. Selected-interval checks only evaluate matching interval cells.
+3. Selected-interval success returns `forward_paper_allowed` and
+   `live_resume_allowed=false`.
+4. Default all-interval checks preserve previous strict behavior.
+5. The Phase 38 matrix marks `quant_setup_selective` on `5m` as
+   `forward_paper_allowed`.
+6. The same matrix still returns `keep_live_paused` with default all-interval
+   scope.
+7. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-38 | 9/9 | Phase 38 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-39 | 10/10 | Phase 39 local | Pending |
 
 ## Requirement Coverage
 
@@ -295,10 +322,11 @@ without changing live defaults.
 ## Next Step
 
 Keep live automation paused while the latest calibrated `quant_setup` matrix
-still fails total `ops strategy-promotion-check`. The `quant_setup_selective`
-variant is promising on `5m` but fails `15m`; next work should add
-interval-aware promotion or further 15m filtering before restoring live
-automation. Monitor `SOLUSDT` through filter-aware `ops position-adjustment-plan`
-and use `ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not
-execute adjustment orders, restore the live timer, or apply
-`30u_10x_multi_dynamic` without an explicit confirmation token.
+still fails default all-interval `ops strategy-promotion-check`. The
+`quant_setup_selective` variant is now eligible only for `5m` forward-paper
+observation through `--scope selected-intervals --intervals 5m`; next work
+should collect forward-paper evidence and/or recalibrate failed `15m` behavior
+before restoring live automation. Monitor `SOLUSDT` through filter-aware
+`ops position-adjustment-plan` and use `ops trade-trace --symbol SOLUSDT` for
+decision-chain review. Do not execute adjustment orders, restore the live
+timer, or apply `30u_10x_multi_dynamic` without an explicit confirmation token.

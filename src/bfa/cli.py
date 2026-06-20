@@ -333,6 +333,16 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy_promotion.add_argument("--env-file", help="optional env file to load before environment overrides")
     strategy_promotion.add_argument("--matrix-report", required=True, help="JSON report from backtest matrix")
     strategy_promotion.add_argument("--variant", default="quant_setup", help="variant to check")
+    strategy_promotion.add_argument(
+        "--scope",
+        choices=("all-intervals", "selected-intervals"),
+        default="all-intervals",
+        help="check the whole variant or only explicitly selected intervals",
+    )
+    strategy_promotion.add_argument(
+        "--intervals",
+        help="comma-separated intervals to check when --scope selected-intervals is used, e.g. 5m",
+    )
     strategy_promotion.add_argument("--min-trade-count", type=int, default=5, help="minimum trades per interval cell")
     strategy_promotion.add_argument(
         "--min-positive-window-rate",
@@ -976,6 +986,8 @@ def _run_ops(
             min_trade_count=args.min_trade_count,
             min_positive_window_rate=args.min_positive_window_rate,
             max_worst_drawdown_usdt=args.max_worst_drawdown_usdt,
+            intervals=_symbols_arg(args.intervals, uppercase=False) if args.intervals else None,
+            scope=args.scope,
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.promotion_allowed else 1

@@ -2047,6 +2047,74 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["promotion_allowed"])
         self.assertIn("variant_not_promoted", payload["reasons"])
 
+    def test_ops_strategy_promotion_check_accepts_selected_interval_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "matrix.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "schema": "bfa_hot_backtest_matrix_v1",
+                        "promotion": {
+                            "overall": "keep_caps_unchanged_drawdown_risk",
+                            "cells": [
+                                {
+                                    "interval": "5m",
+                                    "variant": "quant_setup_selective",
+                                    "verdict": "candidate_for_forward_paper",
+                                    "trade_count": 51,
+                                    "net_pnl_usdt": 1.62,
+                                    "positive_window_rate": 1.0,
+                                    "worst_drawdown_usdt": 1.27,
+                                    "max_daily_loss_usdt": 1.5,
+                                },
+                                {
+                                    "interval": "15m",
+                                    "variant": "quant_setup_selective",
+                                    "verdict": "negative_or_flat",
+                                    "trade_count": 60,
+                                    "net_pnl_usdt": -1.4,
+                                    "positive_window_rate": 0.33,
+                                    "worst_drawdown_usdt": 2.39,
+                                    "max_daily_loss_usdt": 1.5,
+                                },
+                            ],
+                            "variants": {
+                                "quant_setup_selective": {
+                                    "total_net_pnl_usdt": 0.22,
+                                    "worst_drawdown_usdt": 2.39,
+                                    "verdict": "drawdown_exceeds_pilot_cap",
+                                }
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "strategy-promotion-check",
+                "--matrix-report",
+                str(report),
+                "--variant",
+                "quant_setup_selective",
+                "--scope",
+                "selected-intervals",
+                "--intervals",
+                "5m",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertTrue(payload["promotion_allowed"])
+        self.assertFalse(payload["live_resume_allowed"])
+        self.assertEqual(payload["status"], "forward_paper_allowed")
+        self.assertEqual(payload["reasons"], ["selected_intervals_promoted"])
+        self.assertEqual(payload["scope"], "selected-intervals")
+        self.assertEqual(payload["intervals"], ["5m"])
+        self.assertEqual(payload["cell_checks"][0]["interval"], "5m")
+
 
 if __name__ == "__main__":
     unittest.main()
