@@ -75,6 +75,17 @@ resume path.
   observation summaries and source health, and remains paper-only with no
   `order_intents`.
 
+- Phase 57 server deployment is complete under
+  `/opt/binance-futures-agent/app` from commit `be3ea4c`. Server focused tests
+  passed with 62 tests, full tests passed with 369 tests, and health-check
+  wrote `runtime/server-health-phase57-be3ea4c.json`. A server paper-only
+  smoke selected 40 auto-hot symbols, generated 0 new paper signals, skipped
+  40, and persisted 40 observations (`blocked_by_guard=5`, `setup_pass=35`).
+  Latest server events after smoke were `paper_observation` events; the latest
+  historical `order_intents` occurrence remained `2026-06-20T15:32:03Z`.
+  Final server state: paper timer active, paper service inactive, live timer
+  inactive, live service inactive.
+
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
 - Backtest discipline: use short-window staged sweeps with completed candles,

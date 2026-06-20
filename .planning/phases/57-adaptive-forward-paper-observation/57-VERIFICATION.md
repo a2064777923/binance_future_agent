@@ -21,10 +21,14 @@ verified: 2026-06-21
 | `python -m unittest discover -s tests` | Passed, 369 tests |
 | `git diff --check` | Passed |
 | `ops forward-paper-run --auto-hot-symbols --top-n 40 --interval 5m --variant quant_setup_selective --limit 36` | Passed, paper-only; 40 observations and zero order intents |
+| Server focused tests | Passed, 62 tests |
+| Server full tests | Passed, 369 tests |
+| Server paper-only smoke | Passed; selected 40 symbols, persisted 40 observations, no new order intent events |
 
 ## Final Verdict
 
 Phase 57 passed locally. Forward-paper evidence is now diagnosable instead of
 opaque: every hot symbol can show whether it became a paper signal, passed setup
 filters, hit an adaptive guard, already had an open paper signal, or lacked
-enough data. Live automation remains disabled.
+enough data. The server deployment preserved paper timer operation and kept live
+automation disabled.

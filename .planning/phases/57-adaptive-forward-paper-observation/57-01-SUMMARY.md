@@ -64,6 +64,23 @@ Temporary DB:
 - Paper-only smoke confirmed `paper_signals=19`, `paper_observations=40`,
   `paper_outcomes=0`, and `order_intents=0`.
 
+## Server Evidence
+
+- Deployed commit `be3ea4c` to `/opt/binance-futures-agent/app`.
+- Server focused tests passed: 62 tests.
+- Server full tests passed: 369 tests.
+- Server health check wrote `runtime/server-health-phase57-be3ea4c.json`.
+- Server paper-only smoke wrote
+  `runtime/server-phase57-forward-paper-20260620T193636Z.json`.
+- The server smoke selected 40 auto-hot symbols, generated 0 new paper signals,
+  skipped 40, and persisted 40 `paper_observations`:
+  `{"blocked_by_guard": 5, "setup_pass": 35}`.
+- Server latest events after smoke were `paper_observation` events; total
+  `order_intents` remained historical with latest occurrence
+  `2026-06-20T15:32:03Z`.
+- Final server state: paper timer active, paper service inactive, live timer
+  inactive, live service inactive.
+
 ## Operational Notes
 
 - The paper timer can keep running with this richer report shape.
