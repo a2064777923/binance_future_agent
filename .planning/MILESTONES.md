@@ -1,31 +1,45 @@
 # Milestones
 
-## v1.22 Portfolio Risk And Multi-Position (Active: 2026-06-20)
+## v1.22 Portfolio Risk And Multi-Position (Shipped: 2026-06-20)
 
-**Phases completed:** 4 phases, 4 plans; Phase 33 deployed and verified
+**Phases completed:** 18 phases, 18 plans, 0 tasks
+
+**Archived artifacts:**
+
+- `.planning/milestones/v1.22-ROADMAP.md`
+- `.planning/milestones/v1.22-REQUIREMENTS.md`
+- `.planning/milestones/v1.22-MILESTONE-AUDIT.md`
 
 **Key accomplishments:**
 
-- Added portfolio-level margin, margin fraction, notional, and same-direction
-  notional caps.
-- Let multi-position mode continue scanning when an existing position is open
-  and capacity remains.
-- Added top-N candidate queue evaluation so retryable first-candidate skips do
-  not end the whole cycle.
-- Added a confirmation-gated `30u_10x_multi_dynamic` profile for higher
-  leverage and two concurrent positions.
-- Allowed risk-profile readiness to carry protected active exposure into the
-  target profile only when portfolio caps can absorb it.
-- Extended exposure status with portfolio budget context.
-- Added read-only active-position review and local active-position adjustment
-  planning for partial take-profit/full-close actions.
-- Added filter-aware adjustment planning so partial reduce quantities are
-  checked against Binance step/min-quantity/min-notional constraints.
+- Added portfolio-level margin, margin-fraction, total-notional, and
+  same-direction exposure caps for controlled multi-position profiles.
+
+- Added active-position review plus confirmation-gated adjustment planning so
+  open positions are reviewed before new entries are scanned.
+
+- Moved side, entry, stop, target, notional, hold time, and traceability into a
+  deterministic multi-factor setup layer with AI as overlay/veto only.
+
+- Added setup-driven backtesting, strategy promotion gates, calibrated variants,
+  and interval-aware forward-paper gates.
+
+- Deployed paper-only forward evidence collection with performance checks, loss
+  attribution, guarded calibration, and adaptive paper guards.
+
+- Added live auto-hot dry-run proof while keeping unattended live auto-hot and
+  live service/timer disabled.
 
 **Known deferred items at close:**
 
-- Active-position adjustment execution and any live env switch remain
-  confirmation-token gated.
+- Live automation remains inactive until all-interval strategy promotion and
+  forward-paper performance evidence improve.
+
+- `30u_10x_multi_dynamic` remains preview/confirmation-gated and was not
+  applied.
+
+- The adaptive paper guard reduces repeated losing samples but does not prove
+  profitability.
 
 ---
 
@@ -43,14 +57,19 @@
 
 - Activated and monitored the live small-capital Binance USD-M pilot with
   protective-order evidence and AI timeout/backoff behavior.
+
 - Added short-window backtesting, tradability filtering, and a controlled
   hot-coin symbol universe for small notional caps.
+
 - Hardened live execution around margin mode, hedge position side, entry-order
   failures, and account-balance preflight checks.
+
 - Switched live AI decisions to DeepSeek while preserving strict JSON schema
   validation and deterministic risk gates.
+
 - Reconciled closed live trade outcomes from Binance fills and added sweep
   tooling for submitted live intents.
+
 - Added resume, hold-time, time-exit, risk-change, dynamic sizing, and
   confirmation-gated profile switch controls.
 

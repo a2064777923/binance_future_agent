@@ -117,6 +117,61 @@
 - Archive docs must preserve historical live symbols while keeping current
   operator next steps pointed at the actual active position.
 
+## Milestone: v1.22 — Portfolio Risk And Multi-Position
+
+**Shipped:** 2026-06-20
+**Phases:** 18
+**Plans:** 18
+
+### What Was Built
+
+- Portfolio-level risk caps, candidate-queue evaluation, and a confirmation-gated
+  30U/10x/two-position preview profile.
+- Read-only active-position review plus confirmation-gated adjustment planning
+  and Binance filter-aware reduce-order checks.
+- Deterministic multi-factor setup generation, setup-driven backtesting, and
+  traceable AI overlay/veto behavior.
+- Strategy promotion gates, calibrated setup variants, and interval-aware
+  forward-paper admission.
+- Paper-only evidence collection, scheduling, performance checks, loss
+  attribution, guarded calibration, and adaptive candidate guards.
+- Live auto-hot scanner plumbing proven through dry-run while unattended live
+  auto-hot stayed disabled.
+
+### What Worked
+
+- Separating live authority from paper evidence let the system improve selection
+  discipline without opening new live risk.
+- Deterministic setup ownership made the old thin AI-only decision path
+  auditable and much easier to challenge.
+- Server deployment stayed isolated under `/opt/binance-futures-agent`; paper
+  timer active and live service/timer inactive is now a repeatable state.
+
+### What Was Inefficient
+
+- Several early v1.22 phases were missing verification reports, so the milestone
+  close required retroactive verification for Phases 30-32.
+- The system accumulated evidence mechanisms faster than profitable evidence;
+  paper performance remains negative and live resume stays blocked.
+
+### Patterns Established
+
+- AI is overlay/veto only; deterministic setup owns side, point, stop, target,
+  notional, and hold time.
+- Wider candidate breadth is acceptable only when order authority remains behind
+  setup, AI/quant fallback policy, and risk gates.
+- Paper loss evidence can feed back into symbol, side, and factor guards before
+  live promotion is considered.
+
+### Key Lessons
+
+- A wider hot-symbol universe can collect better evidence, but it also exposes
+  more bad symbols; adaptive guardrails are mandatory.
+- Passing one selected interval is not live evidence; all-interval and
+  forward-paper gates need to remain separate.
+- Social proof from public traders is useful for architecture ideas, not for
+  promotion decisions.
+
 ## Cross-Milestone Trends
 
 | Trend | Evidence | Next Action |

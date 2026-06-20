@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 47
-status: active
-stopped_at: Phase 47 deployed; paper guard active on server evidence
-last_updated: "2026-06-21T00:00:00+08:00"
-last_activity: 2026-06-21
-last_activity_desc: Deployed adaptive forward-paper guard and verified server evidence
+current_phase: Phase 47 — Forward-Paper Adaptive Candidate Guard
+status: completed
+stopped_at: Phase 47 deployed and server verification recorded.
+last_updated: "2026-06-20T16:22:45.765Z"
+last_activity: 2026-06-20
+last_activity_desc: Milestone v1.22 completed and archived
 progress:
-  total_phases: 42
-  completed_phases: 40
-  total_plans: 63
-  completed_plans: 63
+  total_phases: 18
+  completed_phases: 18
+  total_plans: 18
+  completed_plans: 18
   percent: 100
 ---
 
@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 47 — Forward-Paper Adaptive Candidate Guard
-**Status:** Phase 47 complete and deployed; paper-only timer active; live
+**Status:** v1.22 milestone complete
 auto-hot disabled in server env; live service/timer remain inactive while
 strategy and paper evidence remain negative
 **Last planned:** 2026-06-20
@@ -311,9 +311,8 @@ gated by all-interval strategy evidence.
 - After HYPEUSDT reconciliation, server `ops exposure-status --target-profile
   30u_10x_multi_dynamic --allow-two-positions` reports
   `ready_for_profile_switch`. The active `SOLUSDT` LONG is protected, fits the
-  target portfolio caps, and can be carried forward. The profile token remains
-  `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`. No profile apply was
-  run.
+  target portfolio caps, and can be carried forward. The profile confirmation
+  token is redacted from planning docs. No profile apply was run.
 
 - Phase 33 local implementation makes active-position adjustment plans
   exchange-filter aware. Partial take-profit quantities can be rounded down to
@@ -347,9 +346,9 @@ gated by all-interval strategy evidence.
   while the operator reviews the open position and profile sizing.
 
 - Server `ops exposure-status --target-profile 30u_10x_multi_dynamic
-  --allow-two-positions` still reports `ready_for_profile_switch` with
-  confirmation token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
-  No profile apply was run and the live env remains 30U/5x/12U/one-position.
+  --allow-two-positions` still reports `ready_for_profile_switch` with a
+  redacted confirmation token. No profile apply was run and the live env
+  remains 30U/5x/12U/one-position.
 
 - Phase 34 local implementation adds deterministic multi-factor trade setup
   generation before AI evaluation. Setup scoring separates momentum,
@@ -584,25 +583,11 @@ is negative.
 
 ## Current Position
 
-Phase: 47 — Forward-Paper Adaptive Candidate Guard
-Plan: 47-01 adaptive guard
-Status: Complete and deployed; server paper guard active; live automation inactive
-Last activity: 2026-06-21 — server focused/full suites and health-check passed
+Phase: Milestone v1.22 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-20 — Milestone v1.22 completed and archived
 
 ## Operator Next Steps
 
-- Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
-  `quant_setup_selective` `5m`, now with the adaptive guard active once enough
-  local paper outcomes meet guard thresholds.
-- Keep `live_resume_allowed=false` until all-interval evidence and paper
-  performance pass.
-- Rerun recent hot-symbol matrix sweeps and require default all-interval
-  `ops strategy-promotion-check` to pass before using any setup live.
-- Monitor the active `SOLUSDT` position through filter-aware
-  `ops position-adjustment-plan`.
-- Review the old SOLUSDT decision chain through read-only
-  `ops trade-trace --symbol SOLUSDT`.
-- Apply `30u_10x_multi_dynamic` only if the operator explicitly confirms the
-  fresh token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
-- Do not run `ops position-adjustment-execute --confirm-token ...` unless the
-  operator explicitly approves the fresh token.
+- Start the next milestone with /gsd-new-milestone
