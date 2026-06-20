@@ -69,6 +69,26 @@ class DeployAssetTests(unittest.TestCase):
         self.assertNotIn("-pw", script.lower())
         self.assertNotIn("sshpass", script.lower())
 
+    def test_server_readiness_script_is_preview_first_and_read_only(self):
+        script = (SCRIPTS / "run-server-readiness.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("[switch]$Run", script)
+        self.assertIn("Preview only. Re-run with -Run", script)
+        self.assertIn("BatchMode=yes", script)
+        self.assertIn('"/opt/binance-futures-agent"', script)
+        self.assertIn('"/etc/binance-futures-agent"', script)
+        self.assertIn("ops\", \"live-resume-readiness", script)
+        self.assertIn("--manual-exposure-symbols", script)
+        self.assertIn("ETHUSDT", script)
+        self.assertIn("quant_setup_selective_guarded", script)
+        self.assertIn("bfa_live_resume_readiness_v1", script)
+        self.assertNotRegex(script, re.compile(r"systemctl\s+(enable|start|restart|stop|disable)\b"))
+        self.assertNotIn("risk-profile-apply", script)
+        self.assertNotIn("time-exit-execute", script)
+        self.assertNotIn("agent run-once", script)
+        self.assertNotIn("-pw", script.lower())
+        self.assertNotIn("sshpass", script.lower())
+
     def test_deployment_docs_preserve_dry_run_first_posture(self):
         docs = (DOCS / "deployment.md").read_text(encoding="utf-8")
 

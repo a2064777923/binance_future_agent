@@ -140,6 +140,41 @@ systemctl status binance-futures-agent.service --no-pager
 journalctl -u binance-futures-agent.service -n 100 --no-pager
 ```
 
+## Live Resume Readiness
+
+Before discussing any live timer restore, run the read-only readiness report on
+the isolated server. Preview the exact SSH command first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-server-readiness.ps1
+```
+
+Run it only after reviewing the preview:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-server-readiness.ps1 -Run
+```
+
+The helper runs `ops live-resume-readiness` under `/opt/binance-futures-agent`
+with env from `/etc/binance-futures-agent/env`, writes a local JSON artifact
+under `runtime/`, and marks `ETHUSDT` as manual exposure by default. Use
+`-ManualExposureSymbols "ETHUSDT,SOLUSDT"` if more manually opened symbols must
+be excluded from agent-managed evidence.
+
+By default the helper uses SSH `BatchMode=yes` so it fails fast instead of
+hanging on an interactive password prompt. If you intentionally want to type the
+server password in an SSH prompt, add `-AllowPasswordPrompt`; do not place
+passwords in scripts, docs, shell history, or git-tracked files.
+
+Exit code `1` can be an expected fail-closed result when readiness is blocked.
+The helper accepts exit code `0` or `1` only when stdout parses as
+`bfa_live_resume_readiness_v1`. Any other exit code or invalid JSON is treated
+as a failed check.
+
+This procedure does not restore `binance-futures-agent-live.timer`, start
+`binance-futures-agent-live.service`, apply risk profiles, edit env files,
+create order intents, or place/cancel Binance orders.
+
 ## Live Automated Runner
 
 After env values, account balance, risk limits, AI provider, Binance credentials, and
