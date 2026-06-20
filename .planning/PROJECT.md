@@ -177,8 +177,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 16 are complete and verified. Phase 17 is in final
-verification. The project is installable as an
+Phases 1 through 17 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -192,8 +191,8 @@ pilot tradability filtering, a 10-symbol cap-compatible pilot universe,
 fail-closed margin setup handling, and explicit configurable margin mode. The
 system now also has explicit configurable position mode and entry-order
 fail-closed handling. The current live blocker is not code mode alignment but an
-unfunded USD-M futures account: available balance is 0, so Phase 17 adds a local
-available-balance gate before margin setup and entry submission. The server
+unfunded USD-M futures account: available balance is 0, so Phase 17 deployed a
+local available-balance gate before margin setup and entry submission. The server
 deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
 and OpenAI credentials are configured out of band, the live timer is enabled and
@@ -263,9 +262,9 @@ margin.
 | Fail closed on margin setup errors | Binance account mode can reject isolated-margin setup; no entry should be submitted unless pre-entry setup succeeds. | Phase 14 complete |
 | Make margin mode explicit | The live account is Multi-Assets/cross; using cross must be deliberate, validated, and still capped. | Phase 15 complete |
 | Make position mode explicit | The live account can require hedge `positionSide`; using it must be deliberate, validated, and still capped. | Phase 16 complete |
-| Add balance preflight before live orders | The live account can be unfunded even when order geometry is valid; avoid repeated exchange-side insufficient-margin errors. | Phase 17 in progress |
+| Add balance preflight before live orders | The live account can be unfunded even when order geometry is valid; avoid repeated exchange-side insufficient-margin errors. | Phase 17 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 during v1.9 balance preflight verification.*
+*Last updated: 2026-06-20 after completing v1.9 balance preflight gate.*

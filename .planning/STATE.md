@@ -3,24 +3,24 @@ gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Balance Preflight Gate
 current_phase: Phase 17 - Balance Preflight Gate
-status: in_progress
-stopped_at: Phase 17 local implementation ready; final verification and deployment pending
-last_updated: "2026-06-20T10:30:00.000+08:00"
+status: completed
+stopped_at: Phase 17 deployed; USD-M futures account remains unfunded so live entries are balance-gated
+last_updated: "2026-06-20T10:10:45.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Phase 17 balance preflight implementation in progress
+last_activity_desc: Phase 17 complete and deployed
 progress:
   total_phases: 9
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 9
-  completed_plans: 8
-  percent: 89
+  completed_plans: 9
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 17 - Balance Preflight Gate
-**Status:** v1.9 implementation in progress; final verification and deployment pending
+**Status:** v1.9 complete and deployed; live timer active under pilot caps
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -93,9 +93,10 @@ projects or losing control of downside.
 
 ## Next Command
 
-Complete Phase 17 verification, deploy the balance preflight gate, and observe a
-live timer cycle. With the current unfunded USD-M futures account, expect
-`insufficient_available_balance` and no entry order attempt.
+Fund or transfer USDT into the Binance USD-M futures account before expecting a
+real entry submission. With the current unfunded account, live order intents are
+expected to reject with `insufficient_available_balance` and no entry order
+attempt.
 
 ## Session
 
@@ -106,9 +107,9 @@ live timer cycle. With the current unfunded USD-M futures account, expect
 ## Current Position
 
 Phase: Phase 17 - Balance Preflight Gate
-Plan: 17-01 in progress
-Status: Balance preflight implementation ready for final verification and deployment
-Last activity: 2026-06-20 — Phase 17 implementation in progress
+Plan: 17-01 complete
+Status: Balance preflight deployed; live timer active; account funding is the current blocker
+Last activity: 2026-06-20 — Phase 17 complete
 
 ## Operator Next Steps
 

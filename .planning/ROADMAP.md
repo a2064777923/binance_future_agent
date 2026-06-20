@@ -18,7 +18,7 @@
 - ✅ **v1.6 Margin Setup Fail-Closed** — Phase 14, completed 2026-06-20.
 - ✅ **v1.7 Configurable Margin Mode** — Phase 15, completed 2026-06-20.
 - ✅ **v1.8 Position Mode Entry Fail-Closed** — Phase 16, completed 2026-06-20.
-- ◆ **v1.9 Balance Preflight Gate** — Phase 17, deployment verification in progress.
+- ✅ **v1.9 Balance Preflight Gate** — Phase 17, completed 2026-06-20.
 
 ## Phases
 
@@ -110,7 +110,7 @@ outputs fail closed.
 
 **Requirements:** AIR-01, AIR-02, AIR-03, AIR-04
 
-**Status:** Local implementation complete; deployment verification in progress.
+**Status:** Complete.
 
 **Success Criteria:**
 
@@ -262,7 +262,7 @@ balance is below the order intent's estimated initial margin.
 | 14 | v1.6 | 1/1 | Complete | 2026-06-20 |
 | 15 | v1.7 | 1/1 | Complete | 2026-06-20 |
 | 16 | v1.8 | 1/1 | Complete | 2026-06-20 |
-| 17 | v1.9 | 1/1 | In Progress | - |
+| 17 | v1.9 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
@@ -272,7 +272,7 @@ balance is below the order intent's estimated initial margin.
 
 ## Next Step
 
-Deploy the balance preflight gate, keep 100 USDT pilot caps unchanged, and
-observe live timer cycles. Funding the USD-M futures account is required before
-the bot can submit a real entry; after the first submitted live entry, verify
-protective-order evidence with `ops live-status`.
+Balance preflight is deployed. Keep 100 USDT pilot caps unchanged. Funding the
+USD-M futures account is required before the bot can submit a real entry; after
+the first submitted live entry, verify protective-order evidence with
+`ops live-status`.

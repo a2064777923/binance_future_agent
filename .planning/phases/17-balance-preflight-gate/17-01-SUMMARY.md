@@ -21,15 +21,16 @@
 - `git diff --check` passed with Windows LF-to-CRLF warnings only.
 - Secret scan over changed files reported only synthetic test fixture key names;
   no real secret values were found.
+- Server focused tests passed 21 tests after deployment.
+- Server health check passed in live mode with redacted secrets.
+- Server read-only futures account balance showed `availableBalance=0.00000000`.
+- Server safe preflight using the real account payload and fake order methods
+  returned `status=rejected`, `submitted=false`,
+  `risk_reasons=insufficient_available_balance`, and `calls=account`.
+- Live timer was re-enabled and active after deployment.
 
 ## Follow-Up
 
-- Deploy to `/opt/binance-futures-agent`.
-- Keep `BFA_MARGIN_MODE=cross`, `BFA_POSITION_MODE=hedge`, and all pilot caps
-  unchanged.
-- Observe the next live timer cycle. With the currently unfunded USD-M futures
-  account, the expected result is a local rejection with
-  `insufficient_available_balance` and no entry order attempt.
 - Fund or transfer USDT into the Binance USD-M futures account before expecting
   a real entry submission.
 - LVA-05 remains pending until an actual live entry is submitted and protective
