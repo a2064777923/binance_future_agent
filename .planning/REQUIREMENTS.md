@@ -98,6 +98,17 @@ v1.0 requirements are archived at
 - [x] **PSU-03**: CLI and config tests remain explicit about fixture-specific
   symbol allowlists so test fixtures do not depend on live defaults.
 
+### Margin Setup Fail-Closed
+
+- [x] **MSF-01**: Live execution handles Binance margin/leverage setup errors
+  as rejected, non-submitted order intents rather than uncaught service crashes.
+
+- [x] **MSF-02**: Margin setup errors are persisted as exchange-response
+  evidence without submitting an entry order.
+
+- [x] **MSF-03**: Multi-Assets mode isolated-margin rejection is covered by a
+  regression test.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -131,13 +142,16 @@ v1.0 requirements are archived at
 | PSU-01 | Phase 13 | Complete - 10 pilot-tradable high-liquidity symbols selected |
 | PSU-02 | Phase 13 | Complete - defaults and env examples updated |
 | PSU-03 | Phase 13 | Complete - tests override fixture allowlists explicitly |
+| MSF-01 | Phase 14 | Complete - margin setup errors return rejected results |
+| MSF-02 | Phase 14 | Complete - margin errors persist as exchange-response evidence |
+| MSF-03 | Phase 14 | Complete - Multi-Assets isolated-margin rejection regression added |
 
 **Coverage:**
 
-- v1.1-v1.5 requirements: 20 total
-- Mapped to phases: 20
+- v1.1-v1.6 requirements: 23 total
+- Mapped to phases: 23
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.5 pilot symbol universe*
+*Last updated: 2026-06-20 after completing v1.6 margin setup fail-closed*

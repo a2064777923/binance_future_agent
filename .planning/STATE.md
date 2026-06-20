@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.5
-milestone_name: Pilot Symbol Universe
-current_phase: Phase 13 - Pilot Symbol Universe
+milestone: v1.6
+milestone_name: Margin Setup Fail-Closed
+current_phase: Phase 14 - Margin Setup Fail-Closed
 status: completed
-stopped_at: Phase 13 complete; awaiting future submitted entry for LVA-05 evidence
-last_updated: "2026-06-20T01:25:00.000Z"
+stopped_at: Phase 14 complete; timer stopped pending fail-closed deployment
+last_updated: "2026-06-20T01:35:00.000Z"
 last_activity: 2026-06-20
-last_activity_desc: Phase 13 complete
+last_activity_desc: Phase 14 complete
 progress:
-  total_phases: 5
-  completed_phases: 5
-  total_plans: 5
-  completed_plans: 5
+  total_phases: 6
+  completed_phases: 6
+  total_plans: 6
+  completed_plans: 6
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 13 - Pilot Symbol Universe
-**Status:** v1.5 complete; live timer remains under pilot caps
+**Current phase:** Phase 14 - Margin Setup Fail-Closed
+**Status:** v1.6 complete; live timer paused until deployment verification
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -78,10 +78,13 @@ projects or losing control of downside.
 - The pilot symbol universe is capped at 10 Binance USD-M symbols that currently
   fit the 20 USDT max-position-notional cap.
 
+- Binance Multi-Assets mode rejects isolated-margin setup on the live account;
+  execution must reject before entry submission when margin setup fails.
+
 ## Next Command
 
-Keep live caps unchanged and observe timer cycles. After the first submitted
-live entry, use `ops live-status` to verify protective-order evidence.
+Deploy Phase 14, rerun health checks, resume the live timer, and observe that
+margin setup failures become rejected evidence instead of service crashes.
 
 ## Session
 
@@ -91,15 +94,15 @@ live entry, use `ops live-status` to verify protective-order evidence.
 
 ## Current Position
 
-Phase: Phase 13 - Pilot Symbol Universe
-Plan: 13-01 complete
-Status: Defaults and env templates use a cap-compatible 10-symbol pilot universe
-Last activity: 2026-06-20 — Phase 13 complete
+Phase: Phase 14 - Margin Setup Fail-Closed
+Plan: 14-01 complete
+Status: Margin setup errors are handled as rejected non-submitted execution results
+Last activity: 2026-06-20 — Phase 14 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
-- Confirm live cycles use the cap-compatible pilot universe and still fail closed on weak/no-trade signals.
+- Confirm live cycles reject margin setup failures without entry submission or service crash.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.

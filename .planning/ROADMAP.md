@@ -15,6 +15,7 @@
 - ✅ **v1.3 Decision Robustness** — Phase 11, completed 2026-06-20.
 - ✅ **v1.4 Pilot Tradability Filter** — Phase 12, completed 2026-06-20.
 - ✅ **v1.5 Pilot Symbol Universe** — Phase 13, completed 2026-06-20.
+- ✅ **v1.6 Margin Setup Fail-Closed** — Phase 14, completed 2026-06-20.
 
 ## Phases
 
@@ -161,6 +162,25 @@ minimum executable notional cannot fit the configured max position notional cap.
 4. CLI/config tests explicitly override fixture-specific BTC/ETH allowlists.
 5. Full tests and server health checks pass after deployment.
 
+### Phase 14: Margin Setup Fail-Closed
+
+**Goal:** Ensure Binance margin/leverage setup failures reject the order intent
+without crashing the live service or submitting an entry order.
+
+**Requirements:** MSF-01, MSF-02, MSF-03
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. `_ensure_live_margin` Binance errors are caught before entry order
+   submission.
+2. The execution result is `status=rejected`, `submitted=false`, and includes
+   `margin_setup_failed`.
+3. Margin setup error details are persisted as exchange-response evidence.
+4. Regression coverage reproduces Multi-Assets mode isolated-margin rejection.
+5. Full tests and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -178,15 +198,16 @@ minimum executable notional cannot fit the configured max position notional cap.
 | 11 | v1.3 | 1/1 | Complete | 2026-06-20 |
 | 12 | v1.4 | 1/1 | Complete | 2026-06-20 |
 | 13 | v1.5 | 1/1 | Complete | 2026-06-20 |
+| 14 | v1.6 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.5 requirements: 20
-- Mapped: 20
+- v1.1-v1.6 requirements: 23
+- Mapped: 23
 - Unmapped: 0
 
 ## Next Step
 
-Pilot symbol universe is cap-compatible. Keep 100 USDT pilot caps unchanged and
-observe live timer cycles; after the first submitted live entry, verify
-protective-order evidence with `ops live-status`.
+Margin setup now fails closed. Keep 100 USDT pilot caps unchanged and observe
+live timer cycles; after the first submitted live entry, verify protective-order
+evidence with `ops live-status`.

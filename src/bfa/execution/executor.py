@@ -100,7 +100,23 @@ class ExecutionEngine:
                 exchange_response_type="test_order",
             )
 
-        self._ensure_live_margin(intent)
+        try:
+            self._ensure_live_margin(intent)
+        except BinanceSignedError as exc:
+            return self._finish(
+                status="rejected",
+                submitted=False,
+                intent=intent,
+                risk=RiskDecision(False, ["margin_setup_failed"]),
+                exchange_response={
+                    "margin_error": {
+                        "endpoint": exc.endpoint,
+                        "code": exc.binance_code,
+                        "message": exc.binance_message,
+                    }
+                },
+                exchange_response_type="margin_setup_error",
+            )
         entry_response = self.signed_client.new_order(
             symbol=intent.symbol,
             side=intent.side,

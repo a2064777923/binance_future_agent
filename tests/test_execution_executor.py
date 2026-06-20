@@ -8,6 +8,7 @@ from bfa.ai.decision import validate_decision_payload
 from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
+from bfa.execution.binance_client import BinanceSignedError
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
@@ -39,6 +40,19 @@ class FakeSignedClient:
     def test_order(self, **kwargs):
         self.calls.append(("test_order", kwargs))
         return {}
+
+
+class MarginFailingSignedClient(FakeSignedClient):
+    def change_margin_type(self, symbol, *, margin_type="ISOLATED"):
+        self.calls.append(("margin", symbol, margin_type))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/marginType",
+            params={"symbol": symbol, "marginType": margin_type},
+            status_code=400,
+            binance_code=-4167,
+            binance_message="Unable to adjust to isolated-margin mode under the Multi-Assets mode.",
+            headers={},
+        )
 
 
 class ExecutionEngineTests(unittest.TestCase):
@@ -177,6 +191,42 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(fake_client.calls[4][0], "new_algo_order")
         self.assertEqual(fake_client.calls[4][1]["order_type"], "TAKE_PROFIT_MARKET")
         self.assertEqual(fake_client.calls[4][1]["side"], "SELL")
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) AS count FROM exchange_responses").fetchone()["count"],
+            1,
+        )
+
+    def test_live_margin_setup_error_fails_closed_before_entry_order(self):
+        fake_client = MarginFailingSignedClient()
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+            store=store,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.submitted)
+        self.assertIn("margin_setup_failed", result.risk.reason_codes)
+        self.assertEqual(fake_client.calls, [("margin", "BTCUSDT", "ISOLATED")])
+        self.assertEqual(
+            connection.execute("SELECT COUNT(*) AS count FROM order_intents").fetchone()["count"],
+            1,
+        )
         self.assertEqual(
             connection.execute("SELECT COUNT(*) AS count FROM exchange_responses").fetchone()["count"],
             1,
