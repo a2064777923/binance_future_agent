@@ -156,35 +156,50 @@ def run_agent_once(
             started_at=started_at,
             validation_errors=["unable to read live position risk"],
         )
-    preflight_reasons = _live_entry_capacity_blockers(config, preflight_risk_state)
-    if preflight_reasons:
-        return AgentRunResult(
-            status="entry_capacity_blocked",
-            mode=mode.value,
-            started_at=started_at,
-            risk_reasons=preflight_reasons,
-            position_review=_position_review_summary(position_adjustment_plan),
-            position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
-        )
-
-    market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
-    scan_symbols = _agent_scan_symbols(config, market)
-    collector = collector or MarketDataCollector(
-        client=market,
-        symbols=scan_symbols,
-        max_symbols=max(len(scan_symbols), 1),
-        received_at=started_at,
-    )
-    narrative_runner = narrative_runner or _build_narrative_runner(
-        config,
-        collected_at=started_at,
-        known_symbols=scan_symbols,
-    )
-    ai_client = ai_client or (build_ai_client(config) if ai_enabled else None)
-
-    connection = connect(db_path or config.get("BFA_DB_PATH"))
+    connection = None
     try:
-        store = EventStore(connection)
+        store = None
+        position_lifecycle_event_id = None
+        if mode is RuntimeMode.LIVE:
+            connection = connect(db_path or config.get("BFA_DB_PATH"))
+            store = EventStore(connection)
+            position_lifecycle_event_id = _persist_position_lifecycle(
+                store,
+                config=config,
+                started_at=started_at,
+                adjustment_plan=position_adjustment_plan,
+            )
+
+        preflight_reasons = _live_entry_capacity_blockers(config, preflight_risk_state)
+        if preflight_reasons:
+            return AgentRunResult(
+                status="entry_capacity_blocked",
+                mode=mode.value,
+                started_at=started_at,
+                risk_reasons=preflight_reasons,
+                persisted=_position_lifecycle_persisted(position_lifecycle_event_id),
+                position_review=_position_review_summary(position_adjustment_plan),
+                position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+            )
+
+        market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
+        scan_symbols = _agent_scan_symbols(config, market)
+        collector = collector or MarketDataCollector(
+            client=market,
+            symbols=scan_symbols,
+            max_symbols=max(len(scan_symbols), 1),
+            received_at=started_at,
+        )
+        narrative_runner = narrative_runner or _build_narrative_runner(
+            config,
+            collected_at=started_at,
+            known_symbols=scan_symbols,
+        )
+        ai_client = ai_client or (build_ai_client(config) if ai_enabled else None)
+
+        if store is None:
+            connection = connect(db_path or config.get("BFA_DB_PATH"))
+            store = EventStore(connection)
         paper_guard = build_forward_paper_guard(connection, guard_config_from_app(config))
         market_snapshots = collector.collect_rest_snapshots()
         market_event_ids = [store.insert_market_snapshot(snapshot) for snapshot in market_snapshots]
@@ -237,7 +252,10 @@ def run_agent_once(
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=paper_guard.to_dict(),
-                persisted={"candidates": persisted_candidate_count},
+                persisted={
+                    **_position_lifecycle_persisted(position_lifecycle_event_id),
+                    "candidates": persisted_candidate_count,
+                },
             )
 
         exchange_info = market.exchange_info().payload
@@ -257,7 +275,10 @@ def run_agent_once(
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=paper_guard.to_dict(),
-                persisted={"candidates": persisted_candidate_count},
+                persisted={
+                    **_position_lifecycle_persisted(position_lifecycle_event_id),
+                    "candidates": persisted_candidate_count,
+                },
             )
 
         return _evaluate_candidate_queue(
@@ -278,11 +299,13 @@ def run_agent_once(
             rejected_count=len(candidates.rejected),
             scan_symbols=scan_symbols,
             persisted_candidate_count=persisted_candidate_count,
+            position_lifecycle_event_id=position_lifecycle_event_id,
             position_adjustment_plan=position_adjustment_plan,
             paper_guard=paper_guard,
         )
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
 
 
 def _agent_scan_symbols(config: AppConfig, market_client) -> list[str]:
@@ -372,6 +395,7 @@ def _evaluate_candidate_queue(
     rejected_count: int,
     scan_symbols: list[str],
     persisted_candidate_count: int,
+    position_lifecycle_event_id: int | None,
     position_adjustment_plan,
     paper_guard,
 ) -> AgentRunResult:
@@ -441,6 +465,7 @@ def _evaluate_candidate_queue(
                         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                         paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
                         persisted={
+                            **_position_lifecycle_persisted(position_lifecycle_event_id),
                             "candidates": persisted_candidate_count,
                             "trade_setups": trade_setups_persisted,
                             "ai_decisions": ai_decisions_persisted,
@@ -484,6 +509,7 @@ def _evaluate_candidate_queue(
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
                 persisted={
+                    **_position_lifecycle_persisted(position_lifecycle_event_id),
                     "candidates": persisted_candidate_count,
                     "trade_setups": trade_setups_persisted,
                     "ai_decisions": ai_decisions_persisted,
@@ -544,6 +570,7 @@ def _evaluate_candidate_queue(
             position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
             paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
             persisted={
+                **_position_lifecycle_persisted(position_lifecycle_event_id),
                 "candidates": persisted_candidate_count,
                 "trade_setups": trade_setups_persisted,
                 "ai_decisions": ai_decisions_persisted,
@@ -571,6 +598,7 @@ def _evaluate_candidate_queue(
         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
         paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
         persisted={
+            **_position_lifecycle_persisted(position_lifecycle_event_id),
             "candidates": persisted_candidate_count,
             "trade_setups": trade_setups_persisted,
             "ai_decisions": ai_decisions_persisted,
@@ -667,6 +695,7 @@ def _position_adjustment_summary(adjustment_plan) -> dict[str, Any] | None:
         "status": adjustment_plan.status,
         "adjustment_allowed": adjustment_plan.adjustment_allowed,
         "reasons": list(adjustment_plan.reasons),
+        "diagnostics": [item.to_dict() for item in adjustment_plan.diagnostics],
         "plans": [
             {
                 "symbol": item.order_plan.symbol,
@@ -680,6 +709,84 @@ def _position_adjustment_summary(adjustment_plan) -> dict[str, Any] | None:
             if item.order_plan is not None
         ],
     }
+
+
+def _persist_position_lifecycle(
+    store: EventStore,
+    *,
+    config: AppConfig,
+    started_at: str,
+    adjustment_plan,
+) -> int:
+    payload = _position_lifecycle_payload(
+        config,
+        started_at=started_at,
+        adjustment_plan=adjustment_plan,
+    )
+    return store.insert_artifact(
+        "risk_state",
+        occurred_at=started_at,
+        source="agent.live_cycle",
+        symbol=None,
+        ref_id=f"position_lifecycle:{started_at}",
+        event_type="position_lifecycle_decision",
+        payload=payload,
+    )
+
+
+def _position_lifecycle_payload(
+    config: AppConfig,
+    *,
+    started_at: str,
+    adjustment_plan,
+) -> dict[str, Any]:
+    diagnostics = [item.to_dict() for item in adjustment_plan.diagnostics] if adjustment_plan is not None else []
+    eligible_actions = [
+        diagnostic
+        for diagnostic in diagnostics
+        if diagnostic.get("order_plan") is not None and not diagnostic.get("manual_symbol")
+    ]
+    auto_management_enabled = _truthy(config.get("BFA_POSITION_AUTO_MANAGEMENT_ENABLED"))
+    max_actions = _positive_int_or_default(
+        config.get("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE"),
+        1,
+    )
+    return {
+        "schema": "bfa_position_lifecycle_decision_v1",
+        "mode": config.get("BFA_MODE"),
+        "decided_at": started_at,
+        "status": adjustment_plan.status if adjustment_plan is not None else "position_adjustment_unavailable",
+        "adjustment_allowed": bool(adjustment_plan.adjustment_allowed) if adjustment_plan is not None else False,
+        "reasons": list(adjustment_plan.reasons) if adjustment_plan is not None else ["position_adjustment_unavailable"],
+        "manual_position_symbols": config.get_list("BFA_MANUAL_POSITION_SYMBOLS"),
+        "auto_management": {
+            "enabled": auto_management_enabled,
+            "max_actions_per_cycle": max_actions,
+            "eligible_action_count": len(eligible_actions),
+            "selected_action_count": min(len(eligible_actions), max_actions) if auto_management_enabled else 0,
+            "executed": False,
+            "status": "enabled_preview_only" if auto_management_enabled else "disabled",
+            "reasons": (
+                ["auto_management_execution_deferred"]
+                if auto_management_enabled
+                else ["auto_management_disabled"]
+            ),
+        },
+        "position_review": _position_review_summary(adjustment_plan),
+        "position_adjustment_plan": _position_adjustment_summary(adjustment_plan),
+        "diagnostics": diagnostics,
+        "read_only_exchange": {
+            "places_orders": False,
+            "cancels_orders": False,
+            "mutates_exchange_state": False,
+            "changes_systemd_state": False,
+            "writes_env_files": False,
+        },
+    }
+
+
+def _position_lifecycle_persisted(event_id: int | None) -> dict[str, int]:
+    return {"position_lifecycle": event_id} if event_id is not None else {}
 
 
 def _build_signed_client(config: AppConfig, mode: RuntimeMode):
@@ -775,6 +882,14 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _positive_int_or_default(value: str, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _market_records(event_ids, snapshots) -> list[dict[str, Any]]:

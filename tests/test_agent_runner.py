@@ -244,8 +244,10 @@ class FakeAiClient:
 
 
 class FakeSignedClient:
-    def __init__(self, positions=None):
+    def __init__(self, positions=None, open_orders=None, open_algo_orders=None):
         self.positions = [] if positions is None else positions
+        self._open_orders = [] if open_orders is None else open_orders
+        self._open_algo_orders = [] if open_algo_orders is None else open_algo_orders
         self.calls = []
 
     def position_risk(self):
@@ -254,6 +256,14 @@ class FakeSignedClient:
     def account(self):
         self.calls.append(("account",))
         return {"availableBalance": "100"}
+
+    def open_orders(self, symbol=None):
+        self.calls.append(("open_orders", symbol))
+        return list(self._open_orders)
+
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return list(self._open_algo_orders)
 
     def change_margin_type(self, symbol, *, margin_type):
         self.calls.append(("margin", symbol, margin_type))
@@ -538,18 +548,146 @@ class AgentRunnerTests(unittest.TestCase):
                             "positionAmt": "0.16",
                             "positionSide": "LONG",
                         }
-                    ]
+                    ],
+                    open_algo_orders=[
+                        {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                        {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                    ],
                 ),
             )
+            connection = sqlite3.connect(root / "agent.sqlite")
+            connection.row_factory = sqlite3.Row
+            try:
+                lifecycle = connection.execute(
+                    """
+                    SELECT r.event_id, r.payload_json
+                    FROM risk_state
+                    AS r
+                    JOIN events AS e ON e.id = r.event_id
+                    WHERE e.event_type = 'position_lifecycle_decision'
+                    """
+                ).fetchone()
+                candidate_count = connection.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
+            finally:
+                connection.close()
 
         self.assertEqual(result.status, "entry_capacity_blocked")
         self.assertTrue(result.ok)
         self.assertFalse(result.submitted)
+        self.assertIn("position_lifecycle", result.persisted)
+        self.assertEqual(lifecycle["event_id"], result.persisted["position_lifecycle"])
+        lifecycle_payload = json.loads(lifecycle["payload_json"])
+        self.assertEqual(lifecycle_payload["schema"], "bfa_position_lifecycle_decision_v1")
+        self.assertEqual(lifecycle_payload["auto_management"]["status"], "disabled")
+        self.assertEqual(candidate_count, 0)
         self.assertEqual(result.risk_reasons, ["multi_position_disabled", "max_open_positions_reached"])
         self.assertEqual(result.market_snapshot_count, 0)
         self.assertEqual(result.candidate_count, 0)
         self.assertEqual(collector.calls, 0)
         self.assertEqual(ai_client.calls, 0)
+
+    def test_live_run_once_persists_position_lifecycle_before_candidates_and_records_manual_hold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            ai_client = FakeAiClient()
+            signed_client = FakeSignedClient(
+                positions=[
+                    {
+                        "symbol": "HYPEUSDT",
+                        "positionAmt": "0.16",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "101",
+                        "unRealizedProfit": "0.16",
+                        "notional": "16.16",
+                        "initialMargin": "3.232",
+                        "leverage": "5",
+                    },
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "entryPrice": "0.18819",
+                        "markPrice": "0.14275",
+                        "unRealizedProfit": "25.26",
+                        "notional": "-79.37",
+                        "initialMargin": "7.937",
+                        "leverage": "10",
+                    },
+                ],
+                open_algo_orders=[
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                    {"symbol": "BTWUSDT", "positionSide": "SHORT"},
+                ],
+            )
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "4",
+                    "BFA_MULTI_POSITION_ENABLED": "true",
+                    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "500",
+                    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "400",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+                signed_client=signed_client,
+            )
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT id, event_type, payload_json
+                    FROM events
+                    WHERE event_type IN ('position_lifecycle_decision', 'candidate')
+                    ORDER BY id
+                    """
+                ).fetchall()
+                lifecycle = connection.execute(
+                    """
+                    SELECT r.event_id, r.payload_json
+                    FROM risk_state
+                    AS r
+                    JOIN events AS e ON e.id = r.event_id
+                    WHERE e.event_type = 'position_lifecycle_decision'
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.status, "submitted")
+        self.assertIn("position_lifecycle", result.persisted)
+        self.assertEqual(lifecycle["event_id"], result.persisted["position_lifecycle"])
+        self.assertGreaterEqual(result.persisted["candidates"], 1)
+        self.assertGreaterEqual(len(rows), 2)
+        self.assertEqual(rows[0]["event_type"], "position_lifecycle_decision")
+        self.assertEqual(rows[1]["event_type"], "candidate")
+        payload = json.loads(lifecycle["payload_json"])
+        diagnostics = {item["symbol"]: item for item in payload["diagnostics"]}
+        self.assertEqual(payload["manual_position_symbols"], ["BTWUSDT"])
+        self.assertEqual(diagnostics["BTWUSDT"]["lifecycle_decision"], "manual_hold")
+        self.assertTrue(diagnostics["BTWUSDT"]["manual_symbol"])
+        self.assertIsNone(diagnostics["BTWUSDT"]["order_plan"])
+        self.assertIn("manual_position_ignored", diagnostics["BTWUSDT"]["failed_preconditions"])
+        self.assertEqual(result.position_adjustment_plan["diagnostics"][1]["symbol"], "BTWUSDT")
 
     def test_live_run_once_continues_when_multi_position_capacity_exists(self):
         with tempfile.TemporaryDirectory() as tmp:

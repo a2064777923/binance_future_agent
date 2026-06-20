@@ -44,6 +44,8 @@ def base_env(**overrides):
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
         "BFA_MARKET_SYMBOLS": ",".join(PILOT_SYMBOLS),
         "BFA_MANUAL_POSITION_SYMBOLS": "",
+        "BFA_POSITION_AUTO_MANAGEMENT_ENABLED": "false",
+        "BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE": "1",
         "BFA_LIVE_AUTO_HOT_SYMBOLS": "false",
         "BFA_LIVE_AUTO_HOT_TOP_N": "40",
         "BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT": "10000000",
@@ -107,6 +109,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS"), "false")
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "40")
         self.assertEqual(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"), [])
+        self.assertEqual(config.get("BFA_POSITION_AUTO_MANAGEMENT_ENABLED"), "false")
+        self.assertEqual(config.get("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE"), "1")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_ENABLED"), "true")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES"), "30")
 
@@ -250,6 +254,7 @@ class ConfigTests(unittest.TestCase):
                 BFA_ACCOUNT_CAPITAL_USDT="lots",
                 BFA_MAX_LEVERAGE="-3",
                 BFA_MAX_OPEN_POSITIONS="0",
+                BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE="0",
                 BFA_LIVE_AUTO_HOT_TOP_N="0",
                 BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES="0",
                 BFA_FORWARD_PAPER_GUARD_SYMBOL_MIN_LOSS_USDT="0",
@@ -263,6 +268,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BFA_ACCOUNT_CAPITAL_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MAX_LEVERAGE must be a positive number", result.errors)
         self.assertIn("BFA_MAX_OPEN_POSITIONS must be a positive integer", result.errors)
+        self.assertIn("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE must be a positive integer", result.errors)
         self.assertIn("BFA_LIVE_AUTO_HOT_TOP_N must be a positive integer", result.errors)
         self.assertIn("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES must be a positive integer", result.errors)
         self.assertIn("BFA_FORWARD_PAPER_GUARD_SYMBOL_MIN_LOSS_USDT must be a positive number", result.errors)
