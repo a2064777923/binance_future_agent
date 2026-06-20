@@ -102,6 +102,7 @@ hold window without changing exchange state:
 
 ```bash
 python -m bfa.cli ops position-hold-check --env-file .env --db runtime/agent.sqlite
+python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 ```
 
 ## Small-Capital Backtesting

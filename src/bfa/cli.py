@@ -34,7 +34,7 @@ from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.live_status import build_live_status_report
-from bfa.ops.position_hold_check import build_position_hold_check_report
+from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
@@ -332,6 +332,19 @@ def _build_parser() -> argparse.ArgumentParser:
     position_hold_check.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     position_hold_check.add_argument("--now", help="optional ISO timestamp for deterministic checks")
     position_hold_check.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
+
+    time_exit_plan = ops_subparsers.add_parser(
+        "time-exit-plan",
+        help="read-only plan for closing positions that exceeded AI hold-time guidance",
+    )
+    time_exit_plan.add_argument("--env-file", help="optional env file to load before environment overrides")
+    time_exit_plan.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    time_exit_plan.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    time_exit_plan.add_argument(
         "--skip-binance",
         action="store_true",
         help="use only local event-store evidence instead of signed Binance reads",
@@ -813,6 +826,16 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 1 if report.action_required else 0
+    if args.ops_command == "time-exit-plan":
+        report = build_time_exit_plan_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.exit_allowed else 1
     if args.ops_command == "risk-change-check":
         report = build_risk_change_check_report(
             config,

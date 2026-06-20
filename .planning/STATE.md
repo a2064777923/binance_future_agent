@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.17
-milestone_name: Position Hold-Time Check
-current_phase: Phase 25 - Position Hold-Time Check
+milestone: v1.18
+milestone_name: Time Exit Plan
+current_phase: Phase 26 - Time Exit Plan
 status: completed
-stopped_at: Phase 25 verified; BNBUSDT is protected but past AI hold window
-last_updated: "2026-06-20T12:54:00.000+08:00"
+stopped_at: Phase 26 verified; BNBUSDT time-exit plan is ready but not executed
+last_updated: "2026-06-20T13:02:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Position hold-time check deployed and verified against live server state
+last_activity_desc: Time-exit plan deployed and verified against live server state
 progress:
-  total_phases: 17
-  completed_phases: 17
-  total_plans: 17
-  completed_plans: 17
+  total_phases: 18
+  completed_phases: 18
+  total_plans: 18
+  completed_plans: 18
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 25 - Position Hold-Time Check
-**Status:** v1.17 complete; active-position hold-time review is available and verified
+**Current phase:** Phase 26 - Time Exit Plan
+**Status:** v1.18 complete; read-only time-exit planning is available and verified
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -92,11 +92,15 @@ projects or losing control of downside.
 - `ops position-hold-check` is deployed and verified on the server. It reports
   BNBUSDT as protected by two algo orders but past the AI decision's 60-minute
   hold window, returning `status=review_required`.
+- `ops time-exit-plan` is deployed and verified on the server. It reports
+  `exit_plan_ready` for BNBUSDT with planned close `SELL MARKET 0.01`,
+  `positionSide=LONG`, and `reduceOnly=false`. It does not place the order.
 
 ## Next Command
 
-BNBUSDT is protected but past its AI hold window. Continue observing or plan an
-operator-approved time-exit phase. After BNBUSDT closes, run
+BNBUSDT is protected but past its AI hold window, and the read-only time-exit
+plan is ready. Continue observing or plan an operator-approved time-exit
+execution phase. After BNBUSDT closes, run
 `ops reconcile-outcomes --persist-closed`, then rerun
 `ops risk-change-check --target-leverage 8` before changing the live profile.
 
@@ -108,17 +112,19 @@ operator-approved time-exit phase. After BNBUSDT closes, run
 
 ## Current Position
 
-Phase: Phase 25 - Position Hold-Time Check
-Plan: 25-01 complete
-Status: hold-time check is deployed and verified; BNBUSDT remains protected but
-past its AI hold window and continues to block risk changes
-Last activity: 2026-06-20 - Phase 25 verified
+Phase: Phase 26 - Time Exit Plan
+Plan: 26-01 complete
+Status: time-exit plan is deployed and verified; BNBUSDT remains protected,
+past its AI hold window, and continues to block risk changes until closed and
+reconciled
+Last activity: 2026-06-20 - Phase 26 verified
 
 ## Operator Next Steps
 
 - Observe the current BNBUSDT live position and its protective orders.
 - Use `ops position-hold-check` to monitor whether the current active position
   remains past its AI hold window.
+- Use `ops time-exit-plan` to inspect the read-only close-order plan.
 - Run `ops reconcile-outcomes --persist-closed` after BNBUSDT closes.
 - Rerun `ops risk-change-check --target-leverage 8` before any leverage change.
 - Do not raise leverage/risk caps while a live position is open unless

@@ -251,6 +251,18 @@ v1.0 requirements are archived at
   active position exceeds its hold window, without closing or modifying the
   position.
 
+### Time Exit Planning
+
+- [x] **TEP-01**: Provide a read-only `ops time-exit-plan` command that turns an
+  overdue protected position into an auditable close-order plan.
+
+- [x] **TEP-02**: The time-exit plan includes close side, order type, quantity,
+  position side, reduce-only flag, and the hold-check evidence that justified
+  the plan.
+
+- [x] **TEP-03**: The command does not place orders, cancel orders, change
+  leverage, edit env caps, or change timers.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -321,13 +333,16 @@ v1.0 requirements are archived at
 | PHT-01 | Phase 25 | Complete - `ops position-hold-check` reports active positions against AI hold-time metadata |
 | PHT-02 | Phase 25 | Complete - server report includes BNBUSDT elapsed time, unrealized PnL, intent event, and protection count |
 | PHT-03 | Phase 25 | Complete - server BNBUSDT returns `review_required` for hold-time expiry without exchange mutation |
+| TEP-01 | Phase 26 | Complete - `ops time-exit-plan` emits a close-order plan for overdue protected BNBUSDT |
+| TEP-02 | Phase 26 | Complete - server plan includes `SELL MARKET 0.01`, `positionSide=LONG`, and `reduceOnly=false` |
+| TEP-03 | Phase 26 | Complete - server command only emitted JSON and did not mutate exchange state |
 
 **Coverage:**
 
-- v1.1-v1.17 requirements: 57 total
-- Mapped to phases: 57
+- v1.1-v1.18 requirements: 60 total
+- Mapped to phases: 60
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.17 position hold-time check*
+*Last updated: 2026-06-20 after verifying v1.18 time exit plan*

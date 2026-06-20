@@ -3,7 +3,7 @@ import unittest
 
 from bfa.event_store.store import EventStore
 from bfa.ops.live_status import LiveStatusReport, OpenAiBackoffStatus, ProtectiveEvidence
-from bfa.ops.position_hold_check import position_hold_check_from_live_status
+from bfa.ops.position_hold_check import position_hold_check_from_live_status, time_exit_plan_from_hold_check
 
 
 def report(*, positions=None, open_orders=None, open_algo_orders=None, protective_complete=True, backoff=False):
@@ -132,6 +132,51 @@ class PositionHoldCheckTests(unittest.TestCase):
         self.assertTrue(result.action_required)
         self.assertEqual(result.status, "keep_current_profile")
         self.assertIn("exchange_evidence_missing", result.reasons)
+
+    def test_time_exit_plan_ready_for_overdue_protected_long_in_hedge_mode(self):
+        self.insert_submitted_intent(hold_time_minutes=30)
+        hold_check = position_hold_check_from_live_status(
+            report(
+                positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
+                open_algo_orders=[
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                ],
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T04:20:00Z",
+        )
+
+        result = time_exit_plan_from_hold_check(hold_check, position_mode="hedge")
+
+        self.assertTrue(result.exit_allowed)
+        self.assertEqual(result.status, "exit_plan_ready")
+        self.assertEqual(result.plans[0].order_plan.symbol, "BNBUSDT")
+        self.assertEqual(result.plans[0].order_plan.side, "SELL")
+        self.assertEqual(result.plans[0].order_plan.order_type, "MARKET")
+        self.assertEqual(result.plans[0].order_plan.quantity, 0.01)
+        self.assertEqual(result.plans[0].order_plan.position_side, "LONG")
+        self.assertFalse(result.plans[0].order_plan.reduce_only)
+
+    def test_time_exit_plan_blocked_before_hold_time_expires(self):
+        self.insert_submitted_intent(hold_time_minutes=60)
+        hold_check = position_hold_check_from_live_status(
+            report(
+                positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
+                open_algo_orders=[
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                ],
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T04:00:00Z",
+        )
+
+        result = time_exit_plan_from_hold_check(hold_check, position_mode="hedge")
+
+        self.assertFalse(result.exit_allowed)
+        self.assertEqual(result.status, "exit_plan_blocked")
+        self.assertIn("hold_time_not_expired", result.plans[0].reasons)
 
 
 if __name__ == "__main__":

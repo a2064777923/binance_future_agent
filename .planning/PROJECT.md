@@ -99,6 +99,8 @@ control of downside.
 - Phase 24 adds a sweep command that scans submitted live intents, skips
   already closed outcomes, and persists only final closed results.
 - Phase 25 adds a read-only active-position hold-time check.
+- Phase 26 adds a read-only time-exit order plan for overdue protected
+  positions.
 
 ### Active
 
@@ -141,6 +143,8 @@ control of downside.
   from Binance fill history.
 - [x] Report whether active live positions have exceeded the AI decision's
   suggested hold window without modifying exchange state.
+- [x] Produce a read-only close-order plan for overdue protected positions
+  without placing orders.
 
 ### Out of Scope
 
@@ -206,7 +210,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 25 are complete and verified. The project is installable as an
+Phases 1 through 26 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -226,7 +230,9 @@ that gate to require final closed outcomes. Phase 24 adds
 `ops reconcile-outcomes` so submitted live trades can be swept and closed
 outcomes persisted without symbol-by-symbol manual commands. Phase 25 adds
 `ops position-hold-check` so active positions past their AI hold window are
-visible before any future time-exit automation is considered.
+visible before any future time-exit automation is considered. Phase 26 adds
+`ops time-exit-plan` so the exact close-order shape can be inspected before any
+operator-approved execution phase.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -248,6 +254,9 @@ the already reconciled ZECUSDT trade, reported BNBUSDT as `open_or_partial`,
 and inserted no new fills or outcomes. Phase 25 server verification reported
 BNBUSDT as protected by two algo orders but past its 60-minute AI hold window,
 with `status=review_required`.
+Phase 26 server verification produced an `exit_plan_ready` read-only close plan:
+`SELL MARKET 0.01` with `positionSide=LONG` and no `reduceOnly` flag because
+the account uses hedge mode.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -381,7 +390,7 @@ manual symbol-by-symbol operation.
 **Status:** Complete. Server sweep shows ZECUSDT already reconciled and
 BNBUSDT still open/partial, with no new local fills or outcomes inserted.
 
-## Current Milestone: v1.17 Position Hold-Time Check
+## Previous Milestone: v1.17 Position Hold-Time Check
 
 **Goal:** Make active-position hold-time overruns visible without adding
 automatic exits.
@@ -395,6 +404,20 @@ automatic exits.
 
 **Status:** Complete. Server check reports BNBUSDT as protected but past the
 AI-provided 60-minute hold window.
+
+## Current Milestone: v1.18 Time Exit Plan
+
+**Goal:** Make the overdue-position close order shape auditable before any
+execution-capable time-exit work.
+
+**Target features:**
+- Add `ops time-exit-plan`.
+- Require hold-time expiry and confirmed protection before a plan is ready.
+- Emit side, order type, quantity, position side, reduce-only flag, and
+  supporting hold-check evidence.
+- Keep the command read-only.
+
+**Status:** Complete. Server plan for BNBUSDT is ready and remains read-only.
 
 ## Key Decisions
 
@@ -426,8 +449,9 @@ AI-provided 60-minute hold window.
 | Require closed outcomes before risk changes | Partial/open accounting should not unlock higher leverage. | Phase 23 complete |
 | Sweep submitted outcomes before risk changes | Operators should not need symbol-specific one-off commands to clear closed outcome evidence after positions exit. | Phase 24 complete |
 | Check active position hold time | Positions that exceed AI hold guidance should be visible before adding any automated time-exit behavior. | Phase 25 complete |
+| Plan time exits before execution | The system should show exact close-order parameters before any automated or operator-approved time exit is built. | Phase 26 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.17 position hold-time check.*
+*Last updated: 2026-06-20 after verifying v1.18 time exit plan.*

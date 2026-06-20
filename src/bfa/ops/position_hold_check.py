@@ -92,6 +92,60 @@ class PositionHoldCheckReport:
         }
 
 
+@dataclass(frozen=True)
+class TimeExitOrderPlan:
+    symbol: str
+    side: str
+    order_type: str
+    quantity: float
+    position_side: str | None = None
+    reduce_only: bool | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "side": self.side,
+            "order_type": self.order_type,
+            "quantity": self.quantity,
+            "position_side": self.position_side,
+            "reduce_only": self.reduce_only,
+        }
+
+
+@dataclass(frozen=True)
+class TimeExitPlanItem:
+    position: PositionHoldItem
+    exit_allowed: bool
+    reasons: list[str] = field(default_factory=list)
+    order_plan: TimeExitOrderPlan | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "position": self.position.to_dict(),
+            "exit_allowed": self.exit_allowed,
+            "reasons": list(self.reasons),
+            "order_plan": self.order_plan.to_dict() if self.order_plan else None,
+        }
+
+
+@dataclass(frozen=True)
+class TimeExitPlanReport:
+    status: str
+    exit_allowed: bool
+    reasons: list[str] = field(default_factory=list)
+    hold_check: PositionHoldCheckReport | None = None
+    plans: list[TimeExitPlanItem] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "exit_allowed": self.exit_allowed,
+            "reasons": list(self.reasons),
+            "hold_check": self.hold_check.to_dict() if self.hold_check else None,
+            "plans": [plan.to_dict() for plan in self.plans],
+        }
+
+
 def build_position_hold_check_report(
     config: AppConfig,
     *,
@@ -119,6 +173,74 @@ def build_position_hold_check_report(
         )
     finally:
         connection.close()
+
+
+def build_time_exit_plan_report(
+    config: AppConfig,
+    *,
+    db_path: str | None = None,
+    check_binance: bool = True,
+    now: str | None = None,
+    live_status_report: LiveStatusReport | None = None,
+    signed_client: BinanceFuturesSignedClient | None = None,
+) -> TimeExitPlanReport:
+    hold_check = build_position_hold_check_report(
+        config,
+        db_path=db_path,
+        check_binance=check_binance,
+        now=now,
+        live_status_report=live_status_report,
+        signed_client=signed_client,
+    )
+    return time_exit_plan_from_hold_check(hold_check, position_mode=config.get("BFA_POSITION_MODE"))
+
+
+def time_exit_plan_from_hold_check(
+    hold_check: PositionHoldCheckReport,
+    *,
+    position_mode: str,
+) -> TimeExitPlanReport:
+    reasons: list[str] = []
+    plans: list[TimeExitPlanItem] = []
+    if hold_check.status == "keep_current_profile":
+        reasons.append("exchange_evidence_missing")
+    if hold_check.open_order_count:
+        reasons.append("normal_open_orders_present")
+    if hold_check.openai_backoff_active:
+        reasons.append("ai_backoff_active")
+
+    for position in hold_check.positions:
+        item_reasons = _time_exit_item_reasons(position)
+        allowed = not item_reasons
+        order_plan = _time_exit_order_plan(position, position_mode=position_mode) if allowed else None
+        plans.append(
+            TimeExitPlanItem(
+                position=position,
+                exit_allowed=allowed,
+                reasons=item_reasons or ["time_exit_candidate"],
+                order_plan=order_plan,
+            )
+        )
+
+    if not hold_check.positions:
+        reasons.append("no_active_position")
+    if any(not plan.exit_allowed for plan in plans):
+        reasons.append("position_exit_preconditions_failed")
+    if plans and all(plan.exit_allowed for plan in plans) and not reasons:
+        return TimeExitPlanReport(
+            status="exit_plan_ready",
+            exit_allowed=True,
+            reasons=["time_exit_preconditions_met"],
+            hold_check=hold_check,
+            plans=plans,
+        )
+    return TimeExitPlanReport(
+        status="exit_plan_blocked",
+        exit_allowed=False,
+        reasons=_dedupe(reasons),
+        hold_check=hold_check,
+        plans=plans,
+    )
 
 
 def position_hold_check_from_live_status(
@@ -180,6 +302,37 @@ def position_hold_check_from_live_status(
         open_algo_order_count=len(open_algo_orders),
         openai_backoff_active=backoff_active,
         positions=items,
+    )
+
+
+def _time_exit_item_reasons(position: PositionHoldItem) -> list[str]:
+    reasons: list[str] = []
+    if not position.overdue:
+        reasons.append("hold_time_not_expired")
+    if position.algo_protection_count <= 0:
+        reasons.append("active_position_without_confirmed_algo_protection")
+    if position.matching_intent is None:
+        reasons.append("active_position_without_matching_submitted_intent")
+    if position.position_amt == 0:
+        reasons.append("zero_position_amount")
+    return reasons
+
+
+def _time_exit_order_plan(
+    position: PositionHoldItem,
+    *,
+    position_mode: str,
+) -> TimeExitOrderPlan:
+    quantity = abs(position.position_amt)
+    side = "SELL" if position.position_amt > 0 else "BUY"
+    hedge_mode = position_mode.strip().lower() == "hedge"
+    return TimeExitOrderPlan(
+        symbol=position.symbol,
+        side=side,
+        order_type="MARKET",
+        quantity=quantity,
+        position_side=position.position_side if hedge_mode else None,
+        reduce_only=False if hedge_mode else True,
     )
 
 

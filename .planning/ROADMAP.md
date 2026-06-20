@@ -28,6 +28,7 @@
 - ✅ **v1.15 Closed Outcome Risk Change Strictness** — Phase 23, completed 2026-06-20.
 - ✅ **v1.16 Outcome Reconciliation Sweep** — Phase 24, completed 2026-06-20.
 - ✅ **v1.17 Position Hold-Time Check** — Phase 25, completed 2026-06-20.
+- ✅ **v1.18 Time Exit Plan** — Phase 26, completed 2026-06-20.
 
 ## Phases
 
@@ -442,6 +443,27 @@ protected but past its 60-minute AI hold window, returning `review_required`.
 5. The command remains read-only and does not close positions, cancel orders,
    edit env risk caps, or change timers.
 
+### Phase 26: Time Exit Plan
+
+**Goal:** Produce a read-only close-order plan for active positions that have
+exceeded AI hold-time guidance.
+
+**Requirements:** TEP-01, TEP-02, TEP-03
+
+**Status:** Complete. Server verification produces an `exit_plan_ready` JSON
+plan for the overdue protected BNBUSDT LONG without placing an order.
+
+**Success Criteria:**
+
+1. `ops time-exit-plan` reuses the Phase 25 hold-time check.
+2. Plans are ready only when hold time is expired, a matching submitted intent
+   exists, the position amount is non-zero, and algo protection is visible.
+3. The plan includes close side, market order type, quantity, position side,
+   reduce-only flag, and supporting hold-check evidence.
+4. Hedge-mode plans include `positionSide` and omit Binance `reduceOnly`.
+5. The command remains read-only and does not touch exchange state or server
+   timers.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -471,17 +493,19 @@ protected but past its 60-minute AI hold window, returning `review_required`.
 | 23 | v1.15 | 1/1 | Complete | 2026-06-20 |
 | 24 | v1.16 | 1/1 | Complete | 2026-06-20 |
 | 25 | v1.17 | 1/1 | Complete | 2026-06-20 |
+| 26 | v1.18 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.17 requirements: 57
-- Mapped: 57
+- v1.1-v1.18 requirements: 60
+- Mapped: 60
 - Unmapped: 0
 
 ## Next Step
 
 The current BNBUSDT position is protected but has exceeded its AI hold window.
-Continue observing or explicitly plan an operator-approved time-exit phase.
+`ops time-exit-plan` now shows the read-only close-order plan. Continue
+observing or explicitly plan an operator-approved time-exit execution phase.
 After it closes, run `ops reconcile-outcomes --persist-closed`, then rerun
 `ops risk-change-check --target-leverage 8`; only if it returns
 `risk_change_allowed=true` should a later phase change the server profile.
