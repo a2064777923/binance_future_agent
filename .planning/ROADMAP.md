@@ -444,12 +444,39 @@ and worst-symbol recalibration.
 
 1. Operators can run a read-only forward-paper loss attribution command against
    stored paper signals and outcomes.
+
 2. The report joins outcomes to their original paper signal setup payloads.
 3. The report ranks underperforming groups by symbol, side, exit reason, setup
    reasons, warnings, and factor evidence.
+
 4. The report emits concrete recalibration candidates while keeping
    `live_resume_allowed=false`.
+
 5. Full local and server tests pass before using the report operationally.
+
+### Phase 44: Forward-Paper Guarded Setup Calibration
+
+**Goal:** Convert Phase 43 attribution into a stricter paper/backtest setup
+variant that can quarantine worst symbols and suppress losing short-side
+conditions before any live resume.
+
+**Requirements:** FGC-01, FGC-02, FGC-03, FGC-04
+
+**Depends on:** Phase 43
+
+**Status:** In progress locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Setup profiles can explicitly disable sides without changing existing
+   default/live profiles.
+2. Setup profiles can exclude symbols identified by paper attribution.
+3. A built-in guarded quant setup variant exists for backtest and forward
+   paper observation.
+4. Guarded variants are accepted by CLI/matrix/forward-paper paths.
+5. Full local and server tests pass before any paper timer switch.
 
 ## Progress
 
@@ -457,7 +484,7 @@ and worst-symbol recalibration.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-43 | 14/14 | Phase 43 deployed, recalibration evidence ready | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-44 | 14/15 | Phase 44 in progress, guarded calibration local | Pending |
 
 ## Requirement Coverage
 
@@ -480,8 +507,7 @@ deployed and the latest server gate returns `keep_live_paused` from negative
 total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Phase 43
 attribution is deployed and shows the clearest recalibration targets are
 short-side setups, stop-loss-heavy entries, and worst symbols such as
-`BICOUSDT`, `BEATUSDT`, and `SLXUSDT`. Monitor any active position through
-filter-aware `ops position-adjustment-plan` and use
-`ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
-adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`
-without an explicit confirmation token.
+`BICOUSDT`, `BEATUSDT`, and `SLXUSDT`. Current work should create a guarded
+paper/backtest variant from that evidence. Do not execute adjustment orders,
+restore the live timer, or apply `30u_10x_multi_dynamic` without an explicit
+confirmation token.

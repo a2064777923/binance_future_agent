@@ -126,6 +126,8 @@ class TradeSetupProfile:
     max_notional_fraction: float = 1.0
     stop_distance_multiplier: float = 1.0
     target_distance_multiplier: float = 1.0
+    disabled_sides: tuple[str, ...] = ()
+    excluded_symbols: tuple[str, ...] = ()
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -225,7 +227,7 @@ def build_trade_setup(
     if target_distance / stop_distance < setup_profile.min_risk_reward:
         decision = "pass"
         reasons = _dedupe([*reasons, "risk_reward_below_profile_min"])
-    profile_rejections = _profile_rejections(features, side, setup_profile)
+    profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
     if profile_rejections:
         decision = "pass"
         reasons = _dedupe([*reasons, *profile_rejections])
@@ -720,8 +722,12 @@ def _price_basis(
     }
 
 
-def _profile_rejections(features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> list[str]:
+def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> list[str]:
     rejections: list[str] = []
+    if side.lower() in {item.lower() for item in profile.disabled_sides}:
+        rejections.append("side_disabled_by_profile")
+    if symbol.upper() in {item.upper() for item in profile.excluded_symbols}:
+        rejections.append("symbol_excluded_by_profile")
     sample_size = int(_float(features.get("indicator_sample_size")) or 0)
     if sample_size < profile.min_indicator_sample_size:
         rejections.append("indicator_sample_below_profile_min")
@@ -747,8 +753,20 @@ def _setup_profile(profile: TradeSetupProfile | Mapping[str, Any] | None) -> Tra
         return profile
     if isinstance(profile, Mapping):
         values = {key: profile[key] for key in TradeSetupProfile.__dataclass_fields__ if key in profile}
+        if "disabled_sides" in values:
+            values["disabled_sides"] = tuple(str(item).lower() for item in _sequence(values["disabled_sides"]))
+        if "excluded_symbols" in values:
+            values["excluded_symbols"] = tuple(str(item).upper() for item in _sequence(values["excluded_symbols"]))
         return TradeSetupProfile(**values)
     return STANDARD_SETUP_PROFILE
+
+
+def _sequence(value: Any) -> list[Any]:
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if value is None:
+        return []
+    return [value]
 
 
 def _high_crowding(features: Mapping[str, Any], side: str) -> bool:

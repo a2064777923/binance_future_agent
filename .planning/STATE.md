@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 43
+current_phase: 44
 status: active
-stopped_at: Phase 43 deployed; recalibration evidence ready
-last_updated: "2026-06-20T23:12:00+08:00"
+stopped_at: Phase 44 in progress; guarded paper calibration local
+last_updated: "2026-06-20T23:23:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Deployed forward-paper loss attribution and identified recalibration targets
+last_activity_desc: Started guarded setup calibration from attribution evidence
 progress:
-  total_phases: 39
+  total_phases: 40
   completed_phases: 39
-  total_plans: 60
+  total_plans: 61
   completed_plans: 60
-  percent: 100
+  percent: 98
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 43 — Forward-Paper Loss Attribution And Recalibration
-**Status:** Phase 43 deployed; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
+**Current phase:** Phase 44 — Forward-Paper Guarded Setup Calibration
+**Status:** Phase 44 in progress; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -533,37 +533,41 @@ gated by all-interval strategy evidence.
   `rsi_bearish_momentum`, `taker_flow_acceleration`, `quant_short_setup`,
   `volume_neutral`, `ema_trend_down`, and `close_near_range_low`.
 
+- Phase 44 has been added to turn attribution into a paper/backtest guarded
+  setup variant. The first guard targets explicit side disabling and worst
+  symbol exclusion for paper calibration, without changing the default/live
+  setup profile or restoring live automation.
+
 ## Next Command
 
-Plan and implement targeted recalibration for `quant_setup_selective` 5m:
-tighten or quarantine short-side setups, stop-loss-heavy entries, and the worst
-symbols (`BICOUSDT`, `BEATUSDT`, `SLXUSDT`) before any live resume. Keep
-collecting out-of-sample `ops forward-paper-run` evidence from the active
-paper-only timer, then rerun `ops forward-paper-performance-check`. Do not
-restore the live timer, execute adjustment orders, or apply
-`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
-`keep_live_paused` and paper performance is negative.
+Implement and verify Phase 44 guarded setup calibration for
+`quant_setup_selective` 5m. Keep collecting out-of-sample
+`ops forward-paper-run` evidence from the active paper-only timer, then rerun
+`ops forward-paper-performance-check`. Do not restore the live timer, execute
+adjustment orders, or apply `30u_10x_multi_dynamic` while the default
+all-interval promotion gate returns `keep_live_paused` and paper performance is
+negative.
 
 ## Session
 
-**Last session:** 2026-06-20T23:12:00+08:00
-**Stopped at:** Phase 43 deployed; recalibration evidence ready
-**Resume file:** .planning/phases/43-forward-paper-loss-attribution-and-recalibration/43-01-SUMMARY.md
+**Last session:** 2026-06-20T23:23:00+08:00
+**Stopped at:** Phase 44 in progress; guarded paper calibration local
+**Resume file:** .planning/phases/44-forward-paper-guarded-setup-calibration/44-01-PLAN.md
 
 ## Current Position
 
-Phase: 43 — Forward-Paper Loss Attribution And Recalibration
-Plan: 43-01 local implementation
-Status: Complete and deployed; recalibration targets identified
-Last activity: 2026-06-20 — loss attribution deployed and verified on server
+Phase: 44 — Forward-Paper Guarded Setup Calibration
+Plan: 44-01 local implementation
+Status: In progress locally; deployment pending
+Last activity: 2026-06-20 — guarded calibration phase added
 
 ## Operator Next Steps
 
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
-- Use Phase 43 loss attribution to recalibrate short-side filters, stop-loss
-  geometry, and worst-symbol quarantine before live resume.
+- Use Phase 44 guarded setup calibration to test side/symbol guards in paper
+  before any live resume.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

@@ -229,6 +229,20 @@ projects or losing control of downside.
 - [x] **FLA-04**: The report emits concrete recalibration candidates while
   preserving `live_resume_allowed=false`.
 
+### Forward-Paper Guarded Calibration
+
+- [ ] **FGC-01**: Setup profiles can explicitly disable selected trade sides
+  without changing the existing default/live profile.
+
+- [ ] **FGC-02**: Setup profiles can exclude symbols identified by
+  forward-paper attribution.
+
+- [ ] **FGC-03**: Backtest and forward-paper paths expose a built-in guarded
+  quant setup variant derived from Phase 43 attribution.
+
+- [ ] **FGC-04**: Guarded calibration remains paper/backtest evidence only and
+  does not restore live automation or change risk profiles.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -296,12 +310,16 @@ projects or losing control of downside.
 | FLA-02 | Phase 43 | Complete and deployed |
 | FLA-03 | Phase 43 | Complete and deployed |
 | FLA-04 | Phase 43 | Complete and deployed |
+| FGC-01 | Phase 44 | In progress |
+| FGC-02 | Phase 44 | In progress |
+| FGC-03 | Phase 44 | In progress |
+| FGC-04 | Phase 44 | In progress |
 
 **Coverage:**
-- v1.22 requirements: 55 total
-- Mapped to phases: 55
+- v1.22 requirements: 59 total
+- Mapped to phases: 59
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 43 forward-paper loss attribution*
+*Last updated: 2026-06-20 during Phase 44 guarded setup calibration*

@@ -149,6 +149,47 @@ class StrategySetupTests(unittest.TestCase):
         self.assertIn("trend_not_aligned", setup.reasons)
         self.assertEqual(setup.price_basis["profile"], "selective")
 
+    def test_profile_can_disable_side_without_changing_default(self):
+        short_candidate = self.candidate(
+            price_change_percent=-4.0,
+            taker_buy_sell_ratio=0.72,
+            taker_buy_sell_ratio_change=-0.1,
+            funding_rate=0.0002,
+            kline_momentum_percent=-1.4,
+            kline_micro_momentum_percent=-0.3,
+            kline_close_position_percent=22,
+            support_price=96.0,
+            resistance_price=102.2,
+            vwap=100.7,
+            ema_fast=99.1,
+            ema_slow=100.4,
+            ema_spread_percent=-1.2948,
+            rsi=31.0,
+        )
+
+        default_setup = build_trade_setup(short_candidate, risk_limits=self.risk_limits())
+        guarded_setup = build_trade_setup(
+            short_candidate,
+            risk_limits=self.risk_limits(),
+            profile={"name": "guarded", "disabled_sides": ["short"]},
+        )
+
+        self.assertEqual(default_setup.decision, "trade")
+        self.assertEqual(default_setup.side, "short")
+        self.assertEqual(guarded_setup.decision, "pass")
+        self.assertEqual(guarded_setup.side, "flat")
+        self.assertIn("side_disabled_by_profile", guarded_setup.reasons)
+
+    def test_profile_can_exclude_symbol(self):
+        setup = build_trade_setup(
+            self.candidate(),
+            risk_limits=self.risk_limits(),
+            profile={"name": "guarded", "excluded_symbols": ["BTCUSDT"]},
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("symbol_excluded_by_profile", setup.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()
