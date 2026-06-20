@@ -5,9 +5,9 @@ milestone_name: Live Pilot Risk Controls
 current_phase: Milestone v1.21 archived
 status: completed
 stopped_at: HYPEUSDT open/protected and within hold window; 8x/dynamic profile still blocked
-last_updated: "2026-06-20T14:58:00+08:00"
+last_updated: "2026-06-20T15:11:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Exposure-status diagnostics deployed and HYPEUSDT gate checked
+last_activity_desc: Live full-position early stop deployed and timer verified
 progress:
   total_phases: 21
   completed_phases: 21
@@ -182,6 +182,26 @@ any profile switch.
   `risk_reasons=["ai_decision_pass"]`. The live service deactivated
   successfully afterwards and the timer remains active.
 
+- Post-archive live-runner hotfix `40d4a95` is deployed on the server. It adds
+  a live-only read-only entry-capacity preflight before market collection,
+  candidate generation, or AI calls. When the active profile is already full,
+  the automated runner returns `entry_capacity_blocked` instead of spending API
+  cycles and then being rejected by the later execution risk gate. Local tests
+  passed (`270` tests), server focused tests passed (`7` tests), server full
+  suite passed (`270` tests), and server secret-safe health-check passed after
+  deployment.
+
+- Post-deploy live evidence: a manual live cycle at `2026-06-20T07:05:32Z`
+  returned `status=entry_capacity_blocked`, `submitted=false`,
+  `risk_reasons=["multi_position_disabled","max_open_positions_reached"]`,
+  and zero market snapshots/candidates/narratives persisted. After the live
+  timer was restored, the scheduled `2026-06-20T07:09:59Z` cycle returned the
+  same early-stop status with `market_snapshot_count=0`, `candidate_count=0`,
+  `narrative_record_count=0`, `ai_accepted=false`, and `submitted=false`; the
+  service deactivated successfully and the timer remains active. A follow-up
+  hold check still showed HYPEUSDT open/protected, about `104.47` minutes into
+  the `120` minute hold window, so no time-exit action was taken.
+
 ## Next Command
 
 Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
@@ -200,7 +220,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 Phase: Milestone v1.21 complete
 Plan: —
 Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — Exposure-status diagnostics deployed and HYPEUSDT gate checked
+Last activity: 2026-06-20 — Live full-position early stop deployed and timer verified
 
 ## Operator Next Steps
 
