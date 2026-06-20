@@ -51,10 +51,77 @@
 - GSD state should distinguish "dry-run deployed" from "live pilot activated" so
   progress is honest.
 
+## Milestone: v1.21 — Live Pilot Risk Controls
+
+**Shipped:** 2026-06-20
+**Phases:** 21
+**Plans:** 21
+
+### What Was Built
+
+- Live small-capital Binance USD-M pilot activation with protective-order
+  evidence, AI timeout/backoff behavior, and server systemd timer controls.
+- Short-window backtesting, pilot tradability filtering, and a cap-compatible
+  hot-coin universe for small notional caps.
+- Fail-closed execution hardening for margin mode, hedge position side, entry
+  order failures, and account-balance preflight.
+- DeepSeek provider support behind the same strict JSON decision validation and
+  deterministic risk gates.
+- Closed-trade outcome reconciliation, submitted-intent sweeps, hold-time
+  checks, time-exit planning, and confirmation-gated time-exit execution.
+- Dynamic sizing, bounded multi-position guards, and confirmation-gated
+  risk-profile preview/apply tooling for a future 30U/8x profile.
+
+### What Worked
+
+- The server stayed isolated under `/opt/binance-futures-agent`, and the live
+  profile changes stayed narrowly scoped to this project.
+- Separating read-only checks from execution-capable commands made it possible
+  to verify live state without accidentally mutating Binance positions.
+- Confirmation tokens gave risky operator actions a clean two-step workflow:
+  preview first, execute only with the exact current token.
+- Treating notional, margin, stop-risk, and exchange minimums as separate
+  quantities prevented a small-margin futures UI from hiding real exposure.
+
+### What Was Inefficient
+
+- Several phases existed because live Binance account settings surfaced one at
+  a time: Multi-Assets cross margin, hedge position side, and tiny-account
+  balance checks.
+- Early milestone docs carried historical BNBUSDT state forward after the
+  active live position changed to HYPEUSDT, so archive closeout needed a
+  cleanup pass to separate history from current operator instructions.
+- The Square/narrative layer still relies on fallback market-heat signals more
+  than a complete external narrative dataset.
+
+### Patterns Established
+
+- LLM decisions remain a slow-path structured filter; final order permission
+  stays in deterministic validation and risk gates.
+- Higher leverage is not a manual env edit: it requires clear exchange state,
+  final closed outcome evidence, risk-change readiness, and a confirmation
+  token.
+- Live time exits are operator-approved and evidence-backed, not automatic.
+- Dynamic sizing is enabled only by explicit profile switch and still bounded by
+  margin fraction, margin cap, risk per trade, max open positions, and duplicate
+  exposure checks.
+
+### Key Lessons
+
+- Small futures accounts need sizing math that talks in both contract notional
+  and estimated initial margin, otherwise the numbers look inconsistent.
+- A profitable-looking or operationally tempting risk increase should wait
+  until the current protected position is closed and reconciled.
+- Backtests help select parameter ranges, but live pilot controls need their own
+  gates because fees, filters, funding, and account modes dominate tiny orders.
+- Archive docs must preserve historical live symbols while keeping current
+  operator next steps pointed at the actual active position.
+
 ## Cross-Milestone Trends
 
 | Trend | Evidence | Next Action |
 |-------|----------|-------------|
-| Safety gates are moving from docs into code | Protective orders, kill switch, AI timeout | Verify on server during Phase 9 |
-| External credentials remain the activation bottleneck | Binance key configured, OpenAI key missing | Configure OpenAI key out of band |
-
+| Safety gates are moving from docs into code | Protective orders, kill switch, AI timeout, resume/risk-change/time-exit gates | Keep new live actions behind read-only preview plus confirmation |
+| External credentials are configured out of band | Binance and AI credentials are present on the server without being committed | Continue treating env files and keys as non-repo secrets |
+| Risk increases require evidence, not enthusiasm | HYPEUSDT blocks the 8x/dynamic profile until closed and reconciled | Reconcile HYPEUSDT after close, then rerun `risk-change-check --target-leverage 8` |
+| Tiny-account futures constraints shape the product | Binance filters, notional-vs-margin, spread, and fees drive sizing | Keep tradability filters and staged backtests before further scaling |

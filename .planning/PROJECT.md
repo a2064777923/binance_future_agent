@@ -222,19 +222,20 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 29 are complete and verified locally and on the server. The project is installable as an
-isolated Python package, has a safe environment contract, official Binance USD-M
-public market-data access, narrative/manual/RSS ingestion, normalized JSONL
-evidence output, a local SQLite event store, deterministic replay/report
-foundations, hot-coin candidate scoring, structured AI decision validation,
-redacted AI journaling, dry-run/live risk-gated execution, signed Binance
-execution helpers, reconciliation reports, deployment health checks, CLI smoke
-commands, automated one-cycle trading runner, live systemd timer assets,
-exchange-side protective order submission, AI provider selection, AI
-timeout/backoff behavior, market-heat fallback narratives, pilot tradability
-filtering, a cap-compatible pilot universe, fail-closed margin setup handling,
-explicit configurable margin mode, explicit position mode, account-balance
-preflight, DeepSeek support, and 30U/5x trial runtime caps.
+Milestones v1.0 and v1.21 are archived. Phases 1 through 29 are complete and
+verified locally and on the server. The project is installable as an isolated
+Python package, has a safe environment contract, official Binance USD-M public
+market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
+output, a local SQLite event store, deterministic replay/report foundations,
+hot-coin candidate scoring, structured AI decision validation, redacted AI
+journaling, dry-run/live risk-gated execution, signed Binance execution
+helpers, reconciliation reports, deployment health checks, CLI smoke commands,
+automated one-cycle trading runner, live systemd timer assets, exchange-side
+protective order submission, AI provider selection, AI timeout/backoff
+behavior, market-heat fallback narratives, pilot tradability filtering, a
+cap-compatible pilot universe, fail-closed margin setup handling, explicit
+configurable margin mode, explicit position mode, account-balance preflight,
+DeepSeek support, and 30U/5x trial runtime caps.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
 Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
@@ -255,7 +256,8 @@ min-notional pressure; it also adds explicit multi-position guards. Both remain
 inactive in live until env settings are deliberately changed.
 Phase 29 adds a `30u_8x_dynamic` profile preview/apply tool that writes only
 approved non-secret risk keys, requires risk-change readiness and confirmation,
-and backs up the env file before any write.
+and backs up the env file before any write. The profile switch has been tested
+and intentionally blocked on the server while HYPEUSDT remains open.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -323,7 +325,7 @@ validation and all pilot risk caps.
 - Extract fenced/prefixed JSON before schema validation.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
-## Current Milestone: v1.11 30U Higher-Leverage Trial Profile
+## Previous Milestone: v1.11 30U Higher-Leverage Trial Profile
 
 **Goal:** Configure the live system for a 30 USDT funded trial with a modest 5x
 leverage ceiling while lowering absolute exposure.
@@ -371,7 +373,7 @@ outcome, net realized PnL `0.1078528` USDT, and repeat reconciliation inserts
 no duplicates. The current BNBUSDT live position remains protected and should be
 reconciled after it closes.
 
-## Current Milestone: v1.14 Risk Change Readiness Gate
+## Previous Milestone: v1.14 Risk Change Readiness Gate
 
 **Goal:** Prevent leverage or risk-cap changes unless the exchange state is
 clear and submitted live trades have outcome evidence.
@@ -429,7 +431,7 @@ automatic exits.
 **Status:** Complete. Server check reports BNBUSDT as protected but past the
 AI-provided 60-minute hold window.
 
-## Current Milestone: v1.18 Time Exit Plan
+## Previous Milestone: v1.18 Time Exit Plan
 
 **Goal:** Make the overdue-position close order shape auditable before any
 execution-capable time-exit work.
@@ -443,7 +445,7 @@ execution-capable time-exit work.
 
 **Status:** Complete. Server plan for BNBUSDT is ready and remains read-only.
 
-## Current Milestone: v1.19 Operator-Approved Time Exit Execution
+## Previous Milestone: v1.19 Operator-Approved Time Exit Execution
 
 **Goal:** Make manual time exits executable only through an auditable
 confirmation gate.
@@ -461,7 +463,7 @@ confirmation gate.
 behavior unless the operator explicitly approves closing the current BNBUSDT
 position.
 
-## Current Milestone: v1.20 Dynamic Sizing And Multi-Position Guard
+## Previous Milestone: v1.20 Dynamic Sizing And Multi-Position Guard
 
 **Goal:** Let a later approved profile use larger, account-aware position sizes
 and optionally more than one open position without losing deterministic risk
@@ -479,7 +481,7 @@ control.
 5x/12U/one-position with dynamic sizing and multi-position disabled while
 HYPEUSDT is open.
 
-## Current Milestone: v1.21 Confirmation-Gated Risk Profile Switch
+## Shipped Milestone: v1.21 Confirmation-Gated Risk Profile Switch
 
 **Goal:** Make future live profile changes auditable, previewable, and
 confirmation-gated.
@@ -493,6 +495,16 @@ confirmation-gated.
 
 **Status:** Complete and deployed. Server plan and blocked-apply verification
 passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
+
+## Next Milestone Goals
+
+- Keep observing HYPEUSDT under the unchanged 5x/12U/one-position live profile.
+- After HYPEUSDT closes, persist closed outcome evidence with
+  `ops reconcile-outcomes --persist-closed`.
+- Rerun `ops risk-change-check --target-leverage 8` before any higher-leverage
+  or dynamic-sizing profile change.
+- Start the next GSD milestone with `$gsd-new-milestone` once the next product
+  objective is selected.
 
 ## Key Decisions
 
@@ -532,4 +544,4 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.21 risk-profile switching on the server.*
+*Last updated: 2026-06-20 after archiving v1.21 Live Pilot Risk Controls.*
