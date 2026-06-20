@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.26
 milestone_name: Live Position Management And Pilot Learning
-current_phase: Phase 62 — Guarded Position Exit Execution
-current_phase_name: Guarded Position Exit Execution
-status: executing
-stopped_at: Phase 61 complete; live timer active; NEARUSDT close_ready; BTWUSDT manual;
-last_updated: "2026-06-20T21:53:10.578Z"
+current_phase: 63
+current_phase_name: Live Cycle Position Stewardship
+status: ready_to_plan
+stopped_at: Phase 62 complete; live timer active; guarded execution preview-only verified;
+last_updated: "2026-06-21T06:00:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 61 complete
+last_activity_desc: Phase 62 complete; Phase 63 ready to plan
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 1
-  percent: 20
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 62 — Guarded Position Exit Execution
-**Status:** Ready to execute
+**Current phase:** Phase 63 — Live Cycle Position Stewardship
+**Status:** Phase 62 complete; Phase 63 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -741,25 +741,25 @@ projects or losing control of downside.
 
 ## Next Command
 
-Plan Phase 62 with `$gsd-plan-phase 62`: guarded close/reduce execution for
-agent-managed positions using fresh confirmation tokens, live-service guards,
-post-action checks, and manual-symbol exclusions.
+Plan Phase 63 with `$gsd-plan-phase 63`: live-cycle stewardship should evaluate
+active agent-managed positions before scanning new entries, with optional
+env-gated auto-management.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 61 complete; live timer active; NEARUSDT diagnostics are
-`close_ready`; BTWUSDT remains manual; 10x/8-position/80U dynamic caps deployed
-and verified.
-**Resume file:** .planning/phases/61-close-review-exit-plan-repair/61-VERIFICATION.md
+**Stopped at:** Phase 62 complete; live timer active; guarded execution
+preview-only checks passed; `NEARUSDT` remains plan-ready but no exit was
+executed; `BTWUSDT` remains manual.
+**Resume file:** .planning/phases/62-guarded-position-exit-execution/62-VERIFICATION.md
 
 ## Current Position
 
-Phase: 62 — Guarded Position Exit Execution
+Phase: 63 — Live Cycle Position Stewardship
 Plan: —
-Status: Ready to execute
-Last activity: 2026-06-21 — Phase 61 complete
+Status: Ready to plan
+Last activity: 2026-06-21 — Phase 62 complete
 
 ## Operator Next Steps
 
-- Plan Phase 62 with `$gsd-plan-phase 62`.
+- Plan Phase 63 with `$gsd-plan-phase 63`.

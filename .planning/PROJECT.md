@@ -166,6 +166,10 @@ control of downside.
   `close_review` due to expired hold time, `BTWUSDT` is manual and must remain
   unmanaged, and the live pilot has entry capacity under the widened caps. The
   focus is now position lifecycle management before further risk scaling.
+- Phase 61/62 add position lifecycle diagnostics plus guarded
+  operator-confirmed close/reduce execution. `NEARUSDT` can be shown as
+  `close_ready`, while `BTWUSDT` remains manual, and execution still refuses to
+  submit without a fresh matching token.
 
 ### Active
 
@@ -250,9 +254,9 @@ control of downside.
 - [x] Keep Lana/public hot-coin claims as design inspiration only; all promotion
   and sizing decisions must come from local backtest, paper, exchange, and live
   outcome evidence.
-- [ ] Explain why each agent-managed `close_review` position is or is not
+- [x] Explain why each agent-managed `close_review` position is or is not
   eligible for a filter-aware close/reduce plan.
-- [ ] Add guarded close/reduce execution for agent-managed positions while
+- [x] Add guarded close/reduce execution for agent-managed positions while
   preserving manual-symbol exclusions.
 - [ ] Make each live cycle record active-position lifecycle decisions before
   scanning new hot entries.

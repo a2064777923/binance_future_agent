@@ -91,15 +91,15 @@ projects or losing control of downside.
 | POS-02 | Phase 61 | Satisfied |
 | POS-03 | Phase 63 | Pending |
 | POS-04 | Phase 61 | Satisfied |
-| EXIT-01 | Phase 62 | Pending |
+| EXIT-01 | Phase 62 | Satisfied |
 | EXIT-02 | Phase 63 | Pending |
-| EXIT-03 | Phase 62 | Pending |
+| EXIT-03 | Phase 62 | Satisfied |
 | LEARN-01 | Phase 64 | Pending |
 | LEARN-02 | Phase 64 | Pending |
 | LEARN-03 | Phase 64 | Pending |
 | OPS-01 | Phase 65 | Pending |
 | OPS-02 | Phase 65 | Pending |
-| RISK-04 | Phase 62 | Pending |
+| RISK-04 | Phase 62 | Satisfied |
 
 **Coverage:**
 - v1.26 requirements: 13 total
