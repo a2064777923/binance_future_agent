@@ -40,6 +40,12 @@ all-interval live gate remains blocked.
   follow-up local fix changes the paper service to auto-select top hot symbols
   from Binance 24h ticker data before falling back to configured paper/live
   symbols.
+- The follow-up fix was deployed. Server focused tests passed with `30` tests,
+  server full suite passed with `322` tests, and health-check passed with
+  network checks skipped. The deployed paper unit now uses
+  `--auto-hot-symbols --top-n 40`. A manual server paper run selected 40
+  symbols, generated 15 paper signals, skipped 25, and left
+  `order_intents=18` unchanged.
 
 ## Not Changed
 

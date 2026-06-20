@@ -257,7 +257,7 @@ projects or losing control of downside.
 | FPS-01 | Phase 41 | Complete and deployed |
 | FPS-02 | Phase 41 | Complete and deployed |
 | FPS-03 | Phase 41 | Complete and deployed |
-| FPS-04 | Phase 41 | Complete locally |
+| FPS-04 | Phase 41 | Complete and deployed |
 
 **Coverage:**
 - v1.22 requirements: 47 total

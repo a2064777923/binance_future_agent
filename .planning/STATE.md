@@ -487,6 +487,15 @@ gated by all-interval strategy evidence.
   absolute price-change filters before falling back to
   `BFA_FORWARD_PAPER_SYMBOLS` or `BFA_MARKET_SYMBOLS`.
 
+- The follow-up Phase 41 fix is deployed. Server focused tests passed with
+  `30` tests, server full suite passed with `322` tests, and health-check
+  passed with network checks skipped. The deployed paper service ExecStart uses
+  `--auto-hot-symbols --top-n 40`; the paper timer is active and the live
+  service/timer remain inactive. A manual server paper run selected `40`
+  symbols, generated `15` paper signals, skipped `25`, and created no
+  `order_intents`; DB counts after timer/manual paper runs were
+  `paper_signals=23`, `paper_outcomes=0`, `order_intents=18`.
+
 ## Next Command
 
 Collect repeated out-of-sample `ops forward-paper-run` evidence from the active
