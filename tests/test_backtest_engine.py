@@ -146,6 +146,82 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertIn(payload["interpretation"]["balanced"], {"insufficient_trades", "candidate_for_forward_paper"})
         self.assertIn("max_daily_loss_usdt", payload["aggregate"]["balanced"])
 
+    def test_quant_setup_variant_generates_long_trade(self):
+        bars = []
+        price = 100.0
+        for index in range(12):
+            close = price * 1.012
+            bars.append(
+                bar(
+                    index,
+                    open_price=price,
+                    high=close * 1.025,
+                    low=price * 0.997,
+                    close=close,
+                    quote_volume=3_000_000,
+                    taker_ratio=1.35,
+                )
+            )
+            price = close
+
+        result = run_hot_momentum_backtest(
+            {"BTCUSDT": bars},
+            self.config(
+                name="quant_setup",
+                strategy_type="quant_setup",
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=25,
+                max_risk_per_trade_usdt=0.6,
+                max_daily_loss_usdt=2,
+                max_open_positions=2,
+                lookback_bars=6,
+                max_hold_bars=6,
+            ),
+        )
+
+        self.assertGreaterEqual(result.trade_count, 1)
+        self.assertEqual(result.trades[0].side, "long")
+        self.assertIn("quant_long_setup", result.trades[0].reason_codes)
+
+    def test_quant_setup_variant_generates_short_trade(self):
+        bars = []
+        price = 100.0
+        for index in range(12):
+            close = price * 0.988
+            bars.append(
+                bar(
+                    index,
+                    open_price=price,
+                    high=price * 1.003,
+                    low=close * 0.975,
+                    close=close,
+                    quote_volume=3_000_000,
+                    taker_ratio=0.72,
+                )
+            )
+            price = close
+
+        result = run_hot_momentum_backtest(
+            {"BTCUSDT": bars},
+            self.config(
+                name="quant_setup",
+                strategy_type="quant_setup",
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=25,
+                max_risk_per_trade_usdt=0.6,
+                max_daily_loss_usdt=2,
+                max_open_positions=2,
+                lookback_bars=6,
+                max_hold_bars=6,
+            ),
+        )
+
+        self.assertGreaterEqual(result.trade_count, 1)
+        self.assertEqual(result.trades[0].side, "short")
+        self.assertIn("quant_short_setup", result.trades[0].reason_codes)
+
     def test_daily_loss_gate_counts_only_realized_exits(self):
         def series(symbol):
             return [

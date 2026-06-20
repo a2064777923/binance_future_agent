@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from bfa.ai.schema import RiskLimits
 from bfa.backtest.models import BacktestBar, BacktestConfig, BacktestResult, BacktestTrade, built_in_variants
+from bfa.strategy.setup import TradeSetup, build_trade_setup
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,7 @@ class _Signal:
     entry_index: int
     entry_time_ms: int
     reason_codes: list[str]
+    setup: TradeSetup | None = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +170,10 @@ def _generate_signals(
     bars: list[BacktestBar],
     config: BacktestConfig,
 ) -> tuple[list[_Signal], int]:
+    if config.strategy_type == "quant_setup":
+        return _generate_quant_setup_signals(symbol, bars, config)
+    if config.strategy_type != "hot_momentum":
+        raise ValueError(f"unknown backtest strategy_type: {config.strategy_type}")
     signals: list[_Signal] = []
     rejected = 0
     next_allowed_index = config.lookback_bars
@@ -218,6 +225,8 @@ def _simulate_trade(
     signal: _Signal,
     config: BacktestConfig,
 ) -> BacktestTrade | None:
+    if config.strategy_type == "quant_setup":
+        return _simulate_quant_setup_trade(bars, signal, config)
     entry_bar = bars[signal.entry_index]
     raw_entry = entry_bar.open
     stop_price = raw_entry * (1.0 - config.stop_loss_percent / 100.0)
@@ -276,6 +285,186 @@ def _simulate_trade(
         exit_reason=exit_reason,
         reason_codes=list(signal.reason_codes),
     )
+
+
+def _generate_quant_setup_signals(
+    symbol: str,
+    bars: list[BacktestBar],
+    config: BacktestConfig,
+) -> tuple[list[_Signal], int]:
+    signals: list[_Signal] = []
+    rejected = 0
+    next_allowed_index = config.lookback_bars
+    last_entry_index = len(bars) - 1
+    for entry_index in range(config.lookback_bars, last_entry_index + 1):
+        if entry_index < next_allowed_index:
+            continue
+        lookback = bars[entry_index - config.lookback_bars : entry_index]
+        setup = build_trade_setup(
+            _candidate_from_bars(symbol, lookback, config),
+            risk_limits=_risk_limits_from_backtest_config(config),
+        )
+        if setup.decision != "trade":
+            rejected += 1
+            continue
+        signals.append(
+            _Signal(
+                symbol=symbol.upper(),
+                entry_index=entry_index,
+                entry_time_ms=bars[entry_index].open_time,
+                reason_codes=list(setup.reasons),
+                setup=setup,
+            )
+        )
+        next_allowed_index = entry_index + config.cooldown_bars + 1
+    return signals, rejected
+
+
+def _simulate_quant_setup_trade(
+    bars: list[BacktestBar],
+    signal: _Signal,
+    config: BacktestConfig,
+) -> BacktestTrade | None:
+    if signal.setup is None:
+        return None
+    setup = signal.setup
+    if setup.entry_price is None or setup.stop_price is None or setup.target_price is None or setup.notional_usdt is None:
+        return None
+    entry_bar = bars[signal.entry_index]
+    side = setup.side
+    raw_entry = entry_bar.open
+    stop_price = setup.stop_price
+    target_price = setup.target_price
+    notional = min(setup.notional_usdt, config.max_position_notional_usdt)
+    if notional <= 0:
+        return None
+
+    slippage_rate = config.slippage_bps / 10_000.0
+    entry_fill = raw_entry * (1.0 + slippage_rate) if side == "long" else raw_entry * (1.0 - slippage_rate)
+    quantity = notional / raw_entry
+    max_hold_bars = _hold_bars_from_setup(setup, config)
+    exit_bar = bars[min(signal.entry_index + max_hold_bars - 1, len(bars) - 1)]
+    exit_price = exit_bar.close
+    exit_reason = "time_exit"
+    exit_time = exit_bar.close_time_iso
+
+    max_exit_index = min(len(bars) - 1, signal.entry_index + max_hold_bars - 1)
+    for index in range(signal.entry_index, max_exit_index + 1):
+        bar = bars[index]
+        if side == "long":
+            hit_stop = bar.low <= stop_price
+            hit_target = bar.high >= target_price
+        else:
+            hit_stop = bar.high >= stop_price
+            hit_target = bar.low <= target_price
+        if hit_stop:
+            exit_price = stop_price
+            exit_reason = "stop_loss"
+            exit_time = bar.close_time_iso
+            break
+        if hit_target:
+            exit_price = target_price
+            exit_reason = "take_profit"
+            exit_time = bar.close_time_iso
+            break
+
+    if side == "long":
+        exit_fill = exit_price * (1.0 - slippage_rate)
+        gross_pnl = quantity * (exit_fill - entry_fill)
+        slippage = quantity * ((entry_fill - raw_entry) + max(exit_price - exit_fill, 0.0))
+    else:
+        exit_fill = exit_price * (1.0 + slippage_rate)
+        gross_pnl = quantity * (entry_fill - exit_fill)
+        slippage = quantity * (max(raw_entry - entry_fill, 0.0) + (exit_fill - exit_price))
+    entry_fee = quantity * entry_fill * config.taker_fee_rate
+    exit_fee = quantity * exit_fill * config.taker_fee_rate
+    fees = entry_fee + exit_fee
+    net_pnl = gross_pnl - fees
+
+    return BacktestTrade(
+        symbol=signal.symbol,
+        side=side,
+        entry_time=entry_bar.open_time_iso,
+        exit_time=exit_time,
+        entry_price=round(entry_fill, 8),
+        exit_price=round(exit_fill, 8),
+        quantity=round(quantity, 8),
+        notional_usdt=round(notional, 8),
+        gross_pnl_usdt=round(gross_pnl, 8),
+        fees_usdt=round(fees, 8),
+        slippage_usdt=round(slippage, 8),
+        net_pnl_usdt=round(net_pnl, 8),
+        exit_reason=exit_reason,
+        reason_codes=list(signal.reason_codes),
+    )
+
+
+def _candidate_from_bars(symbol: str, bars: list[BacktestBar], config: BacktestConfig) -> dict[str, Any]:
+    first = bars[0]
+    last = bars[-1]
+    previous = bars[-2] if len(bars) >= 2 else first
+    taker_ratio = last.taker_buy_sell_ratio
+    previous_taker_ratio = previous.taker_buy_sell_ratio
+    features = {
+        "mention_count": 1,
+        "source_count": 1,
+        "author_count": 1,
+        "engagement_score": min(abs(_momentum_percent(first.open, last.close)) * 10.0, 100.0),
+        "price_change_percent": _momentum_percent(first.open, last.close),
+        "quote_volume": last.quote_volume,
+        "open_interest_value": None,
+        "taker_buy_sell_ratio": taker_ratio,
+        "taker_buy_sell_ratio_change": (taker_ratio - previous_taker_ratio)
+        if taker_ratio is not None and previous_taker_ratio is not None
+        else None,
+        "funding_rate": 0.0,
+        "kline_range_percent": last.range_percent,
+        "kline_range_mean_percent": sum(bar.range_percent for bar in bars) / len(bars),
+        "kline_range_max_percent": max(bar.range_percent for bar in bars),
+        "kline_momentum_percent": _momentum_percent(first.open, last.close),
+        "kline_micro_momentum_percent": _momentum_percent(previous.close, last.close),
+        "kline_close_position_percent": _close_position_percent(last),
+        "kline_quote_volume_change_percent": _momentum_percent(previous.quote_volume, last.quote_volume),
+        "reference_price": last.close,
+        "min_executable_notional": 5.0,
+    }
+    return {
+        "symbol": symbol.upper(),
+        "score": 0.0,
+        "narrative_score": 0.0,
+        "market_score": 0.0,
+        "reason_codes": ["backtest_quant_setup"],
+        "features": features,
+    }
+
+
+def _risk_limits_from_backtest_config(config: BacktestConfig) -> RiskLimits:
+    return RiskLimits(
+        account_capital_usdt=config.account_capital_usdt,
+        max_leverage=config.max_leverage,
+        max_position_notional_usdt=config.max_position_notional_usdt,
+        max_risk_per_trade_usdt=config.max_risk_per_trade_usdt,
+        max_daily_loss_usdt=config.max_daily_loss_usdt,
+        max_open_positions=config.max_open_positions,
+    )
+
+
+def _hold_bars_from_setup(setup: TradeSetup, config: BacktestConfig) -> int:
+    if setup.hold_time_minutes is None:
+        return config.max_hold_bars
+    return max(1, min(config.max_hold_bars, round(setup.hold_time_minutes / 5)))
+
+
+def _momentum_percent(start: float, end: float) -> float:
+    if start <= 0:
+        return 0.0
+    return ((end - start) / start) * 100.0
+
+
+def _close_position_percent(bar: BacktestBar) -> float | None:
+    if bar.high <= bar.low:
+        return None
+    return ((bar.close - bar.low) / (bar.high - bar.low)) * 100.0
 
 
 def _trade_events(candidate_trades: list[_CandidateTrade]) -> list[_TradeEvent]:

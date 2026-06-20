@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-34, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-35, active.
 
 ## Phases
 
@@ -178,13 +178,35 @@ auditable end-to-end.
    intent, and exchange evidence without mutating exchange state.
 6. Full local and server test suites pass.
 
+### Phase 35: Quant Setup Backtest Calibration
+
+**Goal:** Make the deterministic setup layer backtestable through staged
+sweeps and hot-symbol matrix reporting.
+
+**Requirements:** QBT-01, QBT-02, QBT-03
+
+**Status:** Complete locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. `quant_setup` is available as a built-in backtest variant.
+2. Setup-driven backtests use completed kline windows to call the same
+   deterministic setup logic used by the live runner.
+3. Long and short setup-driven trades simulate stop loss, take profit, time
+   exit, fees, and slippage.
+4. CLI `backtest run`, `backtest sweep`, and matrix reporting accept
+   `quant_setup`.
+5. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-34 | 5/5 | Phase 34 deployed | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-35 | 6/6 | Phase 35 local | Pending |
 
 ## Requirement Coverage
 
@@ -194,7 +216,8 @@ auditable end-to-end.
 
 ## Next Step
 
-Monitor `SOLUSDT` through filter-aware `ops position-adjustment-plan` and use
-`ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
-adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`
-without an explicit confirmation token.
+Run broader `quant_setup` backtest matrix sweeps on recent hot symbols before
+restoring live automation. Monitor `SOLUSDT` through filter-aware
+`ops position-adjustment-plan` and use `ops trade-trace --symbol SOLUSDT` for
+decision-chain review. Do not execute adjustment orders, restore the live
+timer, or apply `30u_10x_multi_dynamic` without an explicit confirmation token.

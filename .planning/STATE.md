@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 34
+current_phase: 35
 status: active
-stopped_at: Phase 34 deployed; timer remains paused while SOLUSDT close/profile decision is pending
-last_updated: "2026-06-20T20:35:00+08:00"
+stopped_at: Phase 35 complete locally; broader quant_setup matrix calibration remains next
+last_updated: "2026-06-20T21:05:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 31
-  completed_phases: 31
-  total_plans: 52
-  completed_plans: 52
+  total_phases: 32
+  completed_phases: 32
+  total_plans: 53
+  completed_plans: 53
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 34 — Deterministic Quant Setup And Trade Trace
-**Status:** Phase 34 deployed and verified; live timer paused while operator reviews SOLUSDT
+**Current phase:** Phase 35 — Quant Setup Backtest Calibration
+**Status:** Phase 35 complete locally; live timer remains paused while operator reviews SOLUSDT
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,9 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Keep the live system paused while reviewing the active
-SOLUSDT position and strategy quality; new entry setup logic is now
-deterministic and traceable.
+**Current focus:** Validate the deterministic setup layer with staged
+backtests/matrix sweeps before restoring live automation.
 
 ## Decisions
 
@@ -376,29 +375,45 @@ deterministic and traceable.
   intent, and exchange response. This confirms the operator concern that the
   old SOLUSDT order path was thinner than a mature deterministic quant setup.
 
+- Phase 35 local implementation adds `quant_setup` as a built-in backtest
+  variant. The backtest engine now can build deterministic setup candidates
+  from completed kline windows, call the same `build_trade_setup` logic used by
+  the live runner, and simulate long or short futures trades with setup-derived
+  stop, target, notional, hold time, fees, slippage, and time exit. Legacy
+  `strict`, `balanced`, and `aggressive` variants remain unchanged.
+
+- Phase 35 verification is local/offline only so far. Focused backtest tests
+  passed, full local suite passed with `303` tests, `git diff --check` passed,
+  and manual CLI smoke showed `backtest run --variant quant_setup` and
+  `backtest sweep --variants quant_setup` both produce reports. No live env,
+  server service state, exchange order, or risk profile was changed.
+
 ## Next Command
 
-Await operator decision on the active `SOLUSDT` adjustment/profile change and
-next validation direction. Do not restore the live timer, execute adjustment
-orders, or apply `30u_10x_multi_dynamic` without explicit confirmation.
+Run broader `quant_setup` matrix sweeps on recent hot-symbol data, then decide
+whether the deterministic setup is ready for forward paper/live small-size
+trial. Do not restore the live timer, execute adjustment orders, or apply
+`30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 34 deployed; timer paused while SOLUSDT decision is pending
-**Resume file:** .planning/phases/34-deterministic-quant-setup-and-trade-trace/34-01-SUMMARY.md
+**Stopped at:** Phase 35 complete locally; broader quant_setup matrix calibration remains next
+**Resume file:** .planning/phases/35-quant-setup-backtest-calibration/35-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 34 — Deterministic Quant Setup And Trade Trace
-Plan: 34-01 local implementation
-Status: Deployed and verified; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — deterministic quant setup and trade trace deployed
+Phase: 35 — Quant Setup Backtest Calibration
+Plan: 35-01 local implementation
+Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — quant_setup backtest variant implemented
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
+- Run recent hot-symbol matrix sweeps with `quant_setup` and compare against
+  old fixed variants before using the new setup live.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
 - Review the old SOLUSDT decision chain through read-only

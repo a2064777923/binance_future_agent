@@ -91,6 +91,17 @@ projects or losing control of downside.
   candidate, setup or legacy AI, risk/order intent, and exchange evidence for a
   submitted trade.
 
+### Quant Setup Backtesting
+
+- [x] **QBT-01**: The deterministic setup layer used by the live runner can be
+  evaluated by the backtest engine as a named `quant_setup` variant.
+
+- [x] **QBT-02**: Setup-driven backtests support both long and short futures
+  positions with fees, slippage, stop loss, take profit, and time exit.
+
+- [x] **QBT-03**: Staged sweeps and hot-symbol matrix reports can include the
+  `quant_setup` variant alongside legacy fixed hot-momentum variants.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -123,12 +134,15 @@ projects or losing control of downside.
 | QSE-03 | Phase 34 | Complete and deployed |
 | QSE-04 | Phase 34 | Complete and deployed |
 | QSE-05 | Phase 34 | Complete and deployed |
+| QBT-01 | Phase 35 | Complete locally |
+| QBT-02 | Phase 35 | Complete locally |
+| QBT-03 | Phase 35 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 20 total
-- Mapped to phases: 20
+- v1.22 requirements: 23 total
+- Mapped to phases: 23
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 34 deterministic quant setup and trade trace deployment*
+*Last updated: 2026-06-20 after Phase 35 quant setup backtest calibration*

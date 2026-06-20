@@ -84,6 +84,7 @@ class BacktestBar:
 @dataclass(frozen=True)
 class BacktestConfig:
     name: str = "balanced"
+    strategy_type: str = "hot_momentum"
     account_capital_usdt: float = 100.0
     max_leverage: float = 3.0
     max_position_notional_usdt: float = 20.0
@@ -108,6 +109,7 @@ class BacktestConfig:
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
+            "strategy_type": self.strategy_type,
             "account_capital_usdt": self.account_capital_usdt,
             "max_leverage": self.max_leverage,
             "max_position_notional_usdt": self.max_position_notional_usdt,
@@ -295,6 +297,19 @@ def built_in_variants() -> dict[str, BacktestConfig]:
             stop_loss_percent=2.0,
             take_profit_percent=3.2,
             max_hold_bars=8,
+        ),
+        "quant_setup": base.with_overrides(
+            name="quant_setup",
+            strategy_type="quant_setup",
+            account_capital_usdt=30.0,
+            max_leverage=10.0,
+            max_position_notional_usdt=25.0,
+            max_risk_per_trade_usdt=0.6,
+            max_daily_loss_usdt=2.0,
+            max_open_positions=2,
+            lookback_bars=6,
+            min_quote_volume_usdt=1_000_000.0,
+            cooldown_bars=1,
         ),
     }
 
