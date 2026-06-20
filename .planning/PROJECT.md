@@ -90,6 +90,8 @@ control of downside.
   concurrency caps.
 - Phase 20 adds a read-only timer resume gate so automation resumes only after
   exchange positions, normal orders, algo orders, and AI backoff are clear.
+- Phase 21 adds closed-trade outcome reconciliation from Binance fills and
+  persists net-of-commission fill/outcome evidence idempotently.
 
 ### Active
 
@@ -124,6 +126,8 @@ control of downside.
 - [x] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
 - [x] Gate future timer resume with read-only exchange and AI-backoff checks.
+- [x] Persist closed live trade fill/outcome evidence with gross PnL,
+  commission, net PnL, and closed/open status.
 
 ### Out of Scope
 
@@ -189,7 +193,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 19 are complete and verified. The project is installable as an
+Phases 1 through 21 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -202,7 +206,8 @@ timeout/backoff behavior, market-heat fallback narratives, pilot tradability
 filtering, a cap-compatible pilot universe, fail-closed margin setup handling,
 explicit configurable margin mode, explicit position mode, account-balance
 preflight, DeepSeek support, and 30U/5x trial runtime caps.
-Phase 20 also adds a read-only resume gate for timer reactivation.
+Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
+closed-trade outcome reconciliation and persisted fill/outcome accounting.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -212,17 +217,14 @@ daily loss, and 1 open position.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`
-and has exchange-visible stop-loss and take-profit algo orders. Live-status now
-reports normal open orders and algo orders separately. The live timer is
-currently disabled intentionally while that position is reviewed; automation can
-be resumed after the position closes or after explicit operator approval to run
-while the one-position cap blocks new entries.
-The ZECUSDT position later cleared, and the current server `ops resume-check`
-result is `resume_allowed` with zero active positions, zero normal open orders,
-zero open algo orders, and no active AI backoff.
-The live timer was re-enabled after that gate result; the first resumed cycle
-and the next scheduled cycle both exited successfully with `submitted=false`
-after the AI returned pass.
+and later exited at `471.52`. Phase 21 reconciled that closed trade from
+Binance fills and persisted a net result of `0.1078528` USDT after commission.
+The ZECUSDT position cleared, `ops resume-check` returned `resume_allowed`, and
+the live timer was re-enabled. The first resumed cycles submitted no order, then
+a later timer cycle opened a separate BNBUSDT LONG under the 30U/5x profile.
+Current live-status shows that BNBUSDT position has exchange-visible stop-loss
+and take-profit algo orders; it has not yet been outcome-reconciled because it
+is still open.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -282,7 +284,7 @@ leverage ceiling while lowering absolute exposure.
 ZECUSDT position and two protective algo orders, and the live timer is paused
 for open-position review.
 
-## Current Milestone: v1.12 Timer Resume Gate
+## Previous Milestone: v1.12 Timer Resume Gate
 
 **Goal:** Make timer resume decisions auditable with a read-only gate.
 
@@ -296,6 +298,22 @@ for open-position review.
 protected ZECUSDT position, then returned `resume_allowed` after the position
 and algo orders cleared. The timer was re-enabled, and the first resumed cycle
 plus the next scheduled cycle submitted no order.
+
+## Current Milestone: v1.13 Closed Trade Outcome Reconciliation
+
+**Goal:** Turn completed live trades into replayable fill/outcome records with
+net PnL after commission.
+
+**Target features:**
+- Add signed `userTrades` account-trade reads.
+- Reconstruct latest submitted local trade intent from Binance fills.
+- Report gross PnL, commission, net PnL, net quantity, fill times, and status.
+- Persist fills and outcomes idempotently into the event store.
+
+**Status:** Complete. The closed ZECUSDT trade is persisted with 2 fills and 1
+outcome, net realized PnL `0.1078528` USDT, and repeat reconciliation inserts
+no duplicates. The current BNBUSDT live position remains protected and should be
+reconciled after it closes.
 
 ## Key Decisions
 
@@ -322,8 +340,9 @@ plus the next scheduled cycle submitted no order.
 | Add DeepSeek provider support | The previous OpenAI-compatible endpoint was intermittent and returned invalid JSON; DeepSeek can use Chat Completions JSON mode behind the same validation gates. | Phase 18 complete and deployed |
 | Switch to 30U/5x trial profile | User wants to fund 30 USDT for a first live trial; higher leverage is allowed only with tighter absolute notional/loss/concurrency caps. | Phase 19 complete; timer paused for open-position review |
 | Gate timer resume with exchange state | Timer resume should be a read-only decision based on live positions, open orders, algo orders, and AI backoff rather than manual JSON interpretation. | Phase 20 complete |
+| Persist closed-trade outcomes | Live strategy changes need net-of-fee realized PnL evidence, not only submitted order records. | Phase 21 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.12 timer resume gate.*
+*Last updated: 2026-06-20 after verifying v1.13 closed-trade outcome reconciliation.*

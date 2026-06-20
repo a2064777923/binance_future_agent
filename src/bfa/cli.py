@@ -25,6 +25,7 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
+from bfa.execution.outcome import build_latest_trade_outcome
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.market.snapshot_writer import write_jsonl_snapshots
@@ -95,6 +96,7 @@ def main(
             stdout=stdout,
             client_factory=client_factory,
             ai_client_factory=ai_client_factory,
+            signed_client_factory=signed_client_factory,
         )
     if args.command == "agent":
         return _run_agent(
@@ -291,6 +293,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="use only local event-store evidence instead of signed Binance reads",
     )
+
+    trade_outcome = ops_subparsers.add_parser(
+        "trade-outcome",
+        help="reconstruct the latest submitted trade outcome from read-only Binance fills",
+    )
+    trade_outcome.add_argument("--env-file", help="optional env file to load before environment overrides")
+    trade_outcome.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    trade_outcome.add_argument("--symbol", help="optional symbol filter, e.g. ZECUSDT")
+    trade_outcome.add_argument("--persist", action="store_true", help="persist fills and outcome into the event store")
 
     agent = subparsers.add_parser(
         "agent",
@@ -659,6 +670,7 @@ def _run_ops(
     stdout: TextIO | None,
     client_factory,
     ai_client_factory,
+    signed_client_factory,
 ) -> int:
     config = load_config(env=env, env_file=args.env_file)
     if args.ops_command == "health-check":
@@ -689,6 +701,30 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.resume_allowed else 1
+    if args.ops_command == "trade-outcome":
+        signed_client = _build_signed_client(config, signed_client_factory)
+        if signed_client is None:
+            payload = {
+                "found": False,
+                "outcome": None,
+                "error": "BFA_MODE must be live or testnet for ops trade-outcome",
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+            return 1
+        connection = connect(args.db or config.get("BFA_DB_PATH"))
+        try:
+            store = EventStore(connection)
+            outcome = build_latest_trade_outcome(
+                store,
+                signed_client,
+                symbol=args.symbol,
+                persist=args.persist,
+            )
+        finally:
+            connection.close()
+        payload = {"found": outcome is not None, "outcome": outcome.to_dict() if outcome else None}
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0 if outcome is not None else 1
     return 2
 
 

@@ -143,6 +143,23 @@ class BinanceSignedClientTests(unittest.TestCase):
         self.assertEqual(open_algo_orders, [])
         self.assertEqual(positions, [])
 
+    def test_user_trades_uses_account_trade_list_endpoint(self):
+        transport = FakeSignedTransport(response=(200, [{"id": 1, "symbol": "BTCUSDT"}], {}))
+        client = self.client(transport)
+
+        response = client.user_trades("btcusdt", start_time=1700000000000, limit=10)
+
+        call = transport.calls[0]
+        parsed = urlparse(call["url"])
+        query = parse_qs(parsed.query)
+        self.assertEqual(response[0]["id"], 1)
+        self.assertEqual(call["method"], "GET")
+        self.assertEqual(parsed.path, "/fapi/v1/userTrades")
+        self.assertEqual(query["symbol"], ["BTCUSDT"])
+        self.assertEqual(query["startTime"], ["1700000000000"])
+        self.assertEqual(query["limit"], ["10"])
+        self.assertIn("signature", query)
+
     def test_error_payload_raises_structured_error_without_signature(self):
         transport = FakeSignedTransport(response=(400, {"code": -2019, "msg": "Margin is insufficient."}, {}))
         client = self.client(transport)

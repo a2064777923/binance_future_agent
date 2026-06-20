@@ -196,6 +196,18 @@ v1.0 requirements are archived at
   or open orders exist without a position, the resume gate returns
   `urgent_attention`.
 
+### Closed Trade Outcome Reconciliation
+
+- [x] **CTOR-01**: Provide a read-only `ops trade-outcome` command that
+  reconstructs the latest submitted trade's fills from Binance `userTrades`.
+
+- [x] **CTOR-02**: The outcome report includes gross realized PnL, commission,
+  net realized PnL, net quantity, trade count, first/last fill times, and a
+  closed/open-or-partial status.
+
+- [x] **CTOR-03**: The command can persist fill and outcome artifacts into the
+  existing event store without changing exchange state.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -253,13 +265,16 @@ v1.0 requirements are archived at
 | TRG-01 | Phase 20 | Complete - `ops resume-check` allows resume only for clear exchange/backoff state |
 | TRG-02 | Phase 20 | Complete - protected active ZECUSDT returns `keep_paused` |
 | TRG-03 | Phase 20 | Complete - unprotected positions and orphan orders return `urgent_attention` in tests |
+| CTOR-01 | Phase 21 | Complete - `ops trade-outcome` reconstructs ZECUSDT fills from signed `userTrades` |
+| CTOR-02 | Phase 21 | Complete - live ZECUSDT report includes gross PnL, commission, net PnL, net quantity, fill times, and `closed` status |
+| CTOR-03 | Phase 21 | Complete - persisted 2 fills and 1 outcome locally without changing exchange state; repeat run inserted no duplicates |
 
 **Coverage:**
 
-- v1.1-v1.12 requirements: 44 total
-- Mapped to phases: 44
+- v1.1-v1.13 requirements: 47 total
+- Mapped to phases: 47
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.12 timer resume gate*
+*Last updated: 2026-06-20 after verifying v1.13 closed-trade outcome reconciliation*

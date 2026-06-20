@@ -215,6 +215,28 @@ class BinanceFuturesSignedClient:
         payload = self._signed_request("GET", "/fapi/v2/positionRisk", params)
         return payload if isinstance(payload, list) else [payload]
 
+    def user_trades(
+        self,
+        symbol: str,
+        *,
+        order_id: int | str | None = None,
+        start_time: int | str | None = None,
+        end_time: int | str | None = None,
+        from_id: int | str | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, str] = {"symbol": _symbol(symbol), "limit": str(limit)}
+        if order_id is not None:
+            params["orderId"] = str(order_id)
+        if start_time is not None:
+            params["startTime"] = str(start_time)
+        if end_time is not None:
+            params["endTime"] = str(end_time)
+        if from_id is not None:
+            params["fromId"] = str(from_id)
+        payload = self._signed_request("GET", "/fapi/v1/userTrades", params)
+        return payload if isinstance(payload, list) else [payload]
+
     def _signed_request(
         self,
         method: str,

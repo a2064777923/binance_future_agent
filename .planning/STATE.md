@@ -1,29 +1,29 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.12
-milestone_name: Timer Resume Gate
-current_phase: Phase 20 - Timer Resume Gate
+milestone: v1.13
+milestone_name: Closed Trade Outcome Reconciliation
+current_phase: Phase 21 - Closed Trade Outcome Reconciliation
 status: completed
-stopped_at: Phase 20 verified; timer resumed and two cycles submitted no order
-last_updated: "2026-06-20T11:39:00.000+08:00"
+stopped_at: Phase 21 verified; ZECUSDT outcome persisted; BNBUSDT live position remains protected
+last_updated: "2026-06-20T11:58:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Timer resumed after resume_allowed; two resumed cycles submitted no order
+last_activity_desc: Closed ZECUSDT live trade reconciled net of commission; current BNBUSDT position remains protected
 progress:
-  total_phases: 12
-  completed_phases: 12
-  total_plans: 12
-  completed_plans: 12
+  total_phases: 13
+  completed_phases: 13
+  total_plans: 13
+  completed_plans: 13
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 20 - Timer Resume Gate
-**Status:** v1.12 complete; live timer active after `ops resume-check` returned
-`resume_allowed`
+**Current phase:** Phase 21 - Closed Trade Outcome Reconciliation
+**Status:** v1.13 complete; ZECUSDT fill/outcome accounting is persisted and
+live timer remains active under the 30U/5x profile
 **Last planned:** 2026-06-20
-**Plan count:** 5
+**Plan count:** 1
 
 ## Project Reference
 
@@ -78,12 +78,17 @@ projects or losing control of downside.
   algo orders, and no active AI backoff.
 - The first two resumed timer cycles exited 0 with `submitted=false` and
   `risk_reasons=["ai_decision_pass"]`.
+- A later timer cycle opened a BNBUSDT LONG under the 30U/5x profile; live-status
+  shows the position has exchange-visible stop-loss and take-profit algo orders.
+- The first closed live ZECUSDT trade is reconciled from Binance fills:
+  gross PnL `0.12288` USDT, commission `0.0150272` USDT, net PnL
+  `0.1078528` USDT, and `status=closed`.
 
 ## Next Command
 
-Continue observing live timer cycles under the 30U profile. Before any future
-manual timer resume, run `ops resume-check` and resume only if the gate returns
-`resume_allowed`.
+Observe the current BNBUSDT live position under the 30U/5x profile. After it
+closes, run `ops trade-outcome --symbol BNBUSDT --persist` before any further
+risk-limit or leverage increase.
 
 ## Session
 
@@ -93,14 +98,17 @@ manual timer resume, run `ops resume-check` and resume only if the gate returns
 
 ## Current Position
 
-Phase: Phase 20 - Timer Resume Gate
-Plan: 20-01 complete
-Status: `ops resume-check` deployed; timer active; two resumed cycles selected
-ZECUSDT then HYPEUSDT, AI passed both, and no order was submitted
-Last activity: 2026-06-20 - Phase 20 verified
+Phase: Phase 21 - Closed Trade Outcome Reconciliation
+Plan: 21-01 complete
+Status: `ops trade-outcome` deployed; ZECUSDT outcome persisted; timer active;
+current BNBUSDT LONG is protected by stop-loss and take-profit algo orders
+Last activity: 2026-06-20 - Phase 21 verified
 
 ## Operator Next Steps
 
-- Observe the next live cycles and confirm no unexpected order submission.
+- Observe the current BNBUSDT live position and its protective orders.
+- Run `ops trade-outcome --symbol BNBUSDT --persist` after BNBUSDT closes.
+- Do not raise leverage/risk caps while a live position is open unless
+  explicitly reviewed.
 - Run `ops resume-check` before any future manual timer resume.
 - Rerun staged matrix backtests before any further risk-limit increase.

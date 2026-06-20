@@ -23,6 +23,7 @@
 - ✅ **v1.11 30U Higher-Leverage Trial Profile** — Phase 19, completed 2026-06-20
   with live timer paused for open-position review.
 - ✅ **v1.12 Timer Resume Gate** — Phase 20, completed 2026-06-20.
+- ✅ **v1.13 Closed Trade Outcome Reconciliation** — Phase 21, completed 2026-06-20.
 
 ## Phases
 
@@ -319,6 +320,31 @@ auditable and scriptable with a read-only gate.
    while open, then `resume_allowed` after positions and orders clear; resumed
    timer cycles submit no order unless risk and AI gates allow one.
 
+### Phase 21: Closed Trade Outcome Reconciliation
+
+**Goal:** Turn the first completed live trade into a replayable fill/outcome
+record with net PnL after commission.
+
+**Requirements:** CTOR-01, CTOR-02, CTOR-03
+
+**Status:** Complete. The closed ZECUSDT trade has been reconstructed from
+Binance fills, persisted net of commission, and verified as idempotent on
+repeat reconciliation.
+
+**Success Criteria:**
+
+1. Signed Binance client can read account trades with `/fapi/v1/userTrades`.
+2. `ops trade-outcome` loads the latest submitted intent, fetches fills, and
+   summarizes gross realized PnL, commission, net realized PnL, net quantity,
+   trade count, and first/last fill times.
+3. Closed round trips report `status=closed`; partial/open round trips report
+   `status=open_or_partial`.
+4. `--persist` writes fills and outcome artifacts to the existing event store.
+5. Server read-only verification reconstructs the closed ZECUSDT trade outcome
+   without modifying exchange state.
+6. Repeated reconciliation does not duplicate fills or outcomes in the event
+   store.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -343,15 +369,16 @@ auditable and scriptable with a read-only gate.
 | 18 | v1.10 | 1/1 | Complete | 2026-06-20 |
 | 19 | v1.11 | 1/1 | Complete, timer paused for open-position review | 2026-06-20 |
 | 20 | v1.12 | 1/1 | Complete | 2026-06-20 |
+| 21 | v1.13 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.12 requirements: 44
-- Mapped: 44
+- v1.1-v1.13 requirements: 47
+- Mapped: 47
 - Unmapped: 0
 
 ## Next Step
 
-Continue observing live timer cycles under the 30U profile. Before any future
-manual timer resume, rerun `ops resume-check` and resume only if it returns
-`resume_allowed`.
+Observe the current BNBUSDT live position under the 30U/5x profile. After it
+closes, run `ops trade-outcome --symbol BNBUSDT --persist` to add its final
+fill/outcome evidence before making any risk-cap or leverage increase.
