@@ -4,10 +4,10 @@ milestone: v1.21
 milestone_name: Live Pilot Risk Controls
 current_phase: Milestone v1.21 archived
 status: completed
-stopped_at: HYPEUSDT open/protected and within hold window; 8x/dynamic profile still blocked
-last_updated: "2026-06-20T15:11:00+08:00"
+stopped_at: HYPEUSDT open/protected and past hold window; time-exit plan ready but not approved
+last_updated: "2026-06-20T15:29:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Live full-position early stop deployed and timer verified
+last_activity_desc: HYPEUSDT time-exit plan ready; execution awaits approval
 progress:
   total_phases: 21
   completed_phases: 21
@@ -202,17 +202,32 @@ any profile switch.
   hold check still showed HYPEUSDT open/protected, about `104.47` minutes into
   the `120` minute hold window, so no time-exit action was taken.
 
+- Latest HYPEUSDT hold/time-exit gate: at `2026-06-20T07:28:36Z` the position
+  was still open and protected, but had reached about `122.48` minutes against
+  the `120` minute AI hold window. `ops position-hold-check` returned
+  `review_required` with `hold_time_expired`. `ops time-exit-plan` returned
+  `exit_plan_ready` with a read-only close plan: `SELL MARKET 0.16`,
+  `positionSide=LONG`, and `reduceOnly=false` in hedge mode. Reconcile preview
+  still reports `open_or_partial`, and `risk-change-check --target-leverage 8`
+  remains blocked by the active protected position plus missing closed outcome.
+
+- `ops time-exit-execute` was run without a confirmation token only as a
+  no-trade preview. It returned `confirmation_required`, `exit_executed=false`,
+  and no execution payload. No live close has been approved or submitted.
+
 ## Next Command
 
-Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
-not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes, run
-`ops reconcile-outcomes --persist-closed`, then rerun
-`ops risk-change-check --target-leverage 8` before applying any profile switch.
+HYPEUSDT has reached a reviewed time-exit condition. Do not execute a live
+close unless the operator explicitly approves the fresh confirmation token from
+`ops time-exit-execute`. If the operator does not approve, keep observing for
+exchange-side TP/SL closure. After HYPEUSDT closes, run `ops reconcile-outcomes
+--persist-closed`, then rerun `ops risk-change-check --target-leverage 8`
+before applying any profile switch.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** HYPEUSDT open/protected and within hold window; risk-profile escalation blocked
+**Stopped at:** HYPEUSDT open/protected and past hold window; time-exit plan ready but not approved
 **Resume file:** .planning/milestones/v1.21-MILESTONE-AUDIT.md
 
 ## Current Position
@@ -220,7 +235,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 Phase: Milestone v1.21 complete
 Plan: —
 Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — Live full-position early stop deployed and timer verified
+Last activity: 2026-06-20 — HYPEUSDT time-exit plan ready; execution awaits approval
 
 ## Operator Next Steps
 
