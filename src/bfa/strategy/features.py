@@ -25,6 +25,7 @@ class SymbolFeatures:
     taker_buy_sell_ratio: float | None = None
     funding_rate: float | None = None
     kline_range_percent: float | None = None
+    reference_price: float | None = None
     quality_notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,6 +46,7 @@ class SymbolFeatures:
             "taker_buy_sell_ratio": self.taker_buy_sell_ratio,
             "funding_rate": self.funding_rate,
             "kline_range_percent": self.kline_range_percent,
+            "reference_price": self.reference_price,
             "quality_notes": list(self.quality_notes),
         }
 
@@ -113,6 +115,7 @@ def _apply_market(
         item.funding_rate = _number(snapshot_payload.get("funding_rate"))
     elif "kline" in snapshot_type:
         item.kline_range_percent = _kline_range(snapshot_payload)
+        item.reference_price = _number(snapshot_payload.get("close") or snapshot_payload.get("open"))
 
 
 def _add_missing_feature_notes(item: SymbolFeatures) -> None:
@@ -124,6 +127,7 @@ def _add_missing_feature_notes(item: SymbolFeatures) -> None:
         "missing_taker_flow": item.taker_buy_sell_ratio is None,
         "missing_funding": item.funding_rate is None,
         "missing_volatility_proxy": item.kline_range_percent is None,
+        "missing_reference_price": item.reference_price is None,
     }
     for note, missing in checks.items():
         if missing:
@@ -158,4 +162,3 @@ def _number(value: Any) -> float | None:
 def _note(item: SymbolFeatures, note: str) -> None:
     if note not in item.quality_notes:
         item.quality_notes.append(note)
-

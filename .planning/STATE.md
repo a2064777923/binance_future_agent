@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.2
-milestone_name: Backtest Calibration
-current_phase: 10
+milestone: v1.3
+milestone_name: Decision Robustness
+current_phase: Phase 11 - AI Decision Robustness
 status: completed
-stopped_at: v1.0 dry-run server deployment verified
-last_updated: "2026-06-20T00:24:30.020Z"
+stopped_at: Phase 11 complete; awaiting future submitted entry for LVA-05 evidence
+last_updated: "2026-06-20T00:45:00.000Z"
 last_activity: 2026-06-20
-last_activity_desc: Phase 10 complete
+last_activity_desc: Phase 11 complete
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 10
-**Status:** Milestone complete
+**Current phase:** Phase 11 - AI Decision Robustness
+**Status:** v1.3 complete; live timer remains under pilot caps
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -73,10 +73,8 @@ projects or losing control of downside.
 
 ## Next Command
 
-Keep live caps unchanged. Continue observing the live timer, rerun
-`python -m bfa.cli backtest matrix` before any risk-limit change, and use
-`ops live-status` after the first submitted live entry to verify protective
-orders.
+Keep live caps unchanged and observe timer cycles. After the first submitted
+live entry, use `ops live-status` to verify protective-order evidence.
 
 ## Session
 
@@ -86,14 +84,15 @@ orders.
 
 ## Current Position
 
-Phase: Phase 10 - Small-Capital Backtest Calibration
-Plan: 10-01 complete
-Status: Backtest matrix tooling and public-kline smoke evidence captured; caps remain unchanged
-Last activity: 2026-06-20 — Phase 10 complete
+Phase: Phase 11 - AI Decision Robustness
+Plan: 11-01 complete
+Status: Reference-price context and stricter AI trade validation deployed locally
+Last activity: 2026-06-20 — Phase 11 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
+- Confirm deployed AI decision context/instructions continue to produce either complete trade geometry or fail-closed `pass`/validation results.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.

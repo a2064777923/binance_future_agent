@@ -54,6 +54,22 @@ v1.0 requirements are archived at
 - [x] **BT-03**: Document the backtest commands, limitations, and promotion
   rules before any live risk-limit increase.
 
+### Decision Robustness
+
+- [x] **AIR-01**: AI decision context includes a latest market reference price
+  for the candidate symbol when kline data is available.
+
+- [x] **AIR-02**: AI instructions require complete executable price geometry for
+  `trade` decisions and require `pass` when entry, stop, or target cannot be
+  provided.
+
+- [x] **AIR-03**: Local validation rejects trades whose entry is implausibly far
+  from the market reference price, in addition to existing risk and geometry
+  gates.
+
+- [x] **AIR-04**: Live runner evidence distinguishes fail-closed incomplete AI
+  trade outputs from submitted or protective-order evidence.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -76,12 +92,17 @@ v1.0 requirements are archived at
 | BT-01 | Phase 10 | Complete - local harness added |
 | BT-02 | Phase 10 | Complete - staged sweep added |
 | BT-03 | Phase 10 | Complete - runbook added |
+| AIR-01 | Phase 11 | Complete - reference price included in AI context |
+| AIR-02 | Phase 11 | Complete - prompt requires full trade geometry or pass |
+| AIR-03 | Phase 11 | Complete - entry/reference validation added |
+| AIR-04 | Phase 11 | Complete - incomplete model trades remain fail-closed |
 
 **Coverage:**
 
-- v1.1 requirements: 9 total
-- Mapped to phases: 9
+- v1.1-v1.3 requirements: 13 total
+- Mapped to phases: 13
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
+*Last updated: 2026-06-20 after starting v1.3 decision robustness*

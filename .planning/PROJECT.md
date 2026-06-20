@@ -62,6 +62,11 @@ control of downside.
   deterministic risk gates, signed Binance USD-M Futures order helpers,
   explicit live execution gating, event-store execution artifacts, CLI
   execution smoke commands, and read-only exchange reconciliation.
+- Phase 9 validated live timer activation under 100 USDT pilot caps, market-heat
+  fallback candidates, OpenAI timeout/backoff, and secret-safe live-status
+  evidence.
+- Phase 10 validated a local short-window backtest harness and hot matrix
+  reporting before any live risk-limit increase.
 
 ### Active
 
@@ -77,6 +82,10 @@ control of downside.
 - [x] Implement risk-capped Binance live execution for a 100 USDT pilot account.
 - [x] Deploy on server `64.83.34.222` under a project-isolated directory and
   systemd unit without modifying existing services.
+- [ ] Improve live AI decision quality so `trade` decisions include executable
+  entry, stop, and target prices derived from market reference data.
+- [ ] Capture LVA-05 protective-order evidence after the first submitted live
+  entry, or prove the fail-closed emergency path if protective orders fail.
 
 ### Out of Scope
 
@@ -140,7 +149,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 8 are complete and verified. The project is installable as an
+Phases 1 through 10 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -156,6 +165,24 @@ and OpenAI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
 pass/no submission. The OpenAI-compatible endpoint is intermittent under the
 5 second timeout; timeouts enter `openai_backoff` and skip execution.
+Recent live cycles also show a second quality issue: the model can return
+`decision=trade` while leaving entry, stop, and target null. Local validation
+correctly rejects those decisions, but the prompt/context should be improved so
+the model either returns an executable decision with complete prices or returns
+`pass`.
+
+## Current Milestone: v1.3 Decision Robustness
+
+**Goal:** Improve the live AI decision layer so executable trades carry complete
+reference-price-based entry, stop, and target data, while non-executable model
+outputs fail closed without polluting live evidence.
+
+**Target features:**
+- Include latest market reference price in AI decision context.
+- Tighten decision instructions around complete trade geometry versus pass.
+- Classify incomplete trade outputs as fail-closed AI validation, not live trade
+  evidence.
+- Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
 ## Key Decisions
 
@@ -172,8 +199,9 @@ pass/no submission. The OpenAI-compatible endpoint is intermittent under the
 | Deploy dry-run-first | Server deployment should prove isolation and health before any live trading mode is enabled. | Phase 8 complete |
 | Keep LLM slow-path with backoff | API outages or slow responses should skip trading rather than block deterministic safety logic. | Phase 9 complete for activation |
 | Track margin vs notional explicitly | Futures UI can show small margin such as 1 USDT, while Binance order filters validate contract notional and quantity. | Phase 9 follow-up |
+| Require market reference price for AI trade geometry | The model should not invent executable prices from summaries alone. | Phase 11 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 during Phase 9 live activation.*
+*Last updated: 2026-06-20 after starting v1.3 decision robustness.*

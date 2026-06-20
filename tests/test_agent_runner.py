@@ -96,9 +96,11 @@ class EmptyNarrativeRunner:
 class FakeAiClient:
     def __init__(self):
         self.calls = 0
+        self.contexts = []
 
     def create_decision(self, context, *, instructions, schema):
         self.calls += 1
+        self.contexts.append(context)
         payload = {
             "decision": "trade",
             "side": "long",
@@ -155,6 +157,34 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(result.persisted["candidates"], 1)
         self.assertEqual(result.persisted["ai_decisions"], 1)
         self.assertGreaterEqual(result.persisted["order_intent"], 1)
+
+    def test_run_once_sends_reference_price_to_ai_client(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+            ai_client = FakeAiClient()
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+            )
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(ai_client.contexts[0]["candidate"]["features"]["reference_price"], 100.0)
 
     def test_run_once_uses_market_heat_when_narratives_are_empty(self):
         with tempfile.TemporaryDirectory() as tmp:

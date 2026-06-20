@@ -188,6 +188,7 @@ def _compact_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
                 "taker_buy_sell_ratio",
                 "funding_rate",
                 "kline_range_percent",
+                "reference_price",
                 "quality_notes",
             )
             if key in features

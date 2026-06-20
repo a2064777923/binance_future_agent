@@ -29,6 +29,7 @@ class StrategyCandidateTests(unittest.TestCase):
         self.assertIn("price_momentum", candidate.reason_codes)
         self.assertEqual(candidate.source_event_ids, [1, 2])
         self.assertEqual(candidate.market_event_ids, [3, 4, 5])
+        self.assertEqual(candidate.features["reference_price"], 104.0)
 
     def test_rejections_include_explicit_reasons(self):
         packet = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -50,4 +51,3 @@ class StrategyCandidateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

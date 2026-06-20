@@ -12,6 +12,7 @@
 - ✅ **v1.1 Live Activation** — Phase 9, live timer active under pilot caps;
   LVA-05 remains a future-entry evidence gate.
 - ✅ **v1.2 Backtest Calibration** — Phase 10, completed 2026-06-20.
+- 🚧 **v1.3 Decision Robustness** — Phase 11, in progress.
 
 ## Phases
 
@@ -95,6 +96,28 @@ reporting, documentation, tests, and public-kline smoke runs are captured.
 5. Results are written to gitignored data/results paths and documented before
    any live cap increase.
 
+### Phase 11: AI Decision Robustness
+
+**Goal:** Improve live AI decision quality so executable trades include complete
+reference-price-based entry, stop, and target data, while incomplete trade
+outputs fail closed.
+
+**Requirements:** AIR-01, AIR-02, AIR-03, AIR-04
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. Candidate features and compact AI context include `reference_price` when
+   recent kline close data is available.
+2. AI instructions explicitly require complete executable trade geometry or a
+   `pass`.
+3. Local validation rejects trades whose entry price is too far from the
+   candidate reference price.
+4. Existing fail-closed behavior remains intact: incomplete AI trade outputs do
+   not create submitted order intents.
+5. Full test suite and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -109,15 +132,16 @@ reporting, documentation, tests, and public-kline smoke runs are captured.
 | 8 | v1.0 | 4/4 | Complete | 2026-06-19 |
 | 9 | v1.1 | 1/1 | Complete    | 2026-06-20 |
 | 10 | v1.2 | 1/1 | Complete    | 2026-06-20 |
+| 11 | v1.3 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1/v1.2 requirements: 9
-- Mapped: 9
+- v1.1-v1.3 requirements: 13
+- Mapped: 13
 - Unmapped: 0
 
 ## Next Step
 
-Keep the 100 USDT pilot caps unchanged. Continue timer observation and rerun
-`backtest matrix` before any risk-limit change; after the first submitted live
-entry, verify protective-order evidence with `ops live-status`.
+Decision robustness is complete. Keep 100 USDT pilot caps unchanged and observe
+live timer cycles; after the first submitted live entry, verify protective-order
+evidence with `ops live-status`.

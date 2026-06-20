@@ -19,7 +19,15 @@ DECISION_INSTRUCTIONS = """You evaluate one Binance USD-M futures hot-coin candi
 Return only the requested structured JSON. You may choose pass when evidence is weak.
 Never claim that an order was placed. notional_usdt means contract position notional,
 not initial margin; approximate initial margin is notional_usdt divided by leverage.
-Keep notional within the provided risk limits."""
+Keep notional within the provided risk limits.
+
+If you choose decision=trade, you MUST provide non-null entry_price, stop_price,
+target_price, notional_usdt, hold_time_minutes, and side long/short. Use the
+candidate features.reference_price as the market reference when present: entry
+should be close to that reference price, stop/target must form valid long or
+short geometry, and stop risk must fit max_risk_per_trade_usdt. If you cannot
+derive a complete executable setup from the provided context, return
+decision=pass with side=flat and null trade fields."""
 
 
 @dataclass(frozen=True)
@@ -233,6 +241,9 @@ def _validate_trade(
     risk = estimate_stop_risk_usdt(decision)
     if risk > risk_limits.max_risk_per_trade_usdt:
         errors.append("risk_exceeds_cap")
+    reference_price = _reference_price(context)
+    if reference_price is not None and _entry_deviation_percent(decision.entry_price, reference_price) > 1.5:
+        errors.append("entry_too_far_from_reference_price")
 
 
 def estimate_stop_risk_usdt(decision: AiTradeDecision) -> float:
@@ -240,6 +251,22 @@ def estimate_stop_risk_usdt(decision: AiTradeDecision) -> float:
         return 0.0
     stop_distance = abs(decision.entry_price - decision.stop_price) / decision.entry_price
     return decision.notional_usdt * stop_distance
+
+
+def _reference_price(context: AiDecisionContext) -> float | None:
+    features = context.candidate.get("features")
+    if not isinstance(features, Mapping):
+        return None
+    reference = _float(features.get("reference_price"))
+    if reference is None or reference <= 0:
+        return None
+    return reference
+
+
+def _entry_deviation_percent(entry_price: float | None, reference_price: float) -> float:
+    if entry_price is None or reference_price <= 0:
+        return 0.0
+    return abs(entry_price - reference_price) / reference_price * 100.0
 
 
 def _text(value: Any) -> str | None:

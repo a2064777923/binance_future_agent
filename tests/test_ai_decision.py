@@ -11,7 +11,7 @@ class AiDecisionTests(unittest.TestCase):
                 "symbol": "BTCUSDT",
                 "score": 50.0,
                 "reason_codes": ["narrative_heat", "price_momentum"],
-                "features": {"quote_volume": 5_000_000},
+                "features": {"quote_volume": 5_000_000, "reference_price": 100.0},
             },
             risk_limits=RiskLimits(
                 account_capital_usdt=100,
@@ -79,6 +79,22 @@ class AiDecisionTests(unittest.TestCase):
 
         self.assertFalse(result.accepted)
         self.assertIn("risk_exceeds_cap", result.validation_errors)
+
+    def test_entry_far_from_reference_price_is_rejected(self):
+        payload = self.valid_trade()
+        payload["entry_price"] = 103.0
+        payload["stop_price"] = 102.0
+        payload["target_price"] = 106.0
+
+        result = validate_decision_payload(payload, self.context())
+
+        self.assertFalse(result.accepted)
+        self.assertIn("entry_too_far_from_reference_price", result.validation_errors)
+
+    def test_compact_context_keeps_reference_price(self):
+        context = self.context().to_dict()
+
+        self.assertEqual(context["candidate"]["features"]["reference_price"], 100.0)
 
     def test_unexpected_fields_are_rejected(self):
         payload = self.valid_trade()
