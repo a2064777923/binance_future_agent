@@ -8,6 +8,7 @@ requirements_addressed:
   - POS-01
   - POS-02
   - POS-04
+requirements-completed: [POS-01, POS-02, POS-04]
 ---
 
 # Phase 61 Summary

@@ -8,6 +8,7 @@ requirements_addressed:
   - EXIT-01
   - EXIT-03
   - RISK-04
+requirements-completed: [EXIT-01, EXIT-03, RISK-04]
 ---
 
 # Phase 62 Summary

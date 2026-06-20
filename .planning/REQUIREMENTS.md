@@ -9,29 +9,29 @@ projects or losing control of downside.
 
 ### Position Lifecycle Stewardship
 
-- [ ] **POS-01**: Operator can see exactly why any agent-managed
+- [x] **POS-01**: Operator can see exactly why any agent-managed
   `close_review` position is or is not eligible for a close/reduce plan,
   including failed preconditions, exchange filter constraints, protection
   state, matching intent evidence, and manual-symbol exclusions.
-- [ ] **POS-02**: System can produce a Binance-filter-aware close/reduce plan
+- [x] **POS-02**: System can produce a Binance-filter-aware close/reduce plan
   for each agent-managed `close_review` position in hedge/cross mode while
   ignoring positions listed in `BFA_MANUAL_POSITION_SYMBOLS`.
 - [x] **POS-03**: Every live cycle evaluates active agent-managed positions
   before scanning new entries and records a lifecycle decision of `hold`,
   `watch`, `reduce`, `close_review`, `close_ready`, `blocked`, or `manual_hold`.
-- [ ] **POS-04**: Unprotected or deteriorating agent-managed positions are
+- [x] **POS-04**: Unprotected or deteriorating agent-managed positions are
   surfaced with higher urgency than normal hold-time expiry, without managing
   manual positions.
 
 ### Guarded Exit Execution
 
-- [ ] **EXIT-01**: Operator can execute a close/reduce action for an
+- [x] **EXIT-01**: Operator can execute a close/reduce action for an
   agent-managed position only when a fresh plan token matches, the live service
   state is safe, and Binance quantity/notional filters pass.
 - [x] **EXIT-02**: The live runner can optionally perform deterministic
   auto-management for agent-managed positions under explicit env flags,
   small-account caps, daily-loss limits, and manual-symbol exclusions.
-- [ ] **EXIT-03**: After any close/reduce execution, the system verifies the
+- [x] **EXIT-03**: After any close/reduce execution, the system verifies the
   post-action position size and cancels symbol protective algo orders only
   when the relevant position side is flat or reduced as intended.
 
@@ -56,7 +56,7 @@ projects or losing control of downside.
   `/opt/binance-futures-agent` and `/etc/binance-futures-agent`, keeps the live
   timer running unless a deployment pause is necessary, and restores timers
   after verification.
-- [ ] **RISK-04**: Automatic or operator-confirmed position-management actions
+- [x] **RISK-04**: Automatic or operator-confirmed position-management actions
   remain bounded by the active 30U/10x bot-managed pilot caps, per-trade and daily-loss
   limits, duplicate-exposure rules, and manual-symbol exclusion.
 
