@@ -49,6 +49,7 @@ from bfa.ops.forward_paper_performance import build_forward_paper_performance_re
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.manual_loss import build_manual_loss_incident, record_manual_loss_incident
 from bfa.ops.manual_loss_review import build_manual_loss_review_report
+from bfa.ops.live_resume_plan import apply_live_resume_plan, build_live_resume_plan
 from bfa.ops.live_resume_readiness import build_live_resume_readiness_report
 from bfa.ops.operator_resume_decision import (
     build_operator_resume_decision_packet,
@@ -661,6 +662,51 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="omit the default operator confirmation blocker from this packet",
     )
+
+    live_resume_plan = ops_subparsers.add_parser(
+        "live-resume-plan",
+        help="preview confirmation-gated live resume env/profile/timer changes without mutation",
+    )
+    live_resume_plan.add_argument("--env-file", help="optional env file to load before environment overrides")
+    live_resume_plan.add_argument(
+        "--operator-decision-report",
+        required=True,
+        help="JSON artifact from ops operator-resume-decision",
+    )
+    live_resume_plan.add_argument("--readiness-artifact", help="optional readiness artifact path to bind into token")
+    live_resume_plan.add_argument("--target-profile", default="30u_10x_multi_dynamic", help="risk profile to apply")
+    live_resume_plan.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="apply target profile with at least two concurrent positions enabled",
+    )
+    _add_resume_systemd_state_args(live_resume_plan)
+
+    live_resume_apply = ops_subparsers.add_parser(
+        "live-resume-apply",
+        help="apply a live resume plan only after eligible packet and matching confirmation token",
+    )
+    live_resume_apply.add_argument("--env-file", required=True, help="env file to read and update")
+    live_resume_apply.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    live_resume_apply.add_argument(
+        "--operator-decision-report",
+        required=True,
+        help="JSON artifact from ops operator-resume-decision",
+    )
+    live_resume_apply.add_argument("--readiness-artifact", help="optional readiness artifact path bound into token")
+    live_resume_apply.add_argument("--target-profile", default="30u_10x_multi_dynamic", help="risk profile to apply")
+    live_resume_apply.add_argument("--confirm-token", help="confirmation token from live-resume-plan")
+    live_resume_apply.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="apply target profile with at least two concurrent positions enabled",
+    )
+    live_resume_apply.add_argument(
+        "--service-active",
+        action="store_true",
+        help="fail closed when the live systemd service is currently active",
+    )
+    _add_resume_systemd_state_args(live_resume_apply)
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -1691,6 +1737,35 @@ def _run_ops(
             )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.eligible_for_operator_resume else 1
+    if args.ops_command == "live-resume-plan":
+        report = build_live_resume_plan(
+            config,
+            operator_decision=_read_json_object(args.operator_decision_report),
+            readiness_artifact_path=args.readiness_artifact,
+            target_profile=args.target_profile,
+            allow_two_positions=args.allow_two_positions,
+            current_systemd_states=_resume_systemd_states(args, "current"),
+            target_systemd_states=_resume_systemd_states(args, "target"),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
+    if args.ops_command == "live-resume-apply":
+        report = apply_live_resume_plan(
+            config,
+            env_path=args.env_file,
+            db_path=args.db,
+            operator_decision=_read_json_object(args.operator_decision_report),
+            confirm_token=args.confirm_token,
+            readiness_artifact_path=args.readiness_artifact,
+            target_profile=args.target_profile,
+            allow_two_positions=args.allow_two_positions,
+            current_systemd_states=_resume_systemd_states(args, "current"),
+            target_systemd_states=_resume_systemd_states(args, "target"),
+            service_active=args.service_active,
+            signed_client=_build_signed_client(config, signed_client_factory),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.applied else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:
@@ -2083,6 +2158,74 @@ def _truthy(value: str) -> bool:
 def _symbols_arg(value: str, *, uppercase: bool = True) -> list[str]:
     values = [item.strip() for item in value.split(",") if item.strip()]
     return [item.upper() for item in values] if uppercase else values
+
+
+def _add_resume_systemd_state_args(parser: argparse.ArgumentParser) -> None:
+    state_choices = ("active", "inactive", "unknown")
+    parser.add_argument(
+        "--current-live-timer-state",
+        choices=state_choices,
+        default="unknown",
+        help="current live timer state used for preview/apply planning",
+    )
+    parser.add_argument(
+        "--current-live-service-state",
+        choices=state_choices,
+        default="unknown",
+        help="current live service state used for preview/apply planning",
+    )
+    parser.add_argument(
+        "--current-paper-timer-state",
+        choices=state_choices,
+        default="unknown",
+        help="current paper timer state used for preview/apply planning",
+    )
+    parser.add_argument(
+        "--current-paper-service-state",
+        choices=state_choices,
+        default="unknown",
+        help="current paper service state used for preview/apply planning",
+    )
+    parser.add_argument(
+        "--target-live-timer-state",
+        choices=("active", "inactive"),
+        default="active",
+        help="target live timer state after confirmed apply",
+    )
+    parser.add_argument(
+        "--target-live-service-state",
+        choices=("active", "inactive"),
+        default="inactive",
+        help="target live service state after confirmed apply",
+    )
+    parser.add_argument(
+        "--target-paper-timer-state",
+        choices=("active", "inactive"),
+        default="active",
+        help="target paper timer state after confirmed apply",
+    )
+    parser.add_argument(
+        "--target-paper-service-state",
+        choices=("active", "inactive"),
+        default="inactive",
+        help="target paper service state after confirmed apply",
+    )
+
+
+def _resume_systemd_states(args, prefix: str) -> dict[str, str]:
+    return {
+        "live.timer": getattr(args, f"{prefix}_live_timer_state"),
+        "live.service": getattr(args, f"{prefix}_live_service_state"),
+        "paper.timer": getattr(args, f"{prefix}_paper_timer_state"),
+        "paper.service": getattr(args, f"{prefix}_paper_service_state"),
+    }
+
+
+def _read_json_object(path: str) -> dict[str, object]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"JSON file must contain an object: {path}")
+    return payload
 
 
 def _write_optional_json(path: str | None, payload: Mapping[str, object]) -> None:

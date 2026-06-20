@@ -56,10 +56,10 @@ projects or losing control of downside.
 
 ### Live Resume Control
 
-- [ ] **LIVE-01**: Operator can preview the exact live resume action plan,
+- [x] **LIVE-01**: Operator can preview the exact live resume action plan,
   including target risk profile, timer/service changes, readiness artifact,
   confirmation token, and non-mutation proof when not confirmed.
-- [ ] **LIVE-02**: Confirmed live resume refuses to mutate server env, systemd
+- [x] **LIVE-02**: Confirmed live resume refuses to mutate server env, systemd
   timers, services, or Binance state unless the operator decision packet is
   `eligible_for_operator_resume`.
 - [ ] **LIVE-03**: The first resumed live cycles include active-position
@@ -68,7 +68,7 @@ projects or losing control of downside.
 
 ### Risk And Evidence Boundaries
 
-- [ ] **RISK-01**: The `30u_10x_multi_dynamic` path remains bounded by account
+- [x] **RISK-01**: The `30u_10x_multi_dynamic` path remains bounded by account
   capital, available balance, portfolio margin cap, portfolio notional cap,
   same-direction concentration cap, per-trade risk, and daily loss cap.
 - [x] **RISK-02**: Public Lana/Square/X claims can influence factor design and
@@ -115,10 +115,10 @@ projects or losing control of downside.
 | DATA-02 | Phase 57 | Complete |
 | LOSS-01 | Phase 56 | Complete |
 | LOSS-02 | Phase 58 | Complete |
-| LIVE-01 | Phase 59 | Pending |
-| LIVE-02 | Phase 59 | Pending |
+| LIVE-01 | Phase 59 | Complete |
+| LIVE-02 | Phase 59 | Complete |
 | LIVE-03 | Phase 60 | Pending |
-| RISK-01 | Phase 59 | Pending |
+| RISK-01 | Phase 59 | Complete |
 | RISK-02 | Phase 58 | Complete |
 | RISK-03 | Phase 60 | Pending |
 
@@ -129,4 +129,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 58 completion*
+*Last updated: 2026-06-21 after Phase 59 completion*

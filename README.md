@@ -127,6 +127,17 @@ confirmation-gated `30u_10x_multi_dynamic` preview.
 python -m bfa.cli ops exposure-status --env-file .env --db runtime/agent.sqlite --hypothetical-symbol HYPEUSDT --hypothetical-side long
 ```
 
+When a read-only operator resume decision packet is available, use the
+confirmation-gated live resume plan command to preview the exact profile/env and
+timer changes before any mutation. The apply command refuses to mutate unless
+the packet is `eligible_for_operator_resume` and the fresh confirmation token
+matches.
+
+```bash
+python -m bfa.cli ops live-resume-plan --env-file .env --operator-decision-report runtime/operator-decision.json
+python -m bfa.cli ops live-resume-apply --env-file .env --operator-decision-report runtime/operator-decision.json --confirm-token LIVE-RESUME-...
+```
+
 The automated live runner also performs a read-only entry-capacity preflight, so
 when the current profile is already full it exits before market collection,
 candidate generation, or AI calls.

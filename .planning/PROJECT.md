@@ -151,6 +151,11 @@ control of downside.
   exposure; lets operator decision consume a clearance artifact; and records
   manual liquidation/failure incidents as secret-safe local event-store
   artifacts.
+- Phase 59 adds a separate confirmation-gated live resume mutation path. It can
+  preview target profile/env/timer changes with a live-resume confirmation token
+  and refuses to apply unless the operator decision packet is
+  `eligible_for_operator_resume`, the token matches, and the live service is
+  inactive.
 
 ### Active
 
@@ -229,7 +234,7 @@ control of downside.
 - [x] Capture user/manual liquidation incidents as structured learning input.
 - [x] Compare manual liquidation incidents with deterministic setup and risk
   guards.
-- [ ] Add a separate confirmation-gated live resume path that can only enable
+- [x] Add a separate confirmation-gated live resume path that can only enable
   the target profile/timer after exposure, strategy, paper, server, and
   operator-confirmation gates pass.
 - [x] Keep Lana/public hot-coin claims as design inspiration only; all promotion
@@ -301,7 +306,7 @@ The user's chosen direction:
 ## Current State
 
 Milestones v1.0, v1.21, v1.22, v1.23, and v1.24 are archived. Phases 1 through
-55 are complete, and the current server deployment is installed under the isolated
+59 are complete locally, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
@@ -737,7 +742,7 @@ remains paused.
 | Operator packet before live | Readiness JSON needs one operator-facing next action before any separate live resume confirmation flow is prepared. | Phase 55 complete; current packet says `resolve_exposure` |
 | Paper observation before resume | Low-signal or zero-signal paper runs must show generated candidates, rejected setup reasons, factor snapshots, and source health before any promotion review. | Phase 57 complete |
 | Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 active |
-| Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | v1.25 active |
+| Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete locally |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -761,4 +766,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 58 completion.*
+*Last updated: 2026-06-21 after Phase 59 completion.*

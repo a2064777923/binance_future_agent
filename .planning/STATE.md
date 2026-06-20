@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
-current_phase: 59
-current_phase_name: Confirmation-Gated Live Resume Path
+current_phase: 60
+current_phase_name: Server Evidence And Pilot Resume Packet
 status: live-pilot-active
-stopped_at: Phase 58 complete; live pilot active; Phase 59 ready to plan.
-last_updated: "2026-06-21T04:29:34+08:00"
+stopped_at: Phase 59 complete locally; Phase 60 ready to plan/deploy.
+last_updated: "2026-06-21T04:43:54+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Manual BTW ignored; live caps widened to 5-position/50U profile
+last_activity_desc: Phase 59 complete
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 59 — Confirmation-Gated Live Resume Path
-**Status:** Live pilot active; Phase 59 ready to plan
+**Current phase:** Phase 60 — Server Evidence And Pilot Resume Packet
+**Status:** Live pilot active; Phase 60 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -32,8 +32,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan Phase 59 so live resume/profile/timer mutation remains
-confirmation-gated and refuses to mutate unless evidence gates are eligible.
+**Current focus:** Deploy and verify Phase 59 controls on the isolated server,
+then produce the current operator packet and server evidence for Phase 60.
 
 ## Decisions
 
@@ -715,31 +715,41 @@ confirmation-gated and refuses to mutate unless evidence gates are eligible.
   `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=250`. The per-trade risk cap remains
   `BFA_MAX_RISK_PER_TRADE_USDT=0.4`.
 
+- Phase 59 is complete locally. It adds `ops live-resume-plan` and
+  `ops live-resume-apply`. The preview command emits target profile values,
+  bounded risk caps, live/paper systemd target state, readiness artifact path,
+  confirmation token, and explicit non-mutation proof. The apply command
+  refuses to mutate unless the operator packet status is
+  `eligible_for_operator_resume`, the fresh live-resume token matches, and the
+  live service is inactive. The path does not place/cancel orders, create order
+  intents, or mutate Binance exchange state.
+
 ## Next Command
 
-Plan Phase 59 with live automation already active. Build the confirmation-gated
-resume/profile/timer mutation path, and ensure it refuses to mutate unless the
-operator packet is eligible. Current Phase 58 evidence still says
-`collect_more_paper`, so eligibility should remain fail-closed.
+Plan Phase 60 with live automation already active. Deploy and verify the
+Phase 59 controls on `/opt/binance-futures-agent`, capture server timer/service
+state before and after deploy, and produce the current operator packet. Current
+Phase 58 evidence still says `collect_more_paper`, so any apply path should
+remain fail-closed unless a future packet becomes eligible.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 58 complete; live timer active; protected NEARUSDT live
-position open; BTWUSDT marked manual; widened 10x/5-position/50U dynamic caps
-deployed; Phase 59 ready to plan.
-**Resume file:** .planning/phases/58-promotion-matrix-and-loss-review/58-VERIFICATION.md
+**Stopped at:** Phase 59 complete locally; live timer active; protected
+NEARUSDT live position open; BTWUSDT marked manual; widened
+10x/5-position/50U dynamic caps deployed; Phase 60 ready to plan/deploy.
+**Resume file:** .planning/phases/59-confirmation-gated-live-resume-path/59-VERIFICATION.md
 
 ## Current Position
 
-Phase: 59 — Confirmation-Gated Live Resume Path
+Phase: 60 — Server Evidence And Pilot Resume Packet
 Plan: —
-Status: Ready to plan with live pilot active and Phase 58 evidence fail-closed
-Last activity: 2026-06-21 — Phase 58 completed with collect-more-paper verdict
+Status: Ready to plan/deploy with live pilot active and Phase 58 evidence fail-closed
+Last activity: 2026-06-21 — Phase 59 completed locally
 
 ## Operator Next Steps
 
 - Monitor/reconcile the open protected `NEARUSDT` live position.
 - Keep `BTWUSDT` classified as manual unless the operator explicitly hands it
   to the agent.
-- Plan Phase 59 with confirmation-gated live resume/profile mutation controls.
+- Plan Phase 60 and deploy/verify the Phase 59 controls on the isolated server.

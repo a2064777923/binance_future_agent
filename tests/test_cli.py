@@ -1120,6 +1120,113 @@ class CliTests(unittest.TestCase):
         self.assertIn("BFA_MAX_LEVERAGE=5", text)
         self.assertNotIn("BFA_MAX_LEVERAGE=8", text)
 
+    def test_ops_live_resume_plan_reads_operator_packet_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            packet = root / "operator-decision.json"
+            packet.write_text(
+                json.dumps(
+                    {
+                        "schema": "bfa_operator_resume_decision_v1",
+                        "status": "collect_more_paper",
+                        "eligible_for_operator_resume": False,
+                        "readiness_status": "keep_live_paused",
+                        "readiness_live_resume_allowed": False,
+                        "recommendation": {
+                            "next_action": "collect_more_guarded_paper_or_recalibrate_before_live_resume",
+                            "blocking_categories": ["paper"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-resume-plan",
+                "--operator-decision-report",
+                str(packet),
+                "--current-live-timer-state",
+                "active",
+                "--current-live-service-state",
+                "inactive",
+                "--current-paper-timer-state",
+                "active",
+                "--current-paper-service-state",
+                "inactive",
+                env={
+                    "BFA_MODE": "live",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_live_resume_plan_v1")
+        self.assertEqual(payload["status"], "resume_apply_blocked")
+        self.assertFalse(payload["resume_allowed"])
+        self.assertFalse(payload["applies_changes"])
+        self.assertFalse(payload["read_only"]["writes_env_files"])
+        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 50.0)
+
+    def test_ops_live_resume_apply_blocks_non_eligible_packet_without_writing_env(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            packet = root / "operator-decision.json"
+            env_path = root / "env"
+            packet.write_text(
+                json.dumps(
+                    {
+                        "schema": "bfa_operator_resume_decision_v1",
+                        "status": "collect_more_paper",
+                        "eligible_for_operator_resume": False,
+                        "readiness_status": "keep_live_paused",
+                        "readiness_live_resume_allowed": False,
+                        "recommendation": {
+                            "next_action": "collect_more_guarded_paper_or_recalibrate_before_live_resume",
+                            "blocking_categories": ["paper"],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "BFA_MODE=live",
+                        "BFA_MAX_LEVERAGE=10",
+                        "BFA_MAX_POSITION_NOTIONAL_USDT=50",
+                        "BINANCE_API_KEY=synthetic-binance-key-abcdef",
+                        "BINANCE_API_SECRET=synthetic-binance-secret-abcdef",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-resume-apply",
+                "--env-file",
+                str(env_path),
+                "--operator-decision-report",
+                str(packet),
+                "--confirm-token",
+                "wrong",
+            )
+            text = env_path.read_text(encoding="utf-8")
+            backup_files = [item.name for item in root.iterdir() if ".bak." in item.name]
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertFalse(payload["applied"])
+        self.assertIn("operator_decision_not_eligible", payload["reasons"])
+        self.assertIn("BFA_MAX_LEVERAGE=10", text)
+        self.assertEqual(backup_files, [])
+
     def test_ops_trade_outcome_persists_latest_submitted_trade(self):
         class FakeSignedClient:
             def user_trades(self, symbol, *, start_time=None, limit=500):
