@@ -114,7 +114,7 @@
 <details open>
 <summary>◆ v1.25 Live Resume Clearance And Adaptive Pilot (Phases 56-60) — ACTIVE</summary>
 
-- [ ] Phase 56: Exposure Clearance And Manual Loss Intake (0/1 plan)
+- [ ] Phase 56: Exposure Clearance And Manual Loss Intake (1/1 plan)
 - [ ] Phase 57: Adaptive Forward-Paper Observation (0/1 plan)
 - [ ] Phase 58: Promotion Matrix And Loss Review (0/1 plan)
 - [ ] Phase 59: Confirmation-Gated Live Resume Path (0/1 plan)
@@ -124,14 +124,16 @@
 
 ## Active Phase Details
 
-**Phase 56: Exposure Clearance And Manual Loss Intake**
+### Phase 56: Exposure Clearance And Manual Loss Intake
 
-Goal: Make the current `resolve_exposure` blocker actionable and capture manual
+**Goal:** Make the current `resolve_exposure` blocker actionable and capture manual
 liquidation/failure cases as structured evidence before any live resume.
 
-Requirements: EXP-01, EXP-02, EXP-03, LOSS-01
+**Requirements:** EXP-01, EXP-02, EXP-03, LOSS-01
 
-Success criteria:
+**Plans:** 1/1 planned
+
+**Success criteria:**
 1. Read-only exposure clearance command/report classifies exchange positions,
    normal orders, algo orders, and local intents as agent-managed, manual,
    stale-attributed, or unknown.
@@ -140,14 +142,14 @@ Success criteria:
 4. Manual liquidation/failure incidents can be captured without secrets and
    without changing exchange or server runtime state.
 
-**Phase 57: Adaptive Forward-Paper Observation**
+### Phase 57: Adaptive Forward-Paper Observation
 
-Goal: Turn zero-signal guarded paper runs into diagnosable observation while
+**Goal:** Turn zero-signal guarded paper runs into diagnosable observation while
 keeping live trading disabled.
 
-Requirements: STRAT-02, STRAT-03, DATA-01, DATA-02
+**Requirements:** STRAT-02, STRAT-03, DATA-01, DATA-02
 
-Success criteria:
+**Success criteria:**
 1. Forward-paper runs record generated signals, skip reasons, guard blocks, and
    setup factor snapshots for broad hot-symbol universes.
 2. Paper-only exploration can shadow rejected candidates without creating live
@@ -157,14 +159,14 @@ Success criteria:
 4. Source-health evidence explains whether Square/manual/RSS/social fallback
    sources contributed to hotness.
 
-**Phase 58: Promotion Matrix And Loss Review**
+### Phase 58: Promotion Matrix And Loss Review
 
-Goal: Re-test current strategy variants and compare manual loss incidents
+**Goal:** Re-test current strategy variants and compare manual loss incidents
 against deterministic guard/risk rules.
 
-Requirements: STRAT-01, STRAT-04, LOSS-02, RISK-02
+**Requirements:** STRAT-01, STRAT-04, LOSS-02, RISK-02
 
-Success criteria:
+**Success criteria:**
 1. Current-data matrix runs with completed candles, next-candle entries, fees,
    slippage, and small-account caps.
 2. Promotion check distinguishes collect-more-paper, forward-paper candidate,
@@ -172,14 +174,14 @@ Success criteria:
 3. Manual loss incidents are compared against setup and risk guards.
 4. Public Lana/Square/X claims remain design inputs, not promotion evidence.
 
-**Phase 59: Confirmation-Gated Live Resume Path**
+### Phase 59: Confirmation-Gated Live Resume Path
 
-Goal: Build the mutation path for live resume, but keep it locked behind
+**Goal:** Build the mutation path for live resume, but keep it locked behind
 readiness and confirmation.
 
-Requirements: LIVE-01, LIVE-02, RISK-01
+**Requirements:** LIVE-01, LIVE-02, RISK-01
 
-Success criteria:
+**Success criteria:**
 1. Operator can preview target profile, timer/service changes, readiness
    artifact, and confirmation token without mutation.
 2. Confirmed resume refuses to mutate unless the operator packet is
@@ -187,15 +189,15 @@ Success criteria:
 3. The `30u_10x_multi_dynamic` path remains bounded by portfolio, notional,
    margin, concentration, per-trade risk, and daily-loss caps.
 
-**Phase 60: Server Evidence And Pilot Resume Packet**
+### Phase 60: Server Evidence And Pilot Resume Packet
 
-Goal: Deploy and verify the v1.25 controls on the isolated server, then produce
+**Goal:** Deploy and verify the v1.25 controls on the isolated server, then produce
 an operator packet that either keeps live paused or prepares a separate
 operator-confirmed resume.
 
-Requirements: LIVE-03, RISK-03
+**Requirements:** LIVE-03, RISK-03
 
-Success criteria:
+**Success criteria:**
 1. Server deployment is scoped to `/opt/binance-futures-agent` and
    `/etc/binance-futures-agent`.
 2. Local and server tests pass after deployment.

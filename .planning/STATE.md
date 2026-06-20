@@ -2,13 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
-status: planning
-last_updated: "2026-06-21T02:53:42+08:00"
+current_phase: Phase 56 — Exposure Clearance And Manual Loss Intake
+current_phase_name: Exposure Clearance And Manual Loss Intake
+status: planned
+stopped_at: Phase 56 planned; ready to execute.
+last_updated: "2026-06-20T19:02:50.120Z"
 last_activity: 2026-06-21
+last_activity_desc: Milestone v1.25 roadmap initialized
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
-  total_plans: 0
+  total_plans: 5
   completed_plans: 0
   percent: 0
 ---
@@ -17,9 +21,9 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 56 — Exposure Clearance And Manual Loss Intake
-**Status:** v1.25 planning active
+**Status:** Phase 56 planned
 **Last planned:** 2026-06-21
-**Plan count:** 3
+**Plan count:** 1
 
 ## Project Reference
 
@@ -581,23 +585,23 @@ loss incidents are classified before any live-resume mutation is considered.
 
 ## Next Command
 
-Run `$gsd-plan-phase 56` for exposure clearance and manual loss intake. Keep
+Run `$gsd-execute-phase 56` for exposure clearance and manual loss intake. Keep
 live automation disabled until exposure, strategy, paper, server, and separate
 operator-confirmation gates pass.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** v1.25 requirements and roadmap initialized.
-**Resume file:** .planning/REQUIREMENTS.md
+**Stopped at:** Phase 56 planned and ready to execute.
+**Resume file:** .planning/phases/56-exposure-clearance-and-manual-loss-intake/56-01-PLAN.md
 
 ## Current Position
 
 Phase: 56 — Exposure Clearance And Manual Loss Intake
-Plan: —
-Status: Ready to plan
-Last activity: 2026-06-21 — Milestone v1.25 roadmap initialized
+Plan: 56-01 Exposure Clearance And Manual Loss Intake
+Status: Ready to execute
+Last activity: 2026-06-21 — Phase 56 planned
 
 ## Operator Next Steps
 
-- Plan Phase 56 with `$gsd-plan-phase 56`.
+- Execute Phase 56 with `$gsd-execute-phase 56`.
