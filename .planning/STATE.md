@@ -176,6 +176,12 @@ any profile switch.
   blocks the profile switch because the active protected HYPEUSDT position and
   unreconciled submitted intent remain.
 
+- Post-restore live timer evidence: the next scheduled live cycle ran at
+  `2026-06-20T06:59:42Z`, selected `ZECUSDT`, returned
+  `execution_status=rejected`, `submitted=false`, and
+  `risk_reasons=["ai_decision_pass"]`. The live service deactivated
+  successfully afterwards and the timer remains active.
+
 ## Next Command
 
 Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
