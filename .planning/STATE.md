@@ -3,25 +3,25 @@ gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
 current_phase: null
-current_phase_name: null
-status: milestone-complete-live-pilot-active
-stopped_at: Phase 60 complete; v1.25 milestone ready for archive/next milestone.
-last_updated: "2026-06-21T05:05:00+08:00"
+status: completed
+stopped_at: Phase 60 complete; live timer active; NEARUSDT needs review; v1.25 archived.
+last_updated: "2026-06-21T05:15:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 60 complete
+last_activity_desc: Milestone v1.25 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 5
   completed_plans: 5
   percent: 100
+current_phase_name: null
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** None — v1.25 milestone complete
-**Status:** Live pilot active; v1.25 complete
+**Status:** v1.25 milestone complete
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -752,15 +752,11 @@ BTWUSDT marked manual; 10x/6-position/60U dynamic caps deployed and verified.
 
 ## Current Position
 
-Phase: none — v1.25 complete
-Plan: none
-Status: Live pilot active; next milestone needed for iteration
-Last activity: 2026-06-21 — Phase 60 completed and deployed
+Phase: Milestone v1.25 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-21 — Milestone v1.25 completed and archived
 
 ## Operator Next Steps
 
-- Monitor/reconcile the open protected `NEARUSDT` live position.
-- Keep `BTWUSDT` classified as manual unless the operator explicitly hands it
-  to the agent.
-- Start the next milestone for active-position automation and strategy
-  improvement from Phase 60 evidence.
+- Start the next milestone with `$gsd-new-milestone`.

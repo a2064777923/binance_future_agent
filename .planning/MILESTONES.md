@@ -1,5 +1,49 @@
 # Milestones
 
+## v1.25 Live Resume Clearance And Adaptive Pilot (Shipped: 2026-06-21)
+
+**Phases completed:** 5 phases, 5 plans, 0 tasks
+
+**Archived artifacts:**
+
+- `.planning/milestones/v1.25-ROADMAP.md`
+- `.planning/milestones/v1.25-REQUIREMENTS.md`
+- `.planning/milestones/v1.25-MILESTONE-AUDIT.md`
+
+**Key accomplishments:**
+
+- Added read-only exposure clearance and append-only manual loss intake so
+  active exchange positions can be classified as agent-managed, manual,
+  stale-attributed, or unknown before any resume decision.
+
+- Made forward-paper observation diagnosable across broad auto-hot universes by
+  persisting generated signals, skipped candidates, guard blocks, setup factors,
+  and source-health summaries.
+
+- Re-ran current strategy promotion evidence with explicit
+  `collect_more_paper`, `forward_paper_allowed`, and `live_resume_eligible`
+  stages while keeping public Lana/Square/X claims as design inputs only.
+
+- Added a confirmation-gated live resume preview/apply path that refuses to
+  mutate env, systemd, Binance state, or order intents unless the operator
+  packet is eligible and the live-resume token matches.
+
+- Deployed and verified server evidence for Phase 60, preserved `BTWUSDT` as a
+  manual position, and widened the active live pilot profile to 10x, 6 open
+  positions, 60 USDT per-position notional, 360 USDT portfolio notional, and
+  300 USDT same-direction notional while keeping 0.4 USDT per-trade risk and
+  1 USDT daily loss.
+
+**Known deferred items at close:**
+
+- `NEARUSDT` is agent-managed and currently needs active-position review
+  follow-up because its hold window expired; no close was executed in v1.25.
+
+- Formal live-resume apply remains blocked by current strategy/paper/exposure
+  evidence, which is the intended fail-closed behavior.
+
+---
+
 ## v1.24 Server Readiness And Paper Promotion (Shipped: 2026-06-21)
 
 **Phases completed:** 3 phases, 3 plans, 0 tasks
