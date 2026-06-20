@@ -54,13 +54,32 @@ class AiDecisionRun:
 
 
 def parse_decision_json(text: str) -> dict[str, Any]:
+    candidate_text = _extract_json_text(text)
     try:
-        payload = json.loads(text)
+        payload = json.loads(candidate_text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"decision response is not valid JSON: {exc.msg}") from exc
     if not isinstance(payload, dict):
         raise ValueError("decision response must be a JSON object")
     return payload
+
+
+def _extract_json_text(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        return stripped[start : end + 1]
+    return stripped
 
 
 def validate_decision_payload(
@@ -123,6 +142,7 @@ def run_ai_decision(
     context: AiDecisionContext,
     journal=None,
     store=None,
+    source: str = "ai.provider",
 ) -> AiDecisionRun:
     response = client.create_decision(
         context.to_dict(),
@@ -162,6 +182,7 @@ def run_ai_decision(
             context=context,
             validation=validation,
             raw_response=response.raw_response,
+            source=source,
         )
         persisted = 1
 

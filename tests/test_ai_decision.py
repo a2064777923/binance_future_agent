@@ -124,6 +124,24 @@ class AiDecisionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_decision_json("[]")
 
+    def test_parse_decision_extracts_fenced_json(self):
+        payload = parse_decision_json(
+            """```json
+{"decision":"pass","side":"flat","confidence":0.1,"entry_price":null,"stop_price":null,"target_price":null,"notional_usdt":null,"hold_time_minutes":null,"reasons":["weak"]}
+```"""
+        )
+
+        self.assertEqual(payload["decision"], "pass")
+
+    def test_parse_decision_extracts_json_from_prefixed_text(self):
+        payload = parse_decision_json(
+            'Here is the JSON: {"decision":"pass","side":"flat","confidence":0.1,"entry_price":null,'
+            '"stop_price":null,"target_price":null,"notional_usdt":null,"hold_time_minutes":null,'
+            '"reasons":["weak"]}'
+        )
+
+        self.assertEqual(payload["decision"], "pass")
+
     def test_estimated_stop_risk_uses_notional_and_stop_distance(self):
         risk = estimate_stop_risk_usdt(
             AiTradeDecision(

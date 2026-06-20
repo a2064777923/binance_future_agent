@@ -20,6 +20,7 @@ class DeployAssetTests(unittest.TestCase):
             "BINANCE_API_KEY",
             "BINANCE_API_SECRET",
             "OPENAI_API_KEY",
+            "DEEPSEEK_API_KEY",
             "X_BEARER_TOKEN",
             "TELEGRAM_BOT_TOKEN",
         ):
@@ -31,6 +32,8 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn("OPENAI_TIMEOUT_SECONDS=5", text)
         self.assertIn("OPENAI_MAX_OUTPUT_TOKENS=400", text)
         self.assertIn("OPENAI_RETRY_AFTER_SECONDS=300", text)
+        self.assertIn("DEEPSEEK_BASE_URL=https://api.deepseek.com", text)
+        self.assertIn("DEEPSEEK_MODEL=deepseek-v4-flash", text)
         self.assertIn("BFA_DB_PATH=/opt/binance-futures-agent/data/agent.sqlite", text)
 
     def test_deploy_assets_do_not_reference_forbidden_paths_or_secrets(self):

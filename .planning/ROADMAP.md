@@ -19,6 +19,7 @@
 - ✅ **v1.7 Configurable Margin Mode** — Phase 15, completed 2026-06-20.
 - ✅ **v1.8 Position Mode Entry Fail-Closed** — Phase 16, completed 2026-06-20.
 - ✅ **v1.9 Balance Preflight Gate** — Phase 17, completed 2026-06-20.
+- ◆ **v1.10 DeepSeek Provider Switch** — Phase 18, local implementation complete; deployment verification pending.
 
 ## Phases
 
@@ -110,7 +111,7 @@ outputs fail closed.
 
 **Requirements:** AIR-01, AIR-02, AIR-03, AIR-04
 
-**Status:** Complete.
+**Status:** Deployment verification pending.
 
 **Success Criteria:**
 
@@ -242,6 +243,28 @@ balance is below the order intent's estimated initial margin.
 4. No order is submitted when futures account available balance is insufficient.
 5. Full tests and server health checks pass after deployment.
 
+### Phase 18: DeepSeek Provider Switch
+
+**Goal:** Switch the live AI decision provider from the intermittent
+OpenAI-compatible endpoint to DeepSeek while preserving strict JSON validation
+and all live risk caps.
+
+**Requirements:** DSP-01, DSP-02, DSP-03, DSP-04
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. `BFA_AI_PROVIDER` validates to either `openai` or `deepseek`.
+2. DeepSeek provider uses `/chat/completions` with JSON object mode and no
+   committed secret values.
+3. Fenced or prefixed JSON responses can be extracted, then still pass through
+   the existing deterministic schema and risk validation.
+4. Server env can be updated to DeepSeek without touching Binance credentials,
+   pilot caps, margin mode, position mode, or other services.
+5. Full tests, DeepSeek smoke test, and server health checks pass after
+   deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -263,16 +286,17 @@ balance is below the order intent's estimated initial margin.
 | 15 | v1.7 | 1/1 | Complete | 2026-06-20 |
 | 16 | v1.8 | 1/1 | Complete | 2026-06-20 |
 | 17 | v1.9 | 1/1 | Complete | 2026-06-20 |
+| 18 | v1.10 | 1/1 | Deployment verification pending | - |
 
 ## Requirement Coverage
 
-- v1.1-v1.9 requirements: 34
-- Mapped: 34
+- v1.1-v1.10 requirements: 38
+- Mapped: 38
 - Unmapped: 0
 
 ## Next Step
 
-Balance preflight is deployed. Keep 100 USDT pilot caps unchanged. Funding the
-USD-M futures account is required before the bot can submit a real entry; after
-the first submitted live entry, verify protective-order evidence with
-`ops live-status`.
+Deploy the DeepSeek provider switch, update only the selected AI provider values
+in `/etc/binance-futures-agent/env`, then run server tests, health checks, and
+one live service/timer cycle. Keep 100 USDT pilot caps unchanged. Funding the
+USD-M futures account is still required before the bot can submit a real entry.

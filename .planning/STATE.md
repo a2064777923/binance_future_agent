@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.9
-milestone_name: Balance Preflight Gate
-current_phase: Phase 17 - Balance Preflight Gate
-status: completed
-stopped_at: Phase 17 deployed; latest timer cycle failed closed on invalid AI JSON and USD-M futures account remains unfunded
-last_updated: "2026-06-20T10:10:45.000+08:00"
+milestone: v1.10
+milestone_name: DeepSeek Provider Switch
+current_phase: Phase 18 - DeepSeek Provider Switch
+status: in_progress
+stopped_at: Phase 18 local implementation complete; deployment verification pending
+last_updated: "2026-06-20T10:45:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Phase 17 complete and deployed
+last_activity_desc: Phase 18 DeepSeek provider switch implemented locally
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 9
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
+  total_plans: 10
+  completed_plans: 10
+  percent: 90
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 17 - Balance Preflight Gate
-**Status:** v1.9 complete and deployed; live timer active under pilot caps
+**Current phase:** Phase 18 - DeepSeek Provider Switch
+**Status:** v1.10 implementation complete locally; deployment verification pending
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -38,7 +38,8 @@ projects or losing control of downside.
 - Deployment target: `64.83.34.222`, isolated under
   `/opt/binance-futures-agent`.
 
-- AI provider: OpenAI.
+- AI provider: DeepSeek is now selected for live use; OpenAI-compatible
+  Responses API remains available as a fallback provider.
 - Exchange: Binance USD-M futures.
 - Pilot capital: 100 USDT.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -63,9 +64,9 @@ projects or losing control of downside.
 - Secrets were provided out-of-band and must be rotated or handled carefully
   before production deployment.
 
-- OpenAI-compatible endpoint is configured on the server and is intermittent
-  under the 5 second timeout. Candidate-driven cycles either receive an AI
-  pass/no-trade decision or enter `openai_backoff` and skip trading.
+- The prior OpenAI-compatible endpoint was intermittent and returned invalid
+  JSON; DeepSeek provider support now uses Chat Completions JSON mode and the
+  same fail-closed decision validation.
 
 - Historical Square/social narrative data is not yet complete, so the first
   backtest layer validates a market-heat proxy rather than claiming to reproduce
@@ -93,10 +94,10 @@ projects or losing control of downside.
 
 ## Next Command
 
-Fund or transfer USDT into the Binance USD-M futures account before expecting a
-real entry submission. With the current unfunded account, live order intents are
-expected to reject with `insufficient_available_balance` and no entry order
-attempt.
+Deploy Phase 18 to the server, update `/etc/binance-futures-agent/env` to
+`BFA_AI_PROVIDER=deepseek` with the DeepSeek key, then run server health checks
+and one timer cycle. Funding the USD-M futures account is still required before
+expecting a real entry submission.
 
 ## Session
 
@@ -106,10 +107,10 @@ attempt.
 
 ## Current Position
 
-Phase: Phase 17 - Balance Preflight Gate
-Plan: 17-01 complete
-Status: Balance preflight deployed; live timer active; latest cycle had invalid AI JSON and no submission; account funding is the current blocker
-Last activity: 2026-06-20 — Phase 17 complete
+Phase: Phase 18 - DeepSeek Provider Switch
+Plan: 18-01 complete locally
+Status: DeepSeek provider support implemented locally; server deployment pending
+Last activity: 2026-06-20 — Phase 18 implementation complete locally
 
 ## Operator Next Steps
 

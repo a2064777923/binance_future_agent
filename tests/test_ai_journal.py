@@ -77,6 +77,22 @@ class AiJournalTests(unittest.TestCase):
         self.assertTrue(payload["validation"]["accepted"])
         self.assertEqual(payload["context"]["candidate"]["symbol"], "BTCUSDT")
 
+    def test_persist_ai_decision_records_selected_source(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+
+        persist_ai_decision(
+            store,
+            context=self.context(),
+            validation=self.validation(),
+            raw_response={"id": "chatcmpl_1"},
+            source="deepseek.chat_completions",
+        )
+
+        row = connection.execute("SELECT source FROM ai_decisions").fetchone()
+        self.assertEqual(row["source"], "deepseek.chat_completions")
+
 
 if __name__ == "__main__":
     unittest.main()

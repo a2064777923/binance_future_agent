@@ -4,9 +4,9 @@
 
 Binance Futures Agent is an isolated crypto futures trading system for Binance
 USD-M contracts. It watches hot coins from Binance Square and other narrative
-sources, confirms them with futures-market anomalies, asks an OpenAI model for
-structured trade decisions, and can run a tightly capped 100 USDT live pilot on
-a dedicated server.
+sources, confirms them with futures-market anomalies, asks a configured AI
+provider for structured trade decisions, and can run a tightly capped 100 USDT
+live pilot on a dedicated server.
 
 This project is separate from the existing HK/US stock repository. It may borrow
 ideas such as config-driven runtime, JSONL event records, replay, and explicit
@@ -54,7 +54,7 @@ control of downside.
   packets, narrative/market feature extraction, conservative rejection gates,
   reason codes, data-quality notes, candidate persistence, and CLI smoke
   commands.
-- Phase 6 validated compact OpenAI decision context packets, strict structured
+- Phase 6 validated compact AI decision context packets, strict structured
   JSON decision parsing, deterministic local risk validation, redacted
   request/response journaling, `ai_decisions` persistence, and AI CLI smoke
   commands with fake transports.
@@ -83,6 +83,8 @@ control of downside.
   after live evidence showed the account expects Binance `positionSide`.
 - Phase 17 adds a live account-balance preflight so an unfunded USD-M futures
   account rejects locally before margin setup or entry order placement.
+- Phase 18 adds DeepSeek provider support using Chat Completions JSON mode after
+  the previous OpenAI-compatible endpoint produced invalid JSON/timeouts.
 
 ### Active
 
@@ -93,8 +95,8 @@ control of downside.
   fill, and outcome in a replayable local event store.
 - [x] Rank candidate symbols by narrative heat, liquidity, price momentum, open
   interest change, taker flow, funding state, and volatility.
-- [x] Use OpenAI to produce structured trade decisions with entry, invalidation,
-  stop, target, time limit, and confidence.
+- [x] Use a configured AI provider to produce structured trade decisions with
+  entry, invalidation, stop, target, time limit, and confidence.
 - [x] Implement risk-capped Binance live execution for a 100 USDT pilot account.
 - [x] Deploy on server `64.83.34.222` under a project-isolated directory and
   systemd unit without modifying existing services.
@@ -144,7 +146,8 @@ The user's chosen direction:
 - Initial capital: 100 USDT.
 - Execution intent: live small-capital pilot, not only paper trading.
 - First strategy focus: hot coins, especially Binance Square narratives.
-- AI provider: OpenAI.
+- AI provider: DeepSeek for live use, with OpenAI Responses provider still
+  available for fallback.
 - Data-source preference: as many useful and allowed sources as possible.
 - Binance API credentials are provided out of band; contents must be handled as
   secrets and never committed.
@@ -167,17 +170,19 @@ The user's chosen direction:
 - **Narrative APIs**: Binance Square reading may require browser automation,
   exports, or unofficial endpoints; implement this behind a replaceable
   collector interface and respect access limits.
-- **AI**: OpenAI calls must use structured JSON outputs and deterministic
+- **AI**: AI provider calls must use structured JSON outputs and deterministic
   validation before a decision can become an order intent.
-- **Secrets**: Store Binance, OpenAI, cookie, and server credentials only in
-  environment files or secret stores. Never write values to git or planning docs.
+- **Secrets**: Store Binance, AI provider, cookie, and server credentials only
+  in environment files or secret stores. Never write values to git or planning
+  docs.
 - **Deployment**: Server deployment must use a dedicated directory such as
   `/opt/binance-futures-agent`, a dedicated systemd unit, and gitignored runtime
   data under that directory.
 
 ## Current State
 
-Phases 1 through 17 are complete and verified. The project is installable as an
+Phases 1 through 17 are complete and verified. Phase 18 is implemented locally
+and awaiting server deployment verification. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -185,8 +190,8 @@ foundations, hot-coin candidate scoring, OpenAI structured decision validation,
 redacted AI journaling, dry-run/live risk-gated execution, signed Binance
 execution helpers, reconciliation reports, deployment health checks, CLI smoke
 commands, automated one-cycle trading runner, live systemd timer assets,
-exchange-side protective order submission, OpenAI-compatible base URL
-configuration, AI timeout/backoff behavior, market-heat fallback narratives, and
+exchange-side protective order submission, AI provider selection,
+AI timeout/backoff behavior, market-heat fallback narratives, and
 pilot tradability filtering, a 10-symbol cap-compatible pilot universe,
 fail-closed margin setup handling, and explicit configurable margin mode. The
 system now also has explicit configurable position mode and entry-order
@@ -195,10 +200,10 @@ unfunded USD-M futures account: available balance is 0, so Phase 17 deployed a
 local available-balance gate before margin setup and entry submission. The server
 deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
-and OpenAI credentials are configured out of band, the live timer is enabled and
+and AI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
-pass/no submission. The OpenAI-compatible endpoint is intermittent under the
-5 second timeout; timeouts enter `openai_backoff` and skip execution.
+pass/no submission. Phase 18 switches live AI selection to DeepSeek because the
+previous OpenAI-compatible endpoint was intermittent and returned invalid JSON.
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under the 20 USDT max-position-notional pilot setting, while
 SOLUSDT can currently fit. Candidate generation now rejects cap-incompatible
@@ -241,6 +246,17 @@ margin.
 - Reject account balance read errors before entry order placement.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
+## Current Milestone: v1.10 DeepSeek Provider Switch
+
+**Goal:** Switch live AI decisions to DeepSeek while preserving strict JSON
+validation and all pilot risk caps.
+
+**Target features:**
+- Select AI provider with `BFA_AI_PROVIDER`.
+- Use DeepSeek Chat Completions JSON mode.
+- Extract fenced/prefixed JSON before schema validation.
+- Preserve 100 USDT pilot caps and unchanged execution risk gates.
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
@@ -263,8 +279,9 @@ margin.
 | Make margin mode explicit | The live account is Multi-Assets/cross; using cross must be deliberate, validated, and still capped. | Phase 15 complete |
 | Make position mode explicit | The live account can require hedge `positionSide`; using it must be deliberate, validated, and still capped. | Phase 16 complete |
 | Add balance preflight before live orders | The live account can be unfunded even when order geometry is valid; avoid repeated exchange-side insufficient-margin errors. | Phase 17 complete |
+| Add DeepSeek provider support | The previous OpenAI-compatible endpoint was intermittent and returned invalid JSON; DeepSeek can use Chat Completions JSON mode behind the same validation gates. | Phase 18 local implementation complete; deployment pending |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 after completing v1.9 balance preflight gate.*
+*Last updated: 2026-06-20 after implementing v1.10 DeepSeek provider switch locally; deployment verification pending.*

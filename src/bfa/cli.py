@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import TextIO
 
 from bfa.agent import run_agent_once
-from bfa.ai.client import OpenAIResponsesClient
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
+from bfa.ai.providers import ai_source, build_ai_client
 from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.backtest.data import fetch_historical_klines, load_klines_dataset, write_klines_dataset
 from bfa.backtest.engine import run_hot_momentum_backtest, run_staged_sweep
@@ -226,12 +226,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     ai = subparsers.add_parser(
         "ai",
-        help="OpenAI structured decision-layer smoke commands",
+        help="AI structured decision-layer smoke commands",
     )
     ai_subparsers = ai.add_subparsers(dest="ai_command", required=True)
     decide = ai_subparsers.add_parser(
         "decide",
-        help="ask OpenAI for a structured decision for one candidate JSON payload",
+        help="ask the selected AI provider for a structured decision for one candidate JSON payload",
     )
     decide.add_argument("--env-file", help="optional env file to load before environment overrides")
     decide.add_argument("--candidate", required=True, help="candidate JSON file")
@@ -268,7 +268,7 @@ def _build_parser() -> argparse.ArgumentParser:
     health.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     health.add_argument("--create-dirs", action="store_true", help="create missing runtime directories")
     health.add_argument("--check-binance", action="store_true", help="check public Binance exchangeInfo")
-    health.add_argument("--check-openai", action="store_true", help="check OpenAI Responses API when enabled")
+    health.add_argument("--check-openai", action="store_true", help="check selected AI provider when enabled")
     health.add_argument("--skip-network", action="store_true", help="disable all network health checks")
 
     live_status = ops_subparsers.add_parser(
@@ -580,6 +580,7 @@ def _run_ai(
                 context=context,
                 journal=journal,
                 store=store,
+                source=ai_source(config),
             )
         finally:
             if connection is not None:
@@ -590,15 +591,7 @@ def _run_ai(
 
 
 def _build_ai_client(config: AppConfig, ai_client_factory):
-    if ai_client_factory is not None:
-        return ai_client_factory(config)
-    return OpenAIResponsesClient(
-        api_key=config.get("OPENAI_API_KEY"),
-        model=config.get("OPENAI_MODEL"),
-        base_url=config.get("OPENAI_BASE_URL"),
-        timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
-        max_output_tokens=int(config.get("OPENAI_MAX_OUTPUT_TOKENS")),
-    )
+    return build_ai_client(config, ai_client_factory)
 
 
 def _run_execution(

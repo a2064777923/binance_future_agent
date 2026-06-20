@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Protocol
 
-from bfa.ai.client import OpenAIResponsesClient
+from bfa.ai.providers import build_ai_client
 from bfa.config import AppConfig, RuntimeMode, validate_config
 from bfa.event_store.migrations import connect, migrate
 from bfa.market.binance_rest import BinanceFuturesRestClient
@@ -182,13 +182,7 @@ def _openai_check(
         return HealthCheck("openai", "skipped", "network check disabled")
     if config.get("BFA_OPENAI_ENABLED").lower() not in {"1", "true", "yes", "on"}:
         return HealthCheck("openai", "skipped", "BFA_OPENAI_ENABLED is false")
-    client = ai_client or OpenAIResponsesClient(
-        api_key=config.get("OPENAI_API_KEY"),
-        model=config.get("OPENAI_MODEL"),
-        base_url=config.get("OPENAI_BASE_URL"),
-        timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
-        max_output_tokens=20,
-    )
+    client = ai_client or build_ai_client(config, max_output_tokens=20)
     try:
         client.create_decision(
             {"health_check": True},
@@ -197,7 +191,8 @@ def _openai_check(
         )
     except Exception as exc:  # pragma: no cover - exact network exceptions vary.
         return HealthCheck("openai", "failed", str(exc))
-    return HealthCheck("openai", "passed", "Responses API reachable")
+    provider = config.get("BFA_AI_PROVIDER", "openai")
+    return HealthCheck("openai", "passed", f"{provider} AI API reachable")
 
 
 def _health_schema() -> dict[str, Any]:

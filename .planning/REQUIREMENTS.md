@@ -152,12 +152,27 @@ v1.0 requirements are archived at
 - [x] **BPG-03**: Account balance API errors fail closed before entry order
   submission.
 
+### DeepSeek AI Provider Switch
+
+- [x] **DSP-01**: Runtime config can select `BFA_AI_PROVIDER=deepseek` without
+  requiring an OpenAI API key.
+
+- [x] **DSP-02**: DeepSeek decisions use the OpenAI-compatible Chat Completions
+  API with JSON object mode and the existing deterministic decision schema.
+
+- [x] **DSP-03**: AI response parsing tolerates fenced JSON or prefixed text but
+  still rejects invalid or schema-incomplete decisions before execution.
+
+- [x] **DSP-04**: Server live config can switch to DeepSeek without changing
+  Binance credentials, risk caps, margin mode, position mode, or service
+  isolation.
+
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
 | Trading above 100 USDT pilot capital | Requires separate evidence and explicit approval. |
-| Running without OpenAI key | User selected OpenAI model; fail-closed is safer than substituting another decision source. |
+| Running without a configured AI provider key | User selected model-driven decisions; fail-closed is safer than substituting another decision source. |
 | Enabling timer before one-cycle validation | Periodic live trading should start only after one reviewed cycle. |
 | Removing deterministic risk gates | LLM remains slow-path analyst/veto, not direct execution authority. |
 
@@ -199,13 +214,17 @@ v1.0 requirements are archived at
 | BPG-01 | Phase 17 | Complete - live account balance checked before entry |
 | BPG-02 | Phase 17 | Complete - insufficient balance rejects before order calls |
 | BPG-03 | Phase 17 | Complete - account balance read errors fail closed |
+| DSP-01 | Phase 18 | Complete - DeepSeek provider config validates without OpenAI key |
+| DSP-02 | Phase 18 | Complete - DeepSeek Chat Completions JSON mode client added |
+| DSP-03 | Phase 18 | Complete - JSON extraction and schema validation cover noisy AI output |
+| DSP-04 | Phase 18 | Complete - server can switch AI provider without risk cap changes |
 
 **Coverage:**
 
-- v1.1-v1.9 requirements: 34 total
-- Mapped to phases: 34
+- v1.1-v1.10 requirements: 38 total
+- Mapped to phases: 38
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.9 balance preflight gate*
+*Last updated: 2026-06-20 after completing v1.10 DeepSeek provider switch*

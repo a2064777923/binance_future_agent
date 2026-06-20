@@ -3,7 +3,7 @@
 Isolated project for a small-capital Binance USDT-M futures trading agent. The
 system focuses first on hot-coin discovery from Binance Square and other
 narrative sources, then combines those events with futures-market anomalies and
-OpenAI-structured trade decisions.
+AI-provider structured trade decisions.
 
 The first live target is a 100 USDT pilot account. The project must default to
 dry-run/test modes until explicit live mode, API credentials, leverage limits,
@@ -19,7 +19,8 @@ rules.
 - Exchange: Binance USD-M futures.
 - Initial account size: 100 USDT.
 - Initial strategy family: hot narrative coin + futures anomaly confirmation.
-- AI provider: OpenAI.
+- AI provider: DeepSeek for live use, with OpenAI Responses still available as
+  a fallback provider.
 - Deployment target: isolated service on server `64.83.34.222` as root, under
   `/opt/binance-futures-agent`.
 
@@ -55,14 +56,15 @@ variable names only.
 
 Phases 1-8 implement the isolated project foundation, public market data,
 narrative ingestion, event-store replay, hot-coin candidate scoring,
-OpenAI-structured decision validation, risk-gated Binance execution, and
+AI-provider structured decision validation, risk-gated Binance execution, and
 dry-run-first server deployment.
 
-## OpenAI Decision Smoke Command
+## AI Decision Smoke Command
 
-Phase 6 adds a structured OpenAI decision layer. It validates the model's JSON
-locally, journals redacted request/response records, and can persist the result
-to `ai_decisions`. It still does not place Binance orders.
+Phase 6 added a structured AI decision layer; Phase 18 added DeepSeek provider
+selection. The command validates the model's JSON locally, journals redacted
+request/response records, and can persist the result to `ai_decisions`. It still
+does not place Binance orders.
 
 ```bash
 python -m bfa.cli ai decide ^

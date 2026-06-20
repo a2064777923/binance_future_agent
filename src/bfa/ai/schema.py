@@ -1,4 +1,4 @@
-"""Schemas and context packets for OpenAI trade decisions."""
+"""Schemas and context packets for AI trade decisions."""
 
 from __future__ import annotations
 

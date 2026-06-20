@@ -46,6 +46,7 @@ def persist_ai_decision(
     context: AiDecisionContext,
     validation: DecisionValidationResult,
     raw_response: Mapping[str, Any],
+    source: str = "ai.provider",
 ) -> int:
     symbol = context.candidate.get("symbol")
     payload = {
@@ -56,7 +57,7 @@ def persist_ai_decision(
     return store.insert_artifact(
         "ai_decisions",
         occurred_at=context.decided_at,
-        source="openai.responses",
+        source=source,
         symbol=str(symbol) if symbol else None,
         ref_id=f"ai_decision:{symbol}:{context.decided_at}" if symbol else f"ai_decision:{context.decided_at}",
         payload=payload,

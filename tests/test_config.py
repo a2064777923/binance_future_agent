@@ -20,6 +20,7 @@ PILOT_SYMBOLS = [
 def base_env(**overrides):
     env = {
         "BFA_MODE": "dry_run",
+        "BFA_AI_PROVIDER": "openai",
         "BFA_OPENAI_ENABLED": "false",
         "BFA_ACCOUNT_CAPITAL_USDT": "100",
         "BFA_MAX_LEVERAGE": "3",
@@ -50,6 +51,9 @@ def base_env(**overrides):
         "OPENAI_BASE_URL": "https://api.openai.com/v1",
         "OPENAI_MODEL": "gpt-5.4",
         "OPENAI_RETRY_AFTER_SECONDS": "300",
+        "DEEPSEEK_API_KEY": "",
+        "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+        "DEEPSEEK_MODEL": "deepseek-v4-flash",
     }
     env.update(overrides)
     return env
@@ -221,12 +225,44 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("OPENAI_MAX_OUTPUT_TOKENS must be a positive integer", result.errors)
         self.assertIn("OPENAI_RETRY_AFTER_SECONDS must be a positive number", result.errors)
 
-    def test_openai_enabled_requires_openai_key(self):
+    def test_openai_enabled_requires_openai_key_for_openai_provider(self):
         config = load_config(base_env(BFA_OPENAI_ENABLED="true"))
         result = validate_config(config)
 
         self.assertFalse(result.valid)
-        self.assertIn("OPENAI_API_KEY is required when BFA_OPENAI_ENABLED=true", result.errors)
+        self.assertIn(
+            "OPENAI_API_KEY is required when BFA_OPENAI_ENABLED=true and BFA_AI_PROVIDER=openai",
+            result.errors,
+        )
+
+    def test_deepseek_provider_requires_deepseek_key(self):
+        config = load_config(base_env(BFA_OPENAI_ENABLED="true", BFA_AI_PROVIDER="deepseek"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn(
+            "DEEPSEEK_API_KEY is required when BFA_OPENAI_ENABLED=true and BFA_AI_PROVIDER=deepseek",
+            result.errors,
+        )
+
+    def test_deepseek_provider_accepts_deepseek_key_without_openai_key(self):
+        config = load_config(
+            base_env(
+                BFA_OPENAI_ENABLED="true",
+                BFA_AI_PROVIDER="deepseek",
+                DEEPSEEK_API_KEY="synthetic-deepseek-key-abcdef",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertTrue(result.valid)
+
+    def test_invalid_ai_provider_fails(self):
+        config = load_config(base_env(BFA_AI_PROVIDER="anthropic"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_AI_PROVIDER must be openai or deepseek", result.errors)
 
     def test_loader_ignores_unknown_environment_keys(self):
         config = load_config(base_env(UNRELATED_PUBLIC_PATH="do-not-print-me"))

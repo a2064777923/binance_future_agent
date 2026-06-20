@@ -1,4 +1,4 @@
-"""OpenAI decision-layer helpers."""
+"""AI decision-layer helpers."""
 
 from bfa.ai.schema import (
     AiDecisionContext,

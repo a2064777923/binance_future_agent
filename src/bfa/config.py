@@ -19,6 +19,7 @@ class RuntimeMode(StrEnum):
 
 DEFAULTS = {
     "BFA_MODE": RuntimeMode.DRY_RUN.value,
+    "BFA_AI_PROVIDER": "openai",
     "BFA_OPENAI_ENABLED": "false",
     "BFA_ACCOUNT_CAPITAL_USDT": "100",
     "BFA_MAX_LEVERAGE": "3",
@@ -59,6 +60,9 @@ DEFAULTS = {
     "OPENAI_TIMEOUT_SECONDS": "5",
     "OPENAI_MAX_OUTPUT_TOKENS": "400",
     "OPENAI_RETRY_AFTER_SECONDS": "300",
+    "DEEPSEEK_API_KEY": "",
+    "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    "DEEPSEEK_MODEL": "deepseek-v4-flash",
 }
 
 NUMERIC_FIELDS = (
@@ -122,9 +126,14 @@ def validate_config(config: AppConfig) -> ValidationResult:
     for field in INTEGER_FIELDS:
         _positive_integer(config.get(field), field, errors)
 
+    ai_provider = config.get("BFA_AI_PROVIDER").strip().lower()
+    if ai_provider not in {"openai", "deepseek"}:
+        errors.append("BFA_AI_PROVIDER must be openai or deepseek")
     openai_enabled = _truthy(config.get("BFA_OPENAI_ENABLED"))
-    if openai_enabled and not config.get("OPENAI_API_KEY"):
-        errors.append("OPENAI_API_KEY is required when BFA_OPENAI_ENABLED=true")
+    if openai_enabled and ai_provider == "openai" and not config.get("OPENAI_API_KEY"):
+        errors.append("OPENAI_API_KEY is required when BFA_OPENAI_ENABLED=true and BFA_AI_PROVIDER=openai")
+    if openai_enabled and ai_provider == "deepseek" and not config.get("DEEPSEEK_API_KEY"):
+        errors.append("DEEPSEEK_API_KEY is required when BFA_OPENAI_ENABLED=true and BFA_AI_PROVIDER=deepseek")
 
     if mode in (RuntimeMode.TESTNET, RuntimeMode.LIVE):
         _required(config, "BINANCE_API_KEY", mode.value, errors)

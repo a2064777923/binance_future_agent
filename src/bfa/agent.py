@@ -9,9 +9,10 @@ from pathlib import Path
 import time
 from typing import Any
 
-from bfa.ai.client import OpenAIAPIError, OpenAIResponsesClient
+from bfa.ai.client import OpenAIAPIError
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
+from bfa.ai.providers import ai_source, build_ai_client
 from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.config import AppConfig, RuntimeMode, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect
@@ -126,13 +127,7 @@ def run_agent_once(
         received_at=started_at,
     )
     narrative_runner = narrative_runner or _build_narrative_runner(config, collected_at=started_at)
-    ai_client = ai_client or OpenAIResponsesClient(
-        api_key=config.get("OPENAI_API_KEY"),
-        model=config.get("OPENAI_MODEL"),
-        base_url=config.get("OPENAI_BASE_URL"),
-        timeout=float(config.get("OPENAI_TIMEOUT_SECONDS")),
-        max_output_tokens=int(config.get("OPENAI_MAX_OUTPUT_TOKENS")),
-    )
+    ai_client = ai_client or build_ai_client(config)
     signed_client = signed_client or _build_signed_client(config, mode)
 
     connection = connect(db_path or config.get("BFA_DB_PATH"))
@@ -189,6 +184,7 @@ def run_agent_once(
                 ),
                 journal=AiDecisionJournal(journal_path) if journal_path else None,
                 store=store,
+                source=ai_source(config),
             )
         except Exception as exc:
             _record_openai_backoff(config, exc)

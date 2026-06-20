@@ -47,23 +47,40 @@ The first deployment should keep:
 
 ```bash
 BFA_MODE=dry_run
+BFA_AI_PROVIDER=openai
 BFA_OPENAI_ENABLED=false
 BFA_REQUIRE_PROTECTIVE_ORDERS=true
 ```
 
 For live automated trading, configure the same file out of band with Binance
-and OpenAI credentials, then set:
+and AI provider credentials, then set:
 
 ```bash
 BFA_MODE=live
+BFA_AI_PROVIDER=openai
 BFA_OPENAI_ENABLED=true
 BFA_REQUIRE_PROTECTIVE_ORDERS=true
+OPENAI_API_KEY=...
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_TIMEOUT_SECONDS=5
 OPENAI_MAX_OUTPUT_TOKENS=400
 OPENAI_RETRY_AFTER_SECONDS=300
 BFA_MARKET_HEAT_NARRATIVE_ENABLED=true
 ```
+
+DeepSeek can be used instead of OpenAI through its OpenAI-compatible Chat
+Completions API:
+
+```bash
+BFA_AI_PROVIDER=deepseek
+BFA_OPENAI_ENABLED=true
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
+```
+
+`OPENAI_TIMEOUT_SECONDS`, `OPENAI_MAX_OUTPUT_TOKENS`, and
+`OPENAI_RETRY_AFTER_SECONDS` still apply to the selected AI provider.
 
 `BFA_MAX_POSITION_NOTIONAL_USDT` is a contract notional cap, not the margin
 spent from the account. For example, 20 USDT notional at 20x leverage is roughly
@@ -123,7 +140,7 @@ journalctl -u binance-futures-agent.service -n 100 --no-pager
 
 ## Live Automated Runner
 
-After env values, account balance, risk limits, OpenAI, Binance credentials, and
+After env values, account balance, risk limits, AI provider, Binance credentials, and
 kill-switch behavior are reviewed, run one live cycle manually:
 
 ```bash
@@ -146,9 +163,9 @@ touch /opt/binance-futures-agent/runtime/KILL_SWITCH
 ```
 
 The LLM is intentionally a slow-path filter. The runner uses
-`OPENAI_TIMEOUT_SECONDS` to fail closed: if OpenAI is slow, unavailable, or
-returns invalid output, the cycle stops before execution and the exchange-side
-protection logic remains deterministic. When the OpenAI-compatible endpoint is
+`OPENAI_TIMEOUT_SECONDS` to fail closed: if the selected AI provider is slow,
+unavailable, or returns invalid output, the cycle stops before execution and the
+exchange-side protection logic remains deterministic. When the AI endpoint is
 down, the runner writes `/opt/binance-futures-agent/runtime/openai_backoff.json`
 and returns `openai_backoff` until `OPENAI_RETRY_AFTER_SECONDS` has elapsed;
 the next timer cycle then checks the API again.
@@ -156,5 +173,5 @@ the next timer cycle then checks the API again.
 When Square exports and RSS feeds are empty, the live runner can derive a
 clearly labelled `market_heat` fallback narrative from Binance USD-M public
 metrics. This is controlled by `BFA_MARKET_HEAT_NARRATIVE_ENABLED` and the
-`BFA_MARKET_HEAT_*` thresholds in the env file; it does not replace the OpenAI
+`BFA_MARKET_HEAT_*` thresholds in the env file; it does not replace the AI
 decision gate or deterministic execution risk checks.
