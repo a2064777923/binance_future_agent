@@ -31,7 +31,8 @@
 - ✅ **v1.18 Time Exit Plan** — Phase 26, completed 2026-06-20.
 - ✅ **v1.19 Operator-Approved Time Exit Execution** — Phase 27, completed 2026-06-20.
 - ✅ **v1.20 Dynamic Sizing And Multi-Position Guard** — Phase 28, completed 2026-06-20.
-- 🚧 **v1.21 Confirmation-Gated Risk Profile Switch** — Phase 29, in progress.
+- ✅ **v1.21 Confirmation-Gated Risk Profile Switch** — Phase 29, completed
+  2026-06-20.
 
 ## Phases
 
@@ -499,7 +500,8 @@ position.
 
 **Requirements:** DSZ-01, DSZ-02, DSZ-03, DSZ-04
 
-**Status:** Planned.
+**Status:** Complete. Dynamic sizing and multi-position guardrails are
+implemented and default off in the live profile.
 
 **Success Criteria:**
 
@@ -522,7 +524,8 @@ operator-confirmed instead of manual env editing.
 
 **Requirements:** RPS-01, RPS-02, RPS-03
 
-**Status:** Planned.
+**Status:** Complete. The risk-profile preview/apply tooling is implemented,
+tested, deployed, and blocked correctly while HYPEUSDT remains open.
 
 **Success Criteria:**
 
@@ -568,7 +571,7 @@ operator-confirmed instead of manual env editing.
 | 26 | v1.18 | 1/1 | Complete | 2026-06-20 |
 | 27 | v1.19 | 1/1 | Complete | 2026-06-20 |
 | 28 | v1.20 | 1/1 | Complete | 2026-06-20 |
-| 29 | v1.21 | 0/1 | Planned | - |
+| 29 | v1.21 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
@@ -578,9 +581,8 @@ operator-confirmed instead of manual env editing.
 
 ## Next Step
 
-Implement Phase 29 risk-profile planning/apply tooling. Do not raise the live
-server's active risk profile while HYPEUSDT remains open. After HYPEUSDT
-closes, run `ops reconcile-outcomes --persist-closed`, then rerun
-`ops risk-change-check --target-leverage 8`; only if it returns
-`risk_change_allowed=true` should the confirmation-gated profile apply command
-be used.
+Observe the active HYPEUSDT live position without changing the server's active
+risk profile. After HYPEUSDT closes, run `ops reconcile-outcomes
+--persist-closed`, then rerun `ops risk-change-check --target-leverage 8`;
+only if it returns `risk_change_allowed=true` should the confirmation-gated
+profile apply command be used.
