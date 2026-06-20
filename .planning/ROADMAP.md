@@ -19,7 +19,7 @@
   shipped 2026-06-21 ([archive](milestones/v1.23-ROADMAP.md)).
 
 - ✅ **v1.24 Server Readiness And Paper Promotion** — Phases 53-55,
-  shipped 2026-06-21 (archive pending milestone audit).
+  shipped 2026-06-21 (audit passed, archive pending).
 
 ## Phases
 
@@ -200,7 +200,7 @@ confirmed live resume.
 
 ## Next Step
 
-Run `$gsd-audit-milestone v1.24`, then archive the milestone if the audit
-passes. Live automation remains paused: the Phase 55 operator packet currently
-returns `resolve_exposure`, not live eligibility, with manual/unattributed
-`ETHUSDT` and `BTWUSDT` exposure plus insufficient guarded paper evidence.
+Run `$gsd-complete-milestone v1.24` to archive the milestone. Live automation
+remains paused: the Phase 55 operator packet currently returns
+`resolve_exposure`, not live eligibility, with manual/unattributed `ETHUSDT`
+and `BTWUSDT` exposure plus insufficient guarded paper evidence.

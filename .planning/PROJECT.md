@@ -628,9 +628,9 @@ live resume.
   investigate exchange/manual exposure, or prepare a separate operator-confirmed
   live resume.
 
-**Status:** Complete pending milestone audit/archive. Phases 53-55 are
-complete. No server live automation, risk profile, or Binance order state has
-been changed for this milestone. The current operator decision is
+**Status:** Complete with milestone audit passed; archive pending. Phases 53-55
+are complete. No server live automation, risk profile, or Binance order state
+has been changed for this milestone. The current operator decision is
 `resolve_exposure`, so live remains paused.
 
 ## Key Decisions
