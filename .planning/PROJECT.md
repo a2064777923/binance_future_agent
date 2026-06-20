@@ -221,7 +221,8 @@ The ZECUSDT position later cleared, and the current server `ops resume-check`
 result is `resume_allowed` with zero active positions, zero normal open orders,
 zero open algo orders, and no active AI backoff.
 The live timer was re-enabled after that gate result; the first resumed cycle
-exited successfully with `submitted=false` after the AI returned pass.
+and the next scheduled cycle both exited successfully with `submitted=false`
+after the AI returned pass.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -294,7 +295,7 @@ for open-position review.
 **Status:** Complete. Server resume check first returned `keep_paused` for the
 protected ZECUSDT position, then returned `resume_allowed` after the position
 and algo orders cleared. The timer was re-enabled, and the first resumed cycle
-submitted no order.
+plus the next scheduled cycle submitted no order.
 
 ## Key Decisions
 

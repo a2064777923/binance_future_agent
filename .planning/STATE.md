@@ -4,10 +4,10 @@ milestone: v1.12
 milestone_name: Timer Resume Gate
 current_phase: Phase 20 - Timer Resume Gate
 status: completed
-stopped_at: Phase 20 verified; timer resumed and first cycle submitted no order
-last_updated: "2026-06-20T11:33:00.000+08:00"
+stopped_at: Phase 20 verified; timer resumed and two cycles submitted no order
+last_updated: "2026-06-20T11:39:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Read-only resume gate deployed; timer resumed after resume_allowed and first cycle submitted no order
+last_activity_desc: Timer resumed after resume_allowed; two resumed cycles submitted no order
 progress:
   total_phases: 12
   completed_phases: 12
@@ -76,7 +76,7 @@ projects or losing control of downside.
 - The pre-switch ZECUSDT LONG has cleared. The resume gate permitted timer
   resume because there were no active positions, no normal open orders, no open
   algo orders, and no active AI backoff.
-- The first resumed timer cycle exited 0 with `submitted=false` and
+- The first two resumed timer cycles exited 0 with `submitted=false` and
   `risk_reasons=["ai_decision_pass"]`.
 
 ## Next Command
@@ -95,8 +95,8 @@ manual timer resume, run `ops resume-check` and resume only if the gate returns
 
 Phase: Phase 20 - Timer Resume Gate
 Plan: 20-01 complete
-Status: `ops resume-check` deployed; timer active; first resumed cycle selected
-ZECUSDT, AI passed, and no order was submitted
+Status: `ops resume-check` deployed; timer active; two resumed cycles selected
+ZECUSDT then HYPEUSDT, AI passed both, and no order was submitted
 Last activity: 2026-06-20 - Phase 20 verified
 
 ## Operator Next Steps

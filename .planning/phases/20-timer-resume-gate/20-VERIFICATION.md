@@ -20,7 +20,7 @@ behavior_unverified: 0
 | 2 | Protected active positions return `keep_paused` and non-zero exit. | VERIFIED | Unit test covers protected active position; first server read-only check returned `keep_paused`, `resume_allowed=false`, and exit code `1`. |
 | 3 | Unprotected positions or orphan orders return `urgent_attention` and non-zero exit. | VERIFIED | Unit tests cover active position without confirmed algo protection and open algo orders without a position. |
 | 4 | The command is deployed to the isolated server path without touching secrets or other services. | VERIFIED | Synced only app source/test files under `/opt/binance-futures-agent/app`; env and systemd files were not modified. |
-| 5 | Server read-only check gates timer resume and the first resumed cycle remains safe. | VERIFIED | Server first returned `keep_paused` while ZECUSDT was open, then `resume_allowed` after positions/orders cleared; timer was re-enabled and the first resumed cycle exited 0 with `submitted=false`. |
+| 5 | Server read-only check gates timer resume and resumed cycles remain safe. | VERIFIED | Server first returned `keep_paused` while ZECUSDT was open, then `resume_allowed` after positions/orders cleared; timer was re-enabled and two resumed cycles exited 0 with `submitted=false`. |
 
 ## Automated Checks
 
@@ -35,9 +35,11 @@ behavior_unverified: 0
 | Server `ops resume-check --env-file /etc/binance-futures-agent/env --db /opt/binance-futures-agent/data/agent.sqlite` after ZECUSDT cleared | Returned `resume_allowed`, exit code `0` |
 | Server timer resume | `systemctl enable --now binance-futures-agent-live.timer` succeeded |
 | First resumed timer cycle | Service exited 0; `status=rejected`, `risk_reasons=["ai_decision_pass"]`, `submitted=false` |
-| Server live-status after resumed cycle | Zero positions, zero normal open orders, zero open algo orders, `openai_backoff.active=false` |
+| Second resumed timer cycle | Service exited 0 at `2026-06-20T03:38:07Z`; selected `HYPEUSDT`, `status=rejected`, `risk_reasons=["ai_decision_pass"]`, `submitted=false` |
+| Server live-status after resumed cycles | Zero positions, zero normal open orders, zero open algo orders, `openai_backoff.active=false` |
 
 ## Gaps Summary
 
 No Phase 20 gaps found. The gate allowed timer resume after ZECUSDT and
-protective algo orders cleared, and the first resumed cycle submitted no order.
+protective algo orders cleared, and the first two resumed cycles submitted no
+order.

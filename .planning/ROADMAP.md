@@ -316,8 +316,8 @@ auditable and scriptable with a read-only gate.
    `urgent_attention` and a non-zero exit code.
 4. Unit and CLI tests cover the resume gate states.
 5. Server read-only resume check reports protected ZECUSDT as `keep_paused`
-   while open, then `resume_allowed` after positions and orders clear; the first
-   resumed timer cycle submits no order.
+   while open, then `resume_allowed` after positions and orders clear; resumed
+   timer cycles submit no order unless risk and AI gates allow one.
 
 ## Progress
 
