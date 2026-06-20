@@ -4,6 +4,10 @@ plan: 01
 name: Server Live-Resume Readiness Evidence
 status: complete
 completed: 2026-06-21
+requirements_completed:
+  - SRV-01
+  - SRV-02
+  - SRV-03
 ---
 
 # Summary: Server Live-Resume Readiness Evidence

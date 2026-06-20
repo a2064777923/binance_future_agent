@@ -4,6 +4,10 @@ plan: 01
 name: Operator Resume Decision Packet
 status: complete
 completed: 2026-06-21
+requirements_completed:
+  - RDM-01
+  - RDM-02
+  - RDM-03
 ---
 
 # Summary: Operator Resume Decision Packet
