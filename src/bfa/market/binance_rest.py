@@ -83,21 +83,29 @@ class BinanceFuturesRestClient:
     def exchange_info(self) -> MarketDataResponse:
         return self._get("/fapi/v1/exchangeInfo")
 
-    def ticker_24hr(self, symbol: str) -> MarketDataResponse:
-        return self._get(
-            "/fapi/v1/ticker/24hr",
-            {"symbol": _normalize_symbol(symbol)},
-        )
+    def ticker_24hr(self, symbol: str | None = None) -> MarketDataResponse:
+        params = {"symbol": _normalize_symbol(symbol)} if symbol is not None else None
+        return self._get("/fapi/v1/ticker/24hr", params)
 
-    def klines(self, symbol: str, *, interval: str, limit: int = 30) -> MarketDataResponse:
-        return self._get(
-            "/fapi/v1/klines",
-            {
-                "symbol": _normalize_symbol(symbol),
-                "interval": _require_text("interval", interval),
-                "limit": str(_validate_limit(limit)),
-            },
-        )
+    def klines(
+        self,
+        symbol: str,
+        *,
+        interval: str,
+        limit: int = 30,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> MarketDataResponse:
+        params = {
+            "symbol": _normalize_symbol(symbol),
+            "interval": _require_text("interval", interval),
+            "limit": str(_validate_limit(limit)),
+        }
+        if start_time is not None:
+            params["startTime"] = str(_validate_timestamp(start_time, "start_time"))
+        if end_time is not None:
+            params["endTime"] = str(_validate_timestamp(end_time, "end_time"))
+        return self._get("/fapi/v1/klines", params)
 
     def funding_rate(self, symbol: str, *, limit: int = 20) -> MarketDataResponse:
         return self._get(
@@ -200,6 +208,12 @@ def _validate_limit(limit: int) -> int:
     if limit <= 0:
         raise ValueError("limit must be positive")
     return limit
+
+
+def _validate_timestamp(value: int, name: str) -> int:
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
 
 
 def _validate_historical_limit(limit: int) -> int:

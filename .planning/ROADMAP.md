@@ -8,7 +8,10 @@
 
 - ✅ **v1.0 Dry-Run Binance Futures Agent** — Phases 1-8, shipped 2026-06-19
   ([archive](milestones/v1.0-ROADMAP.md)).
-- 🚧 **v1.1 Live Activation** — Phase 9, in progress.
+
+- ✅ **v1.1 Live Activation** — Phase 9, live timer active under pilot caps;
+  LVA-05 remains a future-entry evidence gate.
+- ✅ **v1.2 Backtest Calibration** — Phase 10, completed 2026-06-20.
 
 ## Phases
 
@@ -36,9 +39,10 @@ protective-order, or isolation guarantees.
 
 **Requirements:** LVA-01, LVA-02, LVA-03, LVA-04, LVA-05, LVA-06
 
-**Status:** Live timer is enabled/active; market-heat fallback now produces
-candidates without Square/RSS input; a candidate-driven live cycle reached
-OpenAI and resulted in pass/no submission. OpenAI timeouts enter backoff.
+**Status:** Complete for activation readiness. Live timer is enabled/active;
+market-heat fallback now produces candidates without Square/RSS input; a
+candidate-driven live cycle reached OpenAI and resulted in pass/no submission.
+OpenAI timeouts enter backoff. LVA-05 is conditional on a future submitted entry.
 
 **Success Criteria:**
 
@@ -47,19 +51,49 @@ OpenAI and resulted in pass/no submission. OpenAI timeouts enter backoff.
    provider `OPENAI_BASE_URL`, `OPENAI_TIMEOUT_SECONDS=5`,
    `OPENAI_MAX_OUTPUT_TOKENS=400`, `OPENAI_RETRY_AFTER_SECONDS=300`, and no
    secret leakage to git or logs.
+
 2. Server health checks pass for config, Binance, OpenAI, database, runtime
    paths, risk state, and kill switch.
+
 3. One operator-approved live cycle runs through
    `binance-futures-agent-live.service` with at most one risk-gated order
    attempt and deterministic fail-closed/backoff behavior on AI timeout/error.
+
 4. If an entry order is submitted, stop-loss and take-profit protective algo
    orders are submitted in the same execution path, or kill switch plus
    emergency reduce-only close behavior is observed.
+
 5. The live timer is enabled only after the one-cycle result is reviewed, and it
    can be disabled with `systemctl disable --now binance-futures-agent-live.timer`
    plus the kill-switch file.
+
 6. The first live activation evidence is captured in GSD verification notes
    without printing or committing secret values.
+
+### Phase 10: Small-Capital Backtest Calibration
+
+**Goal:** Add repeatable short-window backtests before raising live risk limits
+in a volatile crypto futures market.
+
+**Requirements:** BT-01, BT-02, BT-03
+
+**Status:** Complete. Local backtest harness, staged sweeps, hot matrix
+reporting, documentation, tests, and public-kline smoke runs are captured.
+
+**Success Criteria:**
+
+1. Historical Binance USD-M kline datasets can be fetched without secrets.
+2. The hot-momentum baseline backtest uses completed candles only and enters on
+   the next candle open.
+
+3. Fees, slippage, notional, risk-per-trade, daily-loss, and open-position caps
+   are included in reported metrics.
+
+4. Staged sweeps compare strict, balanced, and aggressive variants across small
+   windows.
+
+5. Results are written to gitignored data/results paths and documented before
+   any live cap increase.
 
 ## Progress
 
@@ -73,16 +107,17 @@ OpenAI and resulted in pass/no submission. OpenAI timeouts enter backoff.
 | 6 | v1.0 | 3/3 | Complete | 2026-06-19 |
 | 7 | v1.0 | 4/4 | Complete | 2026-06-19 |
 | 8 | v1.0 | 4/4 | Complete | 2026-06-19 |
-| 9 | v1.1 | 1/1 | Activation evidence captured | 2026-06-20 |
+| 9 | v1.1 | 1/1 | Complete    | 2026-06-20 |
+| 10 | v1.2 | 1/1 | Complete    | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1 requirements: 6
-- Mapped: 6
+- v1.1/v1.2 requirements: 9
+- Mapped: 9
 - Unmapped: 0
 
 ## Next Step
 
-Monitor the live timer under the 100 USDT risk caps. If a future entry is
-submitted, capture exchange-side stop-loss/take-profit evidence before raising
-limits.
+Keep the 100 USDT pilot caps unchanged. Continue timer observation and rerun
+`backtest matrix` before any risk-limit change; after the first submitted live
+entry, verify protective-order evidence with `ops live-status`.

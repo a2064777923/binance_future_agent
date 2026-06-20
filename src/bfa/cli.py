@@ -13,6 +13,10 @@ from bfa.ai.client import OpenAIResponsesClient
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
 from bfa.ai.schema import RiskLimits, context_from_candidate
+from bfa.backtest.data import fetch_historical_klines, load_klines_dataset, write_klines_dataset
+from bfa.backtest.engine import run_hot_momentum_backtest, run_staged_sweep
+from bfa.backtest.matrix import BacktestMatrixConfig, HotUniverseConfig, run_hot_backtest_matrix
+from bfa.backtest.models import BacktestConfig, built_in_variants
 from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.report import generate_review_report
@@ -101,6 +105,13 @@ def main(
             narrative_runner_factory=narrative_runner_factory,
             ai_client_factory=ai_client_factory,
             signed_client_factory=signed_client_factory,
+        )
+    if args.command == "backtest":
+        return _run_backtest(
+            args,
+            env=env,
+            stdout=stdout,
+            client_factory=client_factory,
         )
 
     parser.print_help(file=stderr)
@@ -281,6 +292,78 @@ def _build_parser() -> argparse.ArgumentParser:
     run_once.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     run_once.add_argument("--journal", help="optional redacted AI journal JSONL path")
     run_once.add_argument("--top-n", type=int, default=3, help="maximum candidates to evaluate")
+
+    backtest = subparsers.add_parser(
+        "backtest",
+        help="small-capital short-window backtest commands",
+    )
+    backtest_subparsers = backtest.add_subparsers(dest="backtest_command", required=True)
+    fetch_klines = backtest_subparsers.add_parser(
+        "fetch-klines",
+        help="fetch Binance USD-M futures klines into a local JSON dataset",
+    )
+    fetch_klines.add_argument("--env-file", help="optional env file to load before environment overrides")
+    fetch_klines.add_argument("--symbols", help="comma-separated symbols; defaults to BFA_MARKET_SYMBOLS")
+    fetch_klines.add_argument("--interval", default="5m", help="kline interval, e.g. 1m, 5m, 15m")
+    fetch_klines.add_argument("--start", help="inclusive ISO time or epoch milliseconds")
+    fetch_klines.add_argument("--end", help="inclusive ISO time or epoch milliseconds")
+    fetch_klines.add_argument("--limit", type=int, default=288, help="maximum bars per symbol")
+    fetch_klines.add_argument("--output", required=True, help="output JSON path under data/ or runtime/")
+
+    run_backtest = backtest_subparsers.add_parser(
+        "run",
+        help="run one hot-momentum backtest variant from a local kline dataset",
+    )
+    run_backtest.add_argument("--input", required=True, help="kline JSON dataset from fetch-klines")
+    run_backtest.add_argument("--variant", choices=sorted(built_in_variants()), default="balanced")
+    run_backtest.add_argument("--include-trades", action="store_true", help="include individual trades in output")
+    run_backtest.add_argument("--output", help="optional JSON report path")
+
+    sweep = backtest_subparsers.add_parser(
+        "sweep",
+        help="run staged short-window sweeps across strict/balanced/aggressive variants",
+    )
+    sweep.add_argument("--input", required=True, help="kline JSON dataset from fetch-klines")
+    sweep.add_argument("--window-bars", type=int, default=72, help="bars per stage window")
+    sweep.add_argument("--step-bars", type=int, help="bars to move between windows; defaults to window-bars")
+    sweep.add_argument(
+        "--variants",
+        default="strict,balanced,aggressive",
+        help="comma-separated variants: strict,balanced,aggressive",
+    )
+    sweep.add_argument("--output", help="optional JSON report path")
+
+    matrix = backtest_subparsers.add_parser(
+        "matrix",
+        help="select hot USDT futures symbols and run multi-interval staged sweeps",
+    )
+    matrix.add_argument("--env-file", help="optional env file to load before environment overrides")
+    matrix.add_argument("--symbols", help="comma-separated symbols; when omitted, auto-select from Binance 24h ticker")
+    matrix.add_argument("--intervals", default="5m,15m", help="comma-separated intervals to fetch and sweep")
+    matrix.add_argument("--start", help="inclusive ISO time or epoch milliseconds")
+    matrix.add_argument("--end", help="inclusive ISO time or epoch milliseconds")
+    matrix.add_argument("--limit", type=int, default=144, help="maximum bars per symbol per interval")
+    matrix.add_argument("--window-bars", type=int, default=72, help="bars per stage window")
+    matrix.add_argument("--step-bars", type=int, default=36, help="bars to move between windows")
+    matrix.add_argument(
+        "--variants",
+        default="strict,balanced,aggressive",
+        help="comma-separated variants: strict,balanced,aggressive",
+    )
+    matrix.add_argument("--top-n", type=int, default=8, help="number of hot symbols to select")
+    matrix.add_argument(
+        "--min-quote-volume-usdt",
+        type=float,
+        default=10_000_000.0,
+        help="minimum 24h quote volume for automatic hot-symbol selection",
+    )
+    matrix.add_argument(
+        "--min-abs-price-change-percent",
+        type=float,
+        default=3.0,
+        help="minimum absolute 24h price change percent for automatic hot-symbol selection",
+    )
+    matrix.add_argument("--output", help="optional JSON report path")
     return parser
 
 
@@ -632,6 +715,85 @@ def _run_agent(
     return 2
 
 
+def _run_backtest(
+    args: argparse.Namespace,
+    *,
+    env: Mapping[str, str] | None,
+    stdout: TextIO | None,
+    client_factory,
+) -> int:
+    if args.backtest_command == "fetch-klines":
+        config = load_config(env=env, env_file=args.env_file)
+        symbols = _symbols_arg(args.symbols) if args.symbols else market_symbols(config)
+        client = _build_client(config, client_factory)
+        rows = fetch_historical_klines(
+            client,
+            symbols=symbols,
+            interval=args.interval,
+            start=args.start,
+            end=args.end,
+            limit=args.limit,
+        )
+        write_klines_dataset(args.output, interval=args.interval, symbols=rows)
+        payload = {
+            "schema": "bfa_backtest_fetch_klines_v1",
+            "output": args.output,
+            "interval": args.interval,
+            "symbols": symbols,
+            "bar_counts": {symbol: len(values) for symbol, values in sorted(rows.items())},
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
+
+    if args.backtest_command == "run":
+        dataset = load_klines_dataset(args.input)
+        config = built_in_variants()[args.variant]
+        result = run_hot_momentum_backtest(dataset, config)
+        payload = result.to_dict(include_trades=args.include_trades)
+        _write_optional_json(args.output, payload)
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
+
+    if args.backtest_command == "sweep":
+        dataset = load_klines_dataset(args.input)
+        payload = run_staged_sweep(
+            dataset,
+            window_bars=args.window_bars,
+            step_bars=args.step_bars,
+            variants=_symbols_arg(args.variants, uppercase=False),
+        )
+        _write_optional_json(args.output, payload)
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
+
+    if args.backtest_command == "matrix":
+        config = load_config(env=env, env_file=args.env_file)
+        matrix_config = BacktestMatrixConfig(
+            intervals=tuple(_symbols_arg(args.intervals, uppercase=False)),
+            limit=args.limit,
+            window_bars=args.window_bars,
+            step_bars=args.step_bars,
+            variants=tuple(_symbols_arg(args.variants, uppercase=False)),
+            hot_universe=HotUniverseConfig(
+                top_n=args.top_n,
+                min_quote_volume_usdt=args.min_quote_volume_usdt,
+                min_abs_price_change_percent=args.min_abs_price_change_percent,
+            ),
+        )
+        payload = run_hot_backtest_matrix(
+            _build_client(config, client_factory),
+            matrix_config,
+            symbols=_symbols_arg(args.symbols) if args.symbols else None,
+            start=args.start,
+            end=args.end,
+        )
+        _write_optional_json(args.output, payload)
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
+
+    return 2
+
+
 def _execution_filters_from_file(path: str, symbol: str) -> SymbolExecutionFilters:
     return SymbolExecutionFilters.from_exchange_info(
         json.loads(Path(path).read_text(encoding="utf-8")),
@@ -694,6 +856,19 @@ def _candidate_payload_from_json(path: Path) -> dict[str, object]:
 
 def _truthy(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _symbols_arg(value: str, *, uppercase: bool = True) -> list[str]:
+    values = [item.strip() for item in value.split(",") if item.strip()]
+    return [item.upper() for item in values] if uppercase else values
+
+
+def _write_optional_json(path: str | None, payload: Mapping[str, object]) -> None:
+    if not path:
+        return
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 if __name__ == "__main__":

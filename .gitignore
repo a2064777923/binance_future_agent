@@ -12,6 +12,7 @@ secrets/
 *.p12
 *.pfx
 data/
+results/
 logs/
 runtime/
 raw_exports/

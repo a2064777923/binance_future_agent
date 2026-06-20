@@ -13,6 +13,23 @@ from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
 
 
+def test_kline(open_time, *, open_price="100", high="101", low="99", close="100.5"):
+    return [
+        open_time,
+        open_price,
+        high,
+        low,
+        close,
+        "10",
+        open_time + 299_999,
+        "2000000",
+        10,
+        "5",
+        "1200000",
+        "0",
+    ]
+
+
 class CliTests(unittest.TestCase):
     def invoke(
         self,
@@ -694,6 +711,177 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["candidates"], 1)
         self.assertEqual(payload["latest"]["candidate"]["symbol"], "SOLUSDT")
         self.assertFalse(payload["lva05_complete"])
+
+    def test_backtest_fetch_klines_uses_fake_client_and_writes_dataset(self):
+        class FakeClient:
+            def __init__(self):
+                self.calls = []
+
+            def klines(self, symbol, *, interval, limit=30, start_time=None, end_time=None):
+                self.calls.append((symbol, interval, limit, start_time, end_time))
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/klines",
+                    params={},
+                    payload=[test_kline(1_700_000_000_000)],
+                )
+
+        fake_client = FakeClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "klines.json"
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "fetch-klines",
+                "--symbols",
+                "btcusdt,ethusdt",
+                "--interval",
+                "5m",
+                "--limit",
+                "1",
+                "--output",
+                str(output),
+                client_factory=lambda _config: fake_client,
+            )
+            dataset = json.loads(output.read_text(encoding="utf-8"))
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["bar_counts"], {"BTCUSDT": 1, "ETHUSDT": 1})
+        self.assertEqual(sorted(dataset["symbols"]), ["BTCUSDT", "ETHUSDT"])
+        self.assertEqual(len(fake_client.calls), 2)
+
+    def test_backtest_run_and_sweep_emit_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset = root / "klines.json"
+            report = root / "report.json"
+            rows = []
+            price = 100.0
+            for index in range(16):
+                close = price * 1.01
+                rows.append(
+                    test_kline(
+                        1_700_000_000_000 + index * 300_000,
+                        open_price=str(price),
+                        high=str(close * 1.025),
+                        low=str(price * 0.998),
+                        close=str(close),
+                    )
+                )
+                price = close
+            dataset.write_text(
+                json.dumps({"schema": "bfa_klines_v1", "interval": "5m", "symbols": {"BTCUSDT": rows}}),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "run",
+                "--input",
+                str(dataset),
+                "--variant",
+                "balanced",
+                "--include-trades",
+                "--output",
+                str(report),
+            )
+            run_payload = json.loads(stdout)
+            saved_payload = json.loads(report.read_text(encoding="utf-8"))
+
+            sweep_code, sweep_stdout, sweep_stderr = self.invoke(
+                "backtest",
+                "sweep",
+                "--input",
+                str(dataset),
+                "--window-bars",
+                "8",
+                "--step-bars",
+                "4",
+                "--variants",
+                "balanced,aggressive",
+            )
+            sweep_payload = json.loads(sweep_stdout)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(run_payload["schema"], "bfa_backtest_result_v1")
+        self.assertEqual(saved_payload["schema"], "bfa_backtest_result_v1")
+        self.assertGreaterEqual(run_payload["summary"]["trade_count"], 1)
+        self.assertIn("trades", run_payload)
+        self.assertEqual(sweep_code, 0)
+        self.assertEqual(sweep_stderr, "")
+        self.assertEqual(sweep_payload["schema"], "bfa_staged_backtest_sweep_v1")
+        self.assertEqual(sweep_payload["window_count"], 3)
+
+    def test_backtest_matrix_auto_selects_hot_symbols_and_writes_report(self):
+        class FakeClient:
+            def ticker_24hr(self, symbol=None):
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {
+                            "symbol": "HOTUSDT",
+                            "priceChangePercent": "7.5",
+                            "quoteVolume": "25000000",
+                            "count": 1000,
+                        },
+                        {
+                            "symbol": "SLOWUSDT",
+                            "priceChangePercent": "1.0",
+                            "quoteVolume": "90000000",
+                            "count": 1000,
+                        },
+                    ],
+                )
+
+            def klines(self, symbol, *, interval, limit=30, start_time=None, end_time=None):
+                rows = []
+                price = 100.0
+                for index in range(limit):
+                    close = price * 1.01
+                    rows.append(
+                        test_kline(
+                            1_700_000_000_000 + index * 300_000,
+                            open_price=str(price),
+                            high=str(close * 1.025),
+                            low=str(price * 0.998),
+                            close=str(close),
+                        )
+                    )
+                    price = close
+                return MarketDataResponse(endpoint="/fapi/v1/klines", params={}, payload=rows)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "matrix.json"
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "matrix",
+                "--intervals",
+                "5m",
+                "--limit",
+                "16",
+                "--window-bars",
+                "8",
+                "--step-bars",
+                "4",
+                "--variants",
+                "balanced",
+                "--top-n",
+                "1",
+                "--output",
+                str(report),
+                client_factory=lambda _config: FakeClient(),
+            )
+            payload = json.loads(stdout)
+            saved = json.loads(report.read_text(encoding="utf-8"))
+
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_hot_backtest_matrix_v1")
+        self.assertEqual(payload["symbols"], ["HOTUSDT"])
+        self.assertEqual(saved["schema"], "bfa_hot_backtest_matrix_v1")
+        self.assertIn("overall", payload["promotion"])
 
 
 if __name__ == "__main__":

@@ -82,3 +82,18 @@ python -m bfa.cli ops health-check --env-file .env --db runtime/agent.sqlite --s
 The server deployment lives under `/opt/binance-futures-agent` with env at
 `/etc/binance-futures-agent/env` and a dedicated
 `binance-futures-agent.service` oneshot health-check unit.
+
+## Small-Capital Backtesting
+
+The project now includes a short-window backtest harness for the hot-momentum
+strategy family. It uses completed Binance USD-M candles, enters on the next
+candle open, includes fees/slippage, and reports staged 100 USDT pilot-style
+metrics.
+
+```bash
+python -m bfa.cli backtest fetch-klines --env-file .env --symbols BTCUSDT,ETHUSDT,SOLUSDT --interval 5m --limit 288 --output data/backtest/klines-5m-latest.json
+python -m bfa.cli backtest sweep --input data/backtest/klines-5m-latest.json --window-bars 72 --step-bars 36 --output results/backtest-sweep-5m.json
+python -m bfa.cli backtest matrix --env-file .env --intervals 5m,15m --limit 144 --window-bars 72 --step-bars 36 --top-n 8 --output results/backtest-hot-matrix.json
+```
+
+See `docs/backtesting.md` for the staged validation method and promotion rules.

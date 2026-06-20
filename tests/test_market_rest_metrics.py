@@ -44,6 +44,17 @@ class RestCurrentMetricTests(unittest.TestCase):
             "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT",
         )
 
+    def test_ticker_24hr_can_fetch_all_symbols_without_symbol_param(self):
+        client, transport = self.build_client([load_metrics()["ticker_24hr"]])
+
+        response = client.ticker_24hr()
+
+        self.assertEqual(response.endpoint, "/fapi/v1/ticker/24hr")
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://fapi.binance.com/fapi/v1/ticker/24hr",
+        )
+
     def test_klines_uses_symbol_interval_and_limit_params(self):
         client, transport = self.build_client(load_metrics()["klines"])
 
@@ -52,6 +63,22 @@ class RestCurrentMetricTests(unittest.TestCase):
         self.assertEqual(
             transport.calls[0]["url"],
             "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=5m&limit=30",
+        )
+
+    def test_klines_accepts_start_and_end_time_params(self):
+        client, transport = self.build_client(load_metrics()["klines"])
+
+        client.klines(
+            "BTCUSDT",
+            interval="5m",
+            limit=30,
+            start_time=1700000000000,
+            end_time=1700000900000,
+        )
+
+        self.assertEqual(
+            transport.calls[0]["url"],
+            "https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=5m&limit=30&startTime=1700000000000&endTime=1700000900000",
         )
 
     def test_funding_rate_and_open_interest_use_public_symbol_endpoints(self):
@@ -79,6 +106,8 @@ class RestCurrentMetricTests(unittest.TestCase):
             client.ticker_24hr("")
         with self.assertRaises(ValueError):
             client.klines("BTCUSDT", interval="5m", limit=0)
+        with self.assertRaises(ValueError):
+            client.klines("BTCUSDT", interval="5m", start_time=-1)
 
 
 class RestHistoricalMetricTests(unittest.TestCase):

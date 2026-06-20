@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Live Activation
-current_phase: Phase 9 - Live Activation Readiness
-status: in_progress
-stopped_at: live timer active; candidate-driven live cycle observed with no submission
-last_updated: "2026-06-19T18:33:28.000Z"
+milestone: v1.2
+milestone_name: Backtest Calibration
+current_phase: 10
+status: completed
+stopped_at: v1.0 dry-run server deployment verified
+last_updated: "2026-06-20T00:24:30.020Z"
 last_activity: 2026-06-20
-last_activity_desc: Market-heat fallback deployed; live candidate cycle observed
+last_activity_desc: Phase 10 complete
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 29
-  completed_plans: 29
+  total_phases: 2
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 9 - Live Activation Readiness
-**Status:** v1.1 live timer active; candidate-driven live cycle observed; OpenAI timeout backoff verified; live-status monitor deployed
+**Current phase:** 10
+**Status:** Milestone complete
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -42,6 +42,9 @@ projects or losing control of downside.
 - Exchange: Binance USD-M futures.
 - Pilot capital: 100 USDT.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
+- Backtest discipline: use short-window staged sweeps with completed candles,
+  next-candle entries, fees/slippage, and 100 USDT pilot caps before any scale-up.
+
 - Project mode: horizontal layers.
 - Workflow config: Standard granularity, parallel execution enabled, planning
   docs committed, research/check/verifier enabled.
@@ -64,9 +67,16 @@ projects or losing control of downside.
   under the 5 second timeout. Candidate-driven cycles either receive an AI
   pass/no-trade decision or enter `openai_backoff` and skip trading.
 
+- Historical Square/social narrative data is not yet complete, so the first
+  backtest layer validates a market-heat proxy rather than claiming to reproduce
+  a private Lana-style social alpha system.
+
 ## Next Command
 
-Monitor live timer evidence before changing risk limits.
+Keep live caps unchanged. Continue observing the live timer, rerun
+`python -m bfa.cli backtest matrix` before any risk-limit change, and use
+`ops live-status` after the first submitted live entry to verify protective
+orders.
 
 ## Session
 
@@ -76,15 +86,17 @@ Monitor live timer evidence before changing risk limits.
 
 ## Current Position
 
-Phase: Phase 9 - Live Activation Readiness
-Plan: 09-01
-Status: Timer active; candidate-driven live cycle passed with no submission
-Last activity: 2026-06-20 — live-status monitor deployed; LVA-05 remains untriggered
+Phase: Phase 10 - Small-Capital Backtest Calibration
+Plan: 10-01 complete
+Status: Backtest matrix tooling and public-kline smoke evidence captured; caps remain unchanged
+Last activity: 2026-06-20 — Phase 10 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
+- Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.
+
 - If a future entry is submitted, verify protective stop-loss and take-profit
   exchange orders with `ops live-status` before changing risk limits.
