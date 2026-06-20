@@ -136,6 +136,22 @@ projects or losing control of downside.
   `quant_setup` is recorded as a keep-live-paused condition, not treated as a
   deploy success.
 
+### Quant Setup Calibration
+
+- [x] **QSC-01**: The deterministic setup layer supports explicit setup
+  profiles for offline calibration without changing the live default profile.
+
+- [x] **QSC-02**: Backtest variants include conservative calibrated
+  `quant_setup_selective` and `quant_setup_scalp` profiles for matrix
+  comparison against baseline `quant_setup`.
+
+- [x] **QSC-03**: Setup profiles can gate trades by factor edge, confidence,
+  risk/reward, indicator sample size, trend alignment, RSI extremes, stop
+  distance, and notional fraction.
+
+- [x] **QSC-04**: Recent hot-symbol matrix evidence is generated for baseline,
+  selective, and scalp variants, and checked through the promotion gate.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -179,12 +195,16 @@ projects or losing control of downside.
 | SPG-02 | Phase 37 | Complete locally |
 | SPG-03 | Phase 37 | Complete locally |
 | SPG-04 | Phase 37 | Complete locally |
+| QSC-01 | Phase 38 | Complete locally |
+| QSC-02 | Phase 38 | Complete locally |
+| QSC-03 | Phase 38 | Complete locally |
+| QSC-04 | Phase 38 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 31 total
-- Mapped to phases: 31
+- v1.22 requirements: 35 total
+- Mapped to phases: 35
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 37 strategy promotion gate*
+*Last updated: 2026-06-20 after Phase 38 quant setup calibration variants*

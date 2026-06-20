@@ -113,11 +113,31 @@ class TradeSetup:
         )
 
 
+@dataclass(frozen=True)
+class TradeSetupProfile:
+    name: str = "standard"
+    min_edge: float = 10.0
+    min_confidence: float = 0.0
+    min_risk_reward: float = 1.2
+    max_stop_distance_percent: float = 4.2
+    min_indicator_sample_size: int = 0
+    require_trend_alignment: bool = False
+    require_rsi_not_extreme: bool = False
+    max_notional_fraction: float = 1.0
+    stop_distance_multiplier: float = 1.0
+    target_distance_multiplier: float = 1.0
+
+
+STANDARD_SETUP_PROFILE = TradeSetupProfile()
+
+
 def build_trade_setup(
     candidate: Mapping[str, Any] | Any,
     *,
     risk_limits: RiskLimits,
+    profile: TradeSetupProfile | Mapping[str, Any] | None = None,
 ) -> TradeSetup:
+    setup_profile = _setup_profile(profile)
     payload = candidate.to_dict() if hasattr(candidate, "to_dict") else dict(candidate)
     symbol = str(payload.get("symbol", "")).upper()
     features = _mapping(payload.get("features"))
@@ -159,8 +179,16 @@ def build_trade_setup(
         )
 
     entry = _entry_price(reference, side, volatility)
-    stop_distance, stop_basis = _stop_distance_percent(entry, volatility, features, side)
-    target_distance, target_basis = _target_distance_percent(entry, stop_distance, edge, volatility, features, side)
+    stop_distance, stop_basis = _stop_distance_percent(entry, volatility, features, side, setup_profile)
+    target_distance, target_basis = _target_distance_percent(
+        entry,
+        stop_distance,
+        edge,
+        volatility,
+        features,
+        side,
+        setup_profile,
+    )
     stop, target = _stop_target(entry, side, stop_distance, target_distance)
     price_basis = _price_basis(
         reference=reference,
@@ -171,6 +199,7 @@ def build_trade_setup(
         features=features,
         stop_basis=stop_basis,
         target_basis=target_basis,
+        profile=setup_profile,
     )
     notional, sizing_warnings = _setup_notional(
         entry_price=entry,
@@ -178,6 +207,7 @@ def build_trade_setup(
         risk_limits=risk_limits,
         features=features,
         edge=edge,
+        profile=setup_profile,
     )
     warnings.extend(sizing_warnings)
     reasons = _setup_reasons(side, factor_scores, regime, warnings)
@@ -185,13 +215,23 @@ def build_trade_setup(
     if notional is None:
         decision = "pass"
         reasons = _dedupe([*reasons, "notional_not_executable"])
-    if edge < 10.0:
+    confidence = _confidence(edge, factor_scores)
+    if edge < setup_profile.min_edge:
         decision = "pass"
         reasons = _dedupe([*reasons, "factor_edge_too_small"])
+    if confidence < setup_profile.min_confidence:
+        decision = "pass"
+        reasons = _dedupe([*reasons, "confidence_below_profile_min"])
+    if target_distance / stop_distance < setup_profile.min_risk_reward:
+        decision = "pass"
+        reasons = _dedupe([*reasons, "risk_reward_below_profile_min"])
+    profile_rejections = _profile_rejections(features, side, setup_profile)
+    if profile_rejections:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *profile_rejections])
     if _high_crowding(features, side):
         warnings.append("crowding_risk")
         reasons = _dedupe([*reasons, "crowding_risk"])
-    confidence = _confidence(edge, factor_scores)
     if decision == "pass":
         return TradeSetup(
             symbol=symbol,
@@ -482,6 +522,7 @@ def _stop_distance_percent(
     volatility: float | None,
     features: Mapping[str, Any],
     side: str,
+    profile: TradeSetupProfile,
 ) -> tuple[float, dict[str, Any]]:
     atr = _float(features.get("atr_percent"))
     base_volatility = atr or volatility or 1.0
@@ -504,13 +545,15 @@ def _stop_distance_percent(
     else:
         stop_distance = base
         anchor = "atr_volatility"
-    stop_distance = min(max(stop_distance, 0.45), 4.2)
+    stop_distance *= max(profile.stop_distance_multiplier, 0.1)
+    stop_distance = min(max(stop_distance, 0.45), profile.max_stop_distance_percent)
     return stop_distance, {
         "anchor": anchor,
         "atr_percent": atr,
         "volatility_percent": volatility,
         "structure_distance_percent": structure_distance,
         "raw_stop_distance_percent": stop_distance,
+        "profile": profile.name,
     }
 
 
@@ -521,6 +564,7 @@ def _target_distance_percent(
     volatility: float | None,
     features: Mapping[str, Any],
     side: str,
+    profile: TradeSetupProfile,
 ) -> tuple[float, dict[str, Any]]:
     reward_multiple = 1.35 + min(edge / 60.0, 0.65)
     trend = abs(_float(features.get("ema_spread_percent")) or 0.0)
@@ -540,12 +584,14 @@ def _target_distance_percent(
     if structure_distance is not None and structure_distance >= stop_distance * 1.2:
         target = min(max(target, structure_distance), stop_distance * 2.4)
         anchor = "nearest_structure_with_min_rr"
-    target = min(max(target, stop_distance * 1.2), 7.0)
+    target *= max(profile.target_distance_multiplier, 0.1)
+    target = min(max(target, stop_distance * profile.min_risk_reward), 7.0)
     return target, {
         "anchor": anchor,
         "reward_multiple": reward_multiple,
         "structure_distance_percent": structure_distance,
         "raw_target_distance_percent": target,
+        "profile": profile.name,
     }
 
 
@@ -564,6 +610,7 @@ def _setup_notional(
     risk_limits: RiskLimits,
     features: Mapping[str, Any],
     edge: float,
+    profile: TradeSetupProfile,
 ) -> tuple[float | None, list[str]]:
     stop_fraction = abs(entry_price - stop_price) / entry_price
     warnings: list[str] = []
@@ -573,6 +620,7 @@ def _setup_notional(
     edge_fraction = min(max(edge / 40.0, 0.35), 1.0)
     max_notional = min(risk_limits.max_position_notional_usdt, risk_notional)
     notional = max_notional * edge_fraction
+    notional *= min(max(profile.max_notional_fraction, 0.0), 1.0)
     min_executable = _positive_float(features.get("min_executable_notional"))
     if min_executable is not None and notional < min_executable:
         if min_executable <= max_notional:
@@ -648,9 +696,11 @@ def _price_basis(
     features: Mapping[str, Any],
     stop_basis: Mapping[str, Any],
     target_basis: Mapping[str, Any],
+    profile: TradeSetupProfile,
 ) -> dict[str, Any]:
     return {
         "model": "expected_market_entry_structure_stop_target_v1",
+        "profile": profile.name,
         "side": side,
         "reference_price": reference,
         "entry_price": round(entry, 8),
@@ -668,6 +718,37 @@ def _price_basis(
         "stop_basis": dict(stop_basis),
         "target_basis": dict(target_basis),
     }
+
+
+def _profile_rejections(features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> list[str]:
+    rejections: list[str] = []
+    sample_size = int(_float(features.get("indicator_sample_size")) or 0)
+    if sample_size < profile.min_indicator_sample_size:
+        rejections.append("indicator_sample_below_profile_min")
+    trend = _float(features.get("ema_spread_percent"))
+    if profile.require_trend_alignment and trend is not None:
+        if side == "long" and trend <= 0:
+            rejections.append("trend_not_aligned")
+        if side == "short" and trend >= 0:
+            rejections.append("trend_not_aligned")
+    rsi = _float(features.get("rsi"))
+    if profile.require_rsi_not_extreme and rsi is not None:
+        if side == "long" and rsi >= 78:
+            rejections.append("rsi_extreme_for_long")
+        if side == "short" and rsi <= 22:
+            rejections.append("rsi_extreme_for_short")
+    return _dedupe(rejections)
+
+
+def _setup_profile(profile: TradeSetupProfile | Mapping[str, Any] | None) -> TradeSetupProfile:
+    if profile is None:
+        return STANDARD_SETUP_PROFILE
+    if isinstance(profile, TradeSetupProfile):
+        return profile
+    if isinstance(profile, Mapping):
+        values = {key: profile[key] for key in TradeSetupProfile.__dataclass_fields__ if key in profile}
+        return TradeSetupProfile(**values)
+    return STANDARD_SETUP_PROFILE
 
 
 def _high_crowding(features: Mapping[str, Any], side: str) -> bool:

@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 37
+current_phase: 38
 status: active
-stopped_at: Phase 37 complete locally; latest quant_setup matrix failed promotion gate
-last_updated: "2026-06-20T22:45:00+08:00"
+stopped_at: Phase 38 complete locally; selective variant promising on 5m but total promotion still blocked
+last_updated: "2026-06-20T23:15:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 34
-  completed_phases: 34
-  total_plans: 55
-  completed_plans: 55
+  total_phases: 35
+  completed_phases: 35
+  total_plans: 56
+  completed_plans: 56
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 37 — Strategy Promotion Gate
-**Status:** Phase 37 complete locally; live timer remains paused while strategy promotion fails
+**Current phase:** Phase 38 — Quant Setup Calibration Variants
+**Status:** Phase 38 complete locally; live timer remains paused while total strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Calibrate the indicator-based deterministic setup until
-recent matrix/promotion checks justify forward-paper or live resumption.
+**Current focus:** Decide whether to promote only passing intervals or further
+calibrate failed intervals before any forward-paper or live resumption.
 
 ## Decisions
 
@@ -414,32 +414,52 @@ recent matrix/promotion checks justify forward-paper or live resumption.
   `status=keep_live_paused`, `promotion_allowed=false`, with both `5m` and
   `15m` cells failing PnL, positive-window-rate, and drawdown checks.
 
+- Phase 38 local implementation adds explicit setup profiles for offline
+  calibration while preserving the standard live default. Backtests now expose
+  `quant_setup_selective` and `quant_setup_scalp` variants. Profiles can gate
+  trades by edge, confidence, risk/reward, indicator sample size, trend
+  alignment, RSI extremes, stop distance, and notional fraction.
+
+- Phase 38 matrix evidence at `runtime/quant_setup_matrix_phase38.json`
+  compared `quant_setup`, `quant_setup_selective`, and `quant_setup_scalp`
+  across recent hot symbols on `5m` and `15m`. Baseline `quant_setup` worsened
+  to total net PnL `-7.50008697` USDT. `quant_setup_selective` improved to
+  total net PnL `0.2231175` USDT and passed the `5m` cell
+  (`+1.62468567` USDT, positive-window-rate `1.0`, worst drawdown
+  `1.27227818` USDT), but failed `15m` (`-1.40156817` USDT, worst drawdown
+  `2.39698293` USDT). `quant_setup_scalp` passed `5m` but total PnL remained
+  negative (`-0.69422935` USDT). Promotion checks for all three variants still
+  returned `keep_live_paused`.
+
 ## Next Command
 
-Calibrate the indicator-based `quant_setup` rules and rerun matrix plus
-`ops strategy-promotion-check`. Do not restore the live timer, execute
-adjustment orders, or apply `30u_10x_multi_dynamic` while the latest strategy
-promotion gate returns `keep_live_paused`.
+Choose whether to add interval-aware promotion for `5m`-only forward-paper
+testing or further calibrate/disable failed `15m` behavior, then rerun matrix
+plus `ops strategy-promotion-check`. Do not restore the live timer, execute
+adjustment orders, or apply `30u_10x_multi_dynamic` while total promotion gate
+returns `keep_live_paused`.
 
 ## Session
 
-**Last session:** 2026-06-20T22:45:00+08:00
-**Stopped at:** Phase 37 complete locally; latest quant_setup matrix failed promotion gate
-**Resume file:** .planning/phases/37-strategy-promotion-gate/37-01-SUMMARY.md
+**Last session:** 2026-06-20T23:15:00+08:00
+**Stopped at:** Phase 38 complete locally; selective variant promising on 5m but total promotion still blocked
+**Resume file:** .planning/phases/38-quant-setup-calibration-variants/38-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 37 — Strategy Promotion Gate
-Plan: 37-01 local implementation
+Phase: 38 — Quant Setup Calibration Variants
+Plan: 38-01 local implementation
 Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — strategy promotion gate implemented and latest matrix blocked
+Last activity: 2026-06-20 — calibrated setup variants implemented and latest matrix checked
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Calibrate `quant_setup`, rerun recent hot-symbol matrix sweeps, then require
-  `ops strategy-promotion-check` to pass before using the new setup live.
+- Decide whether to pursue `5m`-only forward-paper promotion for
+  `quant_setup_selective`, or further calibrate/disable `15m` behavior first.
+- Rerun recent hot-symbol matrix sweeps and require `ops strategy-promotion-check`
+  to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
 - Review the old SOLUSDT decision chain through read-only

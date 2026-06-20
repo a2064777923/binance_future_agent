@@ -128,6 +128,27 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.side, "flat")
         self.assertIn("factor_edge_too_small", setup.reasons)
 
+    def test_profile_can_require_trend_alignment_and_indicator_coverage(self):
+        setup = build_trade_setup(
+            self.candidate(
+                indicator_sample_size=3,
+                ema_spread_percent=-0.2,
+            ),
+            risk_limits=self.risk_limits(),
+            profile={
+                "name": "selective",
+                "min_edge": 20,
+                "min_indicator_sample_size": 8,
+                "require_trend_alignment": True,
+            },
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertEqual(setup.side, "flat")
+        self.assertIn("indicator_sample_below_profile_min", setup.reasons)
+        self.assertIn("trend_not_aligned", setup.reasons)
+        self.assertEqual(setup.price_basis["profile"], "selective")
+
 
 if __name__ == "__main__":
     unittest.main()

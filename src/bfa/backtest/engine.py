@@ -304,6 +304,7 @@ def _generate_quant_setup_signals(
         setup = build_trade_setup(
             _candidate_from_bars(symbol, lookback, config),
             risk_limits=_risk_limits_from_backtest_config(config),
+            profile=config.setup_profile,
         )
         if setup.decision != "trade":
             rejected += 1

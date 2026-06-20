@@ -102,6 +102,7 @@ class BacktestConfig:
     take_profit_percent: float = 2.4
     max_hold_bars: int = 6
     cooldown_bars: int = 2
+    setup_profile: dict[str, Any] = field(default_factory=dict)
 
     def with_overrides(self, **overrides: Any) -> "BacktestConfig":
         return replace(self, **overrides)
@@ -128,6 +129,7 @@ class BacktestConfig:
             "take_profit_percent": self.take_profit_percent,
             "max_hold_bars": self.max_hold_bars,
             "cooldown_bars": self.cooldown_bars,
+            "setup_profile": dict(self.setup_profile),
         }
 
 
@@ -310,6 +312,60 @@ def built_in_variants() -> dict[str, BacktestConfig]:
             lookback_bars=6,
             min_quote_volume_usdt=1_000_000.0,
             cooldown_bars=1,
+        ),
+        "quant_setup_selective": base.with_overrides(
+            name="quant_setup_selective",
+            strategy_type="quant_setup",
+            account_capital_usdt=30.0,
+            max_leverage=10.0,
+            max_position_notional_usdt=18.0,
+            max_risk_per_trade_usdt=0.45,
+            max_daily_loss_usdt=1.5,
+            max_open_positions=1,
+            lookback_bars=12,
+            min_quote_volume_usdt=5_000_000.0,
+            cooldown_bars=4,
+            max_hold_bars=4,
+            setup_profile={
+                "name": "selective",
+                "min_edge": 28.0,
+                "min_confidence": 0.68,
+                "min_risk_reward": 1.45,
+                "max_stop_distance_percent": 2.6,
+                "min_indicator_sample_size": 8,
+                "require_trend_alignment": True,
+                "require_rsi_not_extreme": True,
+                "max_notional_fraction": 0.65,
+                "stop_distance_multiplier": 0.85,
+                "target_distance_multiplier": 1.08,
+            },
+        ),
+        "quant_setup_scalp": base.with_overrides(
+            name="quant_setup_scalp",
+            strategy_type="quant_setup",
+            account_capital_usdt=30.0,
+            max_leverage=10.0,
+            max_position_notional_usdt=15.0,
+            max_risk_per_trade_usdt=0.35,
+            max_daily_loss_usdt=1.2,
+            max_open_positions=1,
+            lookback_bars=6,
+            min_quote_volume_usdt=5_000_000.0,
+            cooldown_bars=6,
+            max_hold_bars=3,
+            setup_profile={
+                "name": "scalp",
+                "min_edge": 32.0,
+                "min_confidence": 0.7,
+                "min_risk_reward": 1.3,
+                "max_stop_distance_percent": 1.8,
+                "min_indicator_sample_size": 5,
+                "require_trend_alignment": True,
+                "require_rsi_not_extreme": True,
+                "max_notional_fraction": 0.5,
+                "stop_distance_multiplier": 0.7,
+                "target_distance_multiplier": 0.95,
+            },
         ),
     }
 

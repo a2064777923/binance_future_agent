@@ -144,7 +144,7 @@ class BacktestMatrixTests(unittest.TestCase):
         self.assertEqual(payload["hot_universe"]["source"], "manual_symbols")
         self.assertTrue(all(call[0] != "ticker_24hr" for call in client.calls))
 
-    def test_hot_backtest_matrix_accepts_quant_setup_variant(self):
+    def test_hot_backtest_matrix_accepts_quant_setup_variants(self):
         client = FakeClient()
 
         payload = run_hot_backtest_matrix(
@@ -154,13 +154,14 @@ class BacktestMatrixTests(unittest.TestCase):
                 limit=16,
                 window_bars=8,
                 step_bars=4,
-                variants=("quant_setup",),
+                variants=("quant_setup", "quant_setup_selective"),
             ),
             symbols=["AAAUSDT"],
         )
 
-        self.assertEqual(payload["matrix_config"]["variants"], ["quant_setup"])
+        self.assertEqual(payload["matrix_config"]["variants"], ["quant_setup", "quant_setup_selective"])
         self.assertIn("quant_setup", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_selective", payload["promotion"]["variants"])
 
     def test_hot_backtest_matrix_reports_no_symbols_selected(self):
         client = FakeClient()

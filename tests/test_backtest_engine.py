@@ -222,6 +222,44 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(result.trades[0].side, "short")
         self.assertIn("quant_short_setup", result.trades[0].reason_codes)
 
+    def test_quant_setup_profile_can_filter_signals(self):
+        bars = []
+        price = 100.0
+        for index in range(12):
+            close = price * 1.012
+            bars.append(
+                bar(
+                    index,
+                    open_price=price,
+                    high=close * 1.025,
+                    low=price * 0.997,
+                    close=close,
+                    quote_volume=3_000_000,
+                    taker_ratio=1.35,
+                )
+            )
+            price = close
+
+        result = run_hot_momentum_backtest(
+            {"BTCUSDT": bars},
+            self.config(
+                name="quant_setup_selective",
+                strategy_type="quant_setup",
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=18,
+                max_risk_per_trade_usdt=0.45,
+                max_daily_loss_usdt=1.5,
+                max_open_positions=1,
+                lookback_bars=6,
+                max_hold_bars=4,
+                setup_profile={"name": "selective", "min_edge": 999, "min_indicator_sample_size": 6},
+            ),
+        )
+
+        self.assertEqual(result.trade_count, 0)
+        self.assertGreater(result.rejected_signals, 0)
+
     def test_daily_loss_gate_counts_only_realized_exits(self):
         def series(symbol):
             return [

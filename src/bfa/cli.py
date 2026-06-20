@@ -573,7 +573,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sweep.add_argument(
         "--variants",
         default="strict,balanced,aggressive",
-        help="comma-separated variants: strict,balanced,aggressive",
+        help="comma-separated variants; see backtest run --help for names",
     )
     sweep.add_argument("--output", help="optional JSON report path")
 
@@ -592,7 +592,7 @@ def _build_parser() -> argparse.ArgumentParser:
     matrix.add_argument(
         "--variants",
         default="strict,balanced,aggressive",
-        help="comma-separated variants: strict,balanced,aggressive",
+        help="comma-separated variants; see backtest run --help for names",
     )
     matrix.add_argument("--top-n", type=int, default=8, help="number of hot symbols to select")
     matrix.add_argument(
