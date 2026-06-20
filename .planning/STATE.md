@@ -1,27 +1,27 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.26
-milestone_name: Live Position Management And Pilot Learning
-current_phase: Planning next milestone
-status: completed
-stopped_at: v1.26 milestone archived; next milestone scope pending
-last_updated: "2026-06-21T07:45:00+08:00"
+milestone: v1.27
+milestone_name: Adaptive Live Pilot Iteration
+current_phase: Phase 66 — Live Cycle Explainability And Ledger Cadence
+current_phase_name: Live Cycle Explainability And Ledger Cadence
+status: roadmap_ready
+stopped_at: v1.27 requirements and roadmap created; ready to plan Phase 66
+last_updated: "2026-06-21T07:55:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Milestone v1.26 completed and archived
+last_activity_desc: v1.27 requirements and roadmap created
 progress:
   total_phases: 5
-  completed_phases: 5
+  completed_phases: 0
   total_plans: 5
-  completed_plans: 5
-  percent: 100
-current_phase_name: Planning next milestone
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Planning next milestone
-**Status:** v1.26 milestone complete and archived
+**Current phase:** Phase 66 — Live Cycle Explainability And Ledger Cadence
+**Status:** v1.27 roadmap ready
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -32,9 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan the next milestone from current live pilot evidence,
-manual `BTWUSDT` isolation, and the operator's request for faster live
-iteration.
+**Current focus:** Make recent live cycles explainable by evaluated symbols,
+factor evidence, AI/risk decisions, sizing caps, and order/no-order outcomes
+before widening the next live-iteration loop.
 
 ## Decisions
 
@@ -70,6 +70,11 @@ iteration.
   liquidation/failure lessons, restore productive paper evidence collection,
   and build a separate confirmation-gated live resume path only after the
   operator packet is eligible.
+
+- v1.27 direction: speed up live pilot iteration by improving live-cycle
+  explainability, broad hot-symbol scanning, multi-factor edge and point
+  precision, adaptive sizing, and high-leverage governors while keeping
+  `BTWUSDT` and other manual symbols outside bot management.
 
 - Phase 57 direction is complete: forward-paper now persists
   `paper_observations` for generated signals and rejected candidates, reports
@@ -782,9 +787,8 @@ iteration.
 
 ## Next Command
 
-Start the next milestone with `$gsd-new-milestone`: use the current live pilot
-packet, widened capacity profile, and manual `BTWUSDT` boundary to define the
-next iteration.
+Start Phase 66 with `$gsd-plan-phase 66`: build live-cycle explainability and
+ledger cadence before changing scanner or sizing behavior again.
 
 ## Session
 
@@ -795,11 +799,11 @@ on the isolated server without order/env/systemd/risk mutation.
 
 ## Current Position
 
-Phase: Planning next milestone
+Phase: 66 — Live Cycle Explainability And Ledger Cadence
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-21 — Milestone v1.26 completed and archived
+Status: Ready to plan
+Last activity: 2026-06-21 — v1.27 requirements and roadmap created
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`.
+- Run `$gsd-plan-phase 66`.

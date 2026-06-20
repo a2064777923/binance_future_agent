@@ -282,6 +282,16 @@ control of downside.
   back into guard recommendations.
 - [x] Deploy v1.26 server evidence without touching unrelated server projects
   or managing manual `BTWUSDT`.
+- [ ] Make latest live-cycle decisions explainable by evaluated symbol, factor,
+  AI/risk decision, sizing cap, and order/no-order result.
+- [ ] Broaden live hot-symbol scanning while preserving liquidity,
+  tradability, weak-evidence, one-order-per-cycle, and manual-symbol guards.
+- [ ] Improve deterministic multi-factor edge scoring and entry/stop/target
+  point precision before AI overlay.
+- [ ] Add adaptive sizing and high-leverage governors that can downsize or
+  block unsafe setups and require explicit evidence before raising risk.
+- [ ] Deploy v1.27 server canary evidence without touching unrelated server
+  projects or managing manual `BTWUSDT`.
 
 ### Out of Scope
 
@@ -493,12 +503,24 @@ packet is read-only, reports manual `BTWUSDT` separately from bot-managed
 capacity, and proves no order/env/systemd/risk/guard mutation during packet
 generation.
 
-## Next Milestone: v1.27 (Not Yet Defined)
+## Current Milestone: v1.27 Adaptive Live Pilot Iteration
 
-The next milestone should be defined with `$gsd-new-milestone` from the current
-server pilot evidence, live outcome ledger, widened capacity profile, and the
-operator's request for faster live iteration while preserving manual-position
-boundaries.
+**Goal:** Make the live pilot iterate faster and more intelligently by widening
+hot-symbol observation, improving multi-factor edge and point precision, and
+adapting sizing inside explicit small-capital risk governors.
+
+**Target features:**
+- Explain every recent live cycle by evaluated symbols, factor evidence,
+  AI/risk decisions, sizing caps, and order/no-order outcomes.
+- Expand live hot-symbol scanning to a broader current Binance USD-M universe
+  while preserving tradability, weak-evidence, one-order-per-cycle, and
+  manual-symbol guards.
+- Improve deterministic multi-factor edge scoring and entry/stop/target point
+  geometry before AI overlay.
+- Add adaptive sizing and high-leverage governors that can downsize/block weak
+  or unsafe setups and require explicit evidence before raising risk.
+- Deploy and verify the v1.27 canary on the isolated server while keeping
+  `BTWUSDT` and other manual symbols outside bot management.
 
 ## Completed Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 
@@ -848,4 +870,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after v1.26 milestone archive.*
+*Last updated: 2026-06-21 after v1.27 milestone initialization.*
