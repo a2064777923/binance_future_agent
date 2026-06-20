@@ -258,6 +258,10 @@ Phase 29 adds a `30u_8x_dynamic` profile preview/apply tool that writes only
 approved non-secret risk keys, requires risk-change readiness and confirmation,
 and backs up the env file before any write. The profile switch has been tested
 and intentionally blocked on the server while HYPEUSDT remains open.
+Post-archive hotfix `8fa704e` is also deployed on the server: AI confidence
+values returned in percent form are normalized into the expected `0..1` range
+with an audit warning, and server focused tests, the full 266-test suite, and a
+secret-safe health check passed after deployment.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -544,4 +548,4 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after archiving v1.21 Live Pilot Risk Controls.*
+*Last updated: 2026-06-20 after deploying the AI confidence normalization hotfix.*

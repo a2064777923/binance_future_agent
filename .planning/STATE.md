@@ -4,10 +4,10 @@ milestone: v1.21
 milestone_name: Live Pilot Risk Controls
 current_phase: Milestone v1.21 archived
 status: completed
-stopped_at: v1.21 archived; HYPEUSDT still blocks 8x/dynamic profile apply
-last_updated: "2026-06-20T14:18:21.9830974+08:00"
+stopped_at: confidence normalization hotfix deployed; HYPEUSDT still blocks 8x/dynamic profile apply
+last_updated: "2026-06-20T14:39:20+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Milestone v1.21 completed and archived
+last_activity_desc: Server hotfix 8fa704e deployed and verified
 progress:
   total_phases: 21
   completed_phases: 21
@@ -137,6 +137,13 @@ any profile switch.
   applied only when `risk-change-check` allows it and a matching confirmation
   token is supplied. No live env switch has been applied.
 
+- Post-archive hotfix `8fa704e` is deployed on the server. It normalizes AI
+  confidence values in percent form, for example `70.0` to `0.70`, with a
+  `confidence_percent_normalized` warning while still rejecting values above
+  `100`. Server focused tests, full suite (`266` tests), and secret-safe
+  health-check passed after deployment. The live timer was paused during the
+  code-only deploy, then restored; the next live cycle submitted no order.
+
 ## Next Command
 
 Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
@@ -147,7 +154,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** v1.21 milestone archived; HYPEUSDT blocks risk-profile escalation
+**Stopped at:** confidence hotfix deployed; HYPEUSDT blocks risk-profile escalation
 **Resume file:** .planning/milestones/v1.21-MILESTONE-AUDIT.md
 
 ## Current Position
@@ -155,7 +162,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 Phase: Milestone v1.21 complete
 Plan: —
 Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — Milestone v1.21 completed and archived
+Last activity: 2026-06-20 — Server hotfix 8fa704e deployed and verified
 
 ## Operator Next Steps
 
