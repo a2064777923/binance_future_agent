@@ -4,15 +4,15 @@ milestone: v1.21
 milestone_name: Live Pilot Risk Controls
 current_phase: Milestone v1.21 archived
 status: completed
-stopped_at: HYPEUSDT open/protected and past hold window; time-exit plan ready but not approved
-last_updated: "2026-06-20T15:29:00+08:00"
+stopped_at: HYPEUSDT still open/protected and past hold window; time-exit plan ready but not approved
+last_updated: "2026-06-20T15:39:51+08:00"
 last_activity: 2026-06-20
-last_activity_desc: HYPEUSDT time-exit plan ready; execution awaits approval
+last_activity_desc: HYPEUSDT still open/protected; time-exit ready; 8x dynamic profile still blocked
 progress:
-  total_phases: 21
-  completed_phases: 21
-  total_plans: 21
-  completed_plans: 21
+  total_phases: 29
+  completed_phases: 29
+  total_plans: 49
+  completed_plans: 49
   percent: 100
 ---
 
@@ -215,6 +215,19 @@ any profile switch.
   no-trade preview. It returned `confirmation_required`, `exit_executed=false`,
   and no execution payload. No live close has been approved or submitted.
 
+- Latest read-only follow-up at `2026-06-20T07:39:05Z`: HYPEUSDT remained open
+  as `0.16` LONG under the unchanged 30U/5x profile, with two protective algo
+  orders, no normal open orders, and about `132.97` minutes elapsed against the
+  `120` minute AI hold window. `ops position-hold-check` still returned
+  `review_required` with `hold_time_expired`; `ops time-exit-plan` still
+  returned `exit_plan_ready` with planned close `SELL MARKET 0.16`,
+  `positionSide=LONG`, and `reduceOnly=false`. Reconcile preview still reported
+  `open_or_partial` with only the entry fill, and
+  `ops risk-change-check --target-leverage 8` still returned
+  `keep_current_profile` because the active protected position and unreconciled
+  submitted intent remain. The live service was inactive and the live timer was
+  active; no close, env switch, or exchange mutation was performed.
+
 ## Next Command
 
 HYPEUSDT has reached a reviewed time-exit condition. Do not execute a live
@@ -227,7 +240,7 @@ before applying any profile switch.
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** HYPEUSDT open/protected and past hold window; time-exit plan ready but not approved
+**Stopped at:** HYPEUSDT still open/protected and past hold window; time-exit plan ready but not approved
 **Resume file:** .planning/milestones/v1.21-MILESTONE-AUDIT.md
 
 ## Current Position
@@ -235,7 +248,7 @@ before applying any profile switch.
 Phase: Milestone v1.21 complete
 Plan: —
 Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — HYPEUSDT time-exit plan ready; execution awaits approval
+Last activity: 2026-06-20 — HYPEUSDT still open/protected; time-exit ready; 8x dynamic profile still blocked
 
 ## Operator Next Steps
 
