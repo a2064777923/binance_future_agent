@@ -1,0 +1,18 @@
+[Unit]
+Description=Binance Futures Agent forward-paper evidence collection
+Documentation=file:/opt/binance-futures-agent/app/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/binance-futures-agent/app
+EnvironmentFile=/etc/binance-futures-agent/env
+ExecStart=/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops forward-paper-run --env-file /etc/binance-futures-agent/env --db /opt/binance-futures-agent/data/agent.sqlite --symbols HYPEUSDT,SOLUSDT,ZECUSDT,WLDUSDT,XRPUSDT,AVAXUSDT,BNBUSDT,DOGEUSDT,NEARUSDT,ADAUSDT --interval 5m --variant quant_setup_selective --limit 36
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/binance-futures-agent

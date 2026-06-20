@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 40
+current_phase: 41
 status: active
-stopped_at: Phase 40 deployed; forward-paper recorder verified on server, first run produced no qualifying signal
-last_updated: "2026-06-21T00:30:00+08:00"
+stopped_at: Phase 41 local assets added; deployment and optional paper timer enablement pending
+last_updated: "2026-06-20T21:48:53+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
@@ -19,8 +19,8 @@ progress:
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 40 — Forward-Paper Evidence Recorder
-**Status:** Phase 40 deployed; live timer remains paused while default all-interval strategy promotion fails
+**Current phase:** Phase 41 — Forward-Paper Scheduling Assets
+**Status:** Phase 41 local assets added; live timer remains paused while default all-interval strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,9 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Deploy or schedule forward-paper evidence collection while
-keeping live resume gated by all-interval strategy evidence.
+**Current focus:** Deploy paper-only systemd scheduling assets, optionally
+enable the paper timer, and keep live resume gated by all-interval strategy
+evidence.
 
 ## Decisions
 
@@ -465,34 +466,41 @@ keeping live resume gated by all-interval strategy evidence.
   `paper_signals=0`, `paper_outcomes=0`, and existing `order_intents=18`,
   confirming no live/dry-run order intent was created.
 
+- Phase 41 local implementation adds a paper-only systemd service and timer.
+  The service runs `ops forward-paper-run` over the configured hot-symbol
+  universe on `5m` with `quant_setup_selective`; it does not run
+  `agent run-once`. The bootstrap installs the paper unit/timer but does not
+  enable or start them. Full local suite passed with `319` tests.
+
 ## Next Command
 
-Schedule repeated `ops forward-paper-run` collection for `quant_setup_selective`
-on `5m`, then collect out-of-sample paper outcomes and rerun matrix plus both
-selected and all-interval `ops strategy-promotion-check`. Do not restore the
-live timer, execute adjustment orders, or apply `30u_10x_multi_dynamic` while
-the default all-interval promotion gate returns `keep_live_paused`.
+Deploy Phase 41 paper scheduling assets, verify live timer remains inactive,
+then optionally enable only `binance-futures-agent-paper.timer` so
+`ops forward-paper-run` collects repeated out-of-sample evidence. Do not
+restore the live timer, execute adjustment orders, or apply
+`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
+`keep_live_paused`.
 
 ## Session
 
 **Last session:** 2026-06-21T00:30:00+08:00
-**Stopped at:** Phase 40 deployed; forward-paper recorder verified on server, first run produced no qualifying signal
-**Resume file:** .planning/phases/40-forward-paper-evidence-recorder/40-01-SUMMARY.md
+**Stopped at:** Phase 41 local assets added; deployment and optional paper timer enablement pending
+**Resume file:** .planning/phases/41-forward-paper-scheduling-assets/41-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 40 — Forward-Paper Evidence Recorder
-Plan: 40-01 local implementation
-Status: Deployed; live service/timer inactive; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — forward-paper recorder deployed and server smoke run completed
+Phase: 41 — Forward-Paper Scheduling Assets
+Plan: 41-01 local implementation
+Status: Local assets added; deployment pending; live service/timer should remain inactive
+Last activity: 2026-06-20 — paper-only systemd service/timer added and local tests passed
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Schedule repeated `ops forward-paper-run` for `quant_setup_selective` on
-  `5m`, while keeping `live_resume_allowed=false` until all-interval evidence
-  passes.
+- Deploy and optionally enable only the paper timer for repeated
+  `ops forward-paper-run` on `quant_setup_selective` `5m`, while keeping
+  `live_resume_allowed=false` until all-interval evidence passes.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-40, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-41, active.
 
 ## Phases
 
@@ -329,13 +329,33 @@ quant setup variants without creating live or dry-run order intents.
 5. CLI and focused unit tests cover signal creation and outcome settlement.
 6. Full local test suite passes.
 
+### Phase 41: Forward-Paper Scheduling Assets
+
+**Goal:** Add a paper-only systemd service and timer so forward-paper evidence
+can be collected repeatedly without enabling live automation.
+
+**Requirements:** FPS-01, FPS-02, FPS-03
+
+**Status:** Complete locally; server deployment pending.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Deployment assets include `binance-futures-agent-paper.service`.
+2. Deployment assets include `binance-futures-agent-paper.timer`.
+3. The paper service runs `ops forward-paper-run`, not `agent run-once`.
+4. Bootstrap installs the paper unit/timer but does not start or enable them.
+5. Deployment docs explain paper-only manual start and timer enablement.
+6. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-40 | 11/11 | Phase 40 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-41 | 12/12 | Phase 41 local | Pending |
 
 ## Requirement Coverage
 
@@ -350,7 +370,8 @@ still fails default all-interval `ops strategy-promotion-check`. The
 `quant_setup_selective` variant is now eligible only for `5m` forward-paper
 observation through `--scope selected-intervals --intervals 5m`, and local
 `ops forward-paper-run` can record paper signals/outcomes without order
-intents. Next work should deploy or schedule this forward-paper recorder on the
+intents, and local deployment assets now include a paper-only systemd timer.
+Next work should deploy and optionally enable the paper-only timer on the
 server, then collect out-of-sample evidence and/or recalibrate failed `15m`
 behavior before restoring live automation. Monitor `SOLUSDT` through
 filter-aware `ops position-adjustment-plan` and use

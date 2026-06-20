@@ -6,6 +6,8 @@ ETC_DIR="${BFA_ETC_DIR:-/etc/binance-futures-agent}"
 UNIT_PATH="/etc/systemd/system/binance-futures-agent.service"
 LIVE_UNIT_PATH="/etc/systemd/system/binance-futures-agent-live.service"
 LIVE_TIMER_PATH="/etc/systemd/system/binance-futures-agent-live.timer"
+PAPER_UNIT_PATH="/etc/systemd/system/binance-futures-agent-paper.service"
+PAPER_TIMER_PATH="/etc/systemd/system/binance-futures-agent-paper.timer"
 ARCHIVE_PATH="${1:-}"
 
 die() {
@@ -19,6 +21,8 @@ require_isolated_paths() {
   [ "$UNIT_PATH" = "/etc/systemd/system/binance-futures-agent.service" ] || die "refusing unexpected unit path"
   [ "$LIVE_UNIT_PATH" = "/etc/systemd/system/binance-futures-agent-live.service" ] || die "refusing unexpected live unit path"
   [ "$LIVE_TIMER_PATH" = "/etc/systemd/system/binance-futures-agent-live.timer" ] || die "refusing unexpected live timer path"
+  [ "$PAPER_UNIT_PATH" = "/etc/systemd/system/binance-futures-agent-paper.service" ] || die "refusing unexpected paper unit path"
+  [ "$PAPER_TIMER_PATH" = "/etc/systemd/system/binance-futures-agent-paper.timer" ] || die "refusing unexpected paper timer path"
 }
 
 prepare_directories() {
@@ -65,6 +69,8 @@ install_systemd_unit() {
   install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent.service" "$UNIT_PATH"
   install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent-live.service" "$LIVE_UNIT_PATH"
   install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent-live.timer" "$LIVE_TIMER_PATH"
+  install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent-paper.service" "$PAPER_UNIT_PATH"
+  install -m 0644 "$APP_ROOT/app/deploy/systemd/binance-futures-agent-paper.timer" "$PAPER_TIMER_PATH"
   systemctl daemon-reload
 }
 

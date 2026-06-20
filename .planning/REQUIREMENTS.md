@@ -184,6 +184,17 @@ projects or losing control of downside.
   variant, limit, and deterministic timestamp inputs for repeatable evidence
   collection.
 
+### Forward-Paper Scheduling
+
+- [x] **FPS-01**: Deployment assets include a paper-only systemd service and
+  timer that run `ops forward-paper-run` instead of `agent run-once`.
+
+- [x] **FPS-02**: Paper-only systemd assets use isolated project paths and do
+  not enable, start, or restart themselves during deployment.
+
+- [x] **FPS-03**: Deployment documentation explains how to run or enable the
+  paper-only timer separately from live automation.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -239,12 +250,15 @@ projects or losing control of downside.
 | FPE-02 | Phase 40 | Complete locally |
 | FPE-03 | Phase 40 | Complete locally |
 | FPE-04 | Phase 40 | Complete locally |
+| FPS-01 | Phase 41 | Complete locally |
+| FPS-02 | Phase 41 | Complete locally |
+| FPS-03 | Phase 41 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 43 total
-- Mapped to phases: 43
+- v1.22 requirements: 46 total
+- Mapped to phases: 46
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 40 forward-paper evidence recorder*
+*Last updated: 2026-06-20 after Phase 41 forward-paper scheduling assets*

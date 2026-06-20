@@ -82,6 +82,8 @@ class DeployAssetTests(unittest.TestCase):
         unit = self.read("systemd", "binance-futures-agent.service")
         live_unit = self.read("systemd", "binance-futures-agent-live.service")
         live_timer = self.read("systemd", "binance-futures-agent-live.timer")
+        paper_unit = self.read("systemd", "binance-futures-agent-paper.service")
+        paper_timer = self.read("systemd", "binance-futures-agent-paper.timer")
 
         self.assertIn("WorkingDirectory=/opt/binance-futures-agent/app", unit)
         self.assertIn("EnvironmentFile=/etc/binance-futures-agent/env", unit)
@@ -93,6 +95,12 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn("/opt/binance-futures-agent/.venv/bin/python -m bfa.cli agent run-once", live_unit)
         self.assertIn("OnUnitActiveSec=5min", live_timer)
         self.assertIn("Unit=binance-futures-agent-live.service", live_timer)
+        self.assertIn("WorkingDirectory=/opt/binance-futures-agent/app", paper_unit)
+        self.assertIn("EnvironmentFile=/etc/binance-futures-agent/env", paper_unit)
+        self.assertIn("/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops forward-paper-run", paper_unit)
+        self.assertNotIn("agent run-once", paper_unit)
+        self.assertIn("OnUnitActiveSec=5min", paper_timer)
+        self.assertIn("Unit=binance-futures-agent-paper.service", paper_timer)
 
     def test_remote_bootstrap_is_path_allowlisted_and_not_auto_enabled(self):
         script = self.read("remote-bootstrap.sh")
@@ -102,6 +110,8 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn('UNIT_PATH="/etc/systemd/system/binance-futures-agent.service"', script)
         self.assertIn('LIVE_UNIT_PATH="/etc/systemd/system/binance-futures-agent-live.service"', script)
         self.assertIn('LIVE_TIMER_PATH="/etc/systemd/system/binance-futures-agent-live.timer"', script)
+        self.assertIn('PAPER_UNIT_PATH="/etc/systemd/system/binance-futures-agent-paper.service"', script)
+        self.assertIn('PAPER_TIMER_PATH="/etc/systemd/system/binance-futures-agent-paper.timer"', script)
         self.assertIn('refusing non-isolated APP_ROOT', script)
         self.assertIn('refusing non-isolated ETC_DIR', script)
         self.assertIn("tr -d '\\r'", script)

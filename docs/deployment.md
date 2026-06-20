@@ -7,6 +7,8 @@ This project deploys into an isolated server prefix:
 - Health unit: `/etc/systemd/system/binance-futures-agent.service`
 - Live runner unit: `/etc/systemd/system/binance-futures-agent-live.service`
 - Live timer: `/etc/systemd/system/binance-futures-agent-live.timer`
+- Forward-paper unit: `/etc/systemd/system/binance-futures-agent-paper.service`
+- Forward-paper timer: `/etc/systemd/system/binance-futures-agent-paper.timer`
 
 Do not place secret values in git, planning docs, shell history, or deployment
 commands. Configure SSH authentication outside this repository.
@@ -175,3 +177,23 @@ clearly labelled `market_heat` fallback narrative from Binance USD-M public
 metrics. This is controlled by `BFA_MARKET_HEAT_NARRATIVE_ENABLED` and the
 `BFA_MARKET_HEAT_*` thresholds in the env file; it does not replace the AI
 decision gate or deterministic execution risk checks.
+
+## Forward-Paper Recorder
+
+Forward-paper collection is separate from live automation. It records
+`paper_signals` and `paper_outcomes` from public klines and never creates
+`order_intents`:
+
+```bash
+systemctl start binance-futures-agent-paper.service
+journalctl -u binance-futures-agent-paper.service -n 100 --no-pager
+```
+
+Enable the paper-only timer only when you want repeated observation:
+
+```bash
+systemctl enable --now binance-futures-agent-paper.timer
+systemctl list-timers 'binance-futures-agent-paper*' --no-pager
+```
+
+This does not enable `binance-futures-agent-live.timer`.
