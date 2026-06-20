@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_UP
 from typing import Any, Mapping
 
+from bfa.strategy.indicators import KlinePoint, compute_indicator_snapshot, point_from_mapping
+
 
 @dataclass
 class SymbolFeatures:
@@ -33,6 +35,16 @@ class SymbolFeatures:
     kline_micro_momentum_percent: float | None = None
     kline_close_position_percent: float | None = None
     kline_quote_volume_change_percent: float | None = None
+    support_price: float | None = None
+    resistance_price: float | None = None
+    vwap: float | None = None
+    atr_percent: float | None = None
+    realized_volatility_percent: float | None = None
+    ema_fast: float | None = None
+    ema_slow: float | None = None
+    ema_spread_percent: float | None = None
+    rsi: float | None = None
+    indicator_sample_size: int = 0
     reference_price: float | None = None
     min_qty: float | None = None
     step_size: float | None = None
@@ -65,6 +77,16 @@ class SymbolFeatures:
             "kline_micro_momentum_percent": self.kline_micro_momentum_percent,
             "kline_close_position_percent": self.kline_close_position_percent,
             "kline_quote_volume_change_percent": self.kline_quote_volume_change_percent,
+            "support_price": self.support_price,
+            "resistance_price": self.resistance_price,
+            "vwap": self.vwap,
+            "atr_percent": self.atr_percent,
+            "realized_volatility_percent": self.realized_volatility_percent,
+            "ema_fast": self.ema_fast,
+            "ema_slow": self.ema_slow,
+            "ema_spread_percent": self.ema_spread_percent,
+            "rsi": self.rsi,
+            "indicator_sample_size": self.indicator_sample_size,
             "reference_price": self.reference_price,
             "min_qty": self.min_qty,
             "step_size": self.step_size,
@@ -211,7 +233,41 @@ def _apply_kline(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
             item.kline_quote_volume_change_percent = ((quote_volume - previous_quote_volume) / previous_quote_volume) * 100.0
         setattr(item, "_last_kline_quote_volume", quote_volume)
 
+    point = point_from_mapping(
+        {
+            "open": open_price,
+            "high": high,
+            "low": low,
+            "close": close,
+            "quote_volume": quote_volume,
+        }
+    )
+    if point is not None:
+        points = list(getattr(item, "_kline_points", []))
+        points.append(point)
+        setattr(item, "_kline_points", points)
+        _apply_indicator_snapshot(item, points)
+
     item.reference_price = close
+
+
+def _apply_indicator_snapshot(item: SymbolFeatures, points: list[KlinePoint]) -> None:
+    snapshot = compute_indicator_snapshot(points)
+    item.indicator_sample_size = snapshot.sample_size
+    item.support_price = snapshot.support_price
+    item.resistance_price = snapshot.resistance_price
+    item.vwap = snapshot.vwap
+    item.atr_percent = snapshot.atr_percent
+    item.realized_volatility_percent = snapshot.realized_volatility_percent
+    item.ema_fast = snapshot.ema_fast
+    item.ema_slow = snapshot.ema_slow
+    item.ema_spread_percent = snapshot.ema_spread_percent
+    item.rsi = snapshot.rsi
+    item.kline_close_position_percent = snapshot.close_position_percent
+    item.kline_quote_volume_change_percent = snapshot.volume_change_percent
+    item.kline_momentum_percent = snapshot.momentum_percent
+    item.kline_micro_momentum_percent = snapshot.micro_momentum_percent
+    item.reference_price = snapshot.reference_price
 
 
 def _set_min_executable_notional(item: SymbolFeatures) -> None:
@@ -241,6 +297,7 @@ def _add_missing_feature_notes(item: SymbolFeatures) -> None:
         "missing_funding": item.funding_rate is None,
         "missing_volatility_proxy": item.kline_range_percent is None,
         "missing_kline_momentum": item.kline_momentum_percent is None,
+        "missing_indicator_sample": item.indicator_sample_size <= 1,
         "missing_reference_price": item.reference_price is None,
         "missing_min_executable_notional": item.min_executable_notional is None,
     }

@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-35, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-36, active.
 
 ## Phases
 
@@ -200,13 +200,38 @@ sweeps and hot-symbol matrix reporting.
    `quant_setup`.
 5. Full local test suite passes.
 
+### Phase 36: Indicator-Based Setup Point Logic
+
+**Goal:** Make deterministic setup scoring and point selection more explicitly
+quantitative by adding shared market indicators, market-structure price bases,
+and trace-visible stop/target rationale.
+
+**Requirements:** QSI-01, QSI-02, QSI-03, QSI-04
+
+**Status:** Complete locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Live feature extraction and `quant_setup` backtests use a shared indicator
+   snapshot for ATR, VWAP, EMA spread, RSI, support, resistance, momentum, and
+   volume impulse where kline data is available.
+2. Deterministic setup scoring includes trend structure, RSI regime, and
+   volume impulse factors in addition to the existing market/narrative factors.
+3. Entry, stop, and target output includes a `price_basis` object explaining
+   whether stop/target distances came from ATR/volatility or market structure.
+4. AI context and `ops trade-trace` expose indicator features and `price_basis`
+   without giving AI authority to rewrite deterministic setup prices.
+5. Focused and full local test suites pass.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-35 | 6/6 | Phase 35 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-36 | 7/7 | Phase 36 local | Pending |
 
 ## Requirement Coverage
 
@@ -216,8 +241,8 @@ sweeps and hot-symbol matrix reporting.
 
 ## Next Step
 
-Run broader `quant_setup` backtest matrix sweeps on recent hot symbols before
-restoring live automation. Monitor `SOLUSDT` through filter-aware
+Run broader indicator-based `quant_setup` backtest matrix sweeps on recent hot
+symbols before restoring live automation. Monitor `SOLUSDT` through filter-aware
 `ops position-adjustment-plan` and use `ops trade-trace --symbol SOLUSDT` for
 decision-chain review. Do not execute adjustment orders, restore the live
 timer, or apply `30u_10x_multi_dynamic` without an explicit confirmation token.

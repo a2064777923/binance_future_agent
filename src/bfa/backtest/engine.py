@@ -7,6 +7,7 @@ from typing import Any, Iterable
 
 from bfa.ai.schema import RiskLimits
 from bfa.backtest.models import BacktestBar, BacktestConfig, BacktestResult, BacktestTrade, built_in_variants
+from bfa.strategy.indicators import KlinePoint, compute_indicator_snapshot
 from bfa.strategy.setup import TradeSetup, build_trade_setup
 
 
@@ -405,6 +406,17 @@ def _candidate_from_bars(symbol: str, bars: list[BacktestBar], config: BacktestC
     previous = bars[-2] if len(bars) >= 2 else first
     taker_ratio = last.taker_buy_sell_ratio
     previous_taker_ratio = previous.taker_buy_sell_ratio
+    indicators = compute_indicator_snapshot(
+        KlinePoint(
+            open=bar.open,
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+            quote_volume=bar.quote_volume,
+            taker_buy_sell_ratio=bar.taker_buy_sell_ratio,
+        )
+        for bar in bars
+    )
     features = {
         "mention_count": 1,
         "source_count": 1,
@@ -428,6 +440,7 @@ def _candidate_from_bars(symbol: str, bars: list[BacktestBar], config: BacktestC
         "reference_price": last.close,
         "min_executable_notional": 5.0,
     }
+    features.update({key: value for key, value in indicators.to_features().items() if value is not None})
     return {
         "symbol": symbol.upper(),
         "score": 0.0,

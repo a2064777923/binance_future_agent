@@ -69,7 +69,13 @@ class AiSchemaTests(unittest.TestCase):
         context = context_from_candidate(
             {
                 "symbol": "BTCUSDT",
-                "features": {"reference_price": 100.0, "ignored_extra": "drop-me"},
+                "features": {
+                    "reference_price": 100.0,
+                    "atr_percent": 1.2,
+                    "ema_spread_percent": 0.4,
+                    "rsi": 62.0,
+                    "ignored_extra": "drop-me",
+                },
             },
             risk_limits=self.risk_limits(),
             decided_at="2026-06-19T10:00:00Z",
@@ -82,6 +88,7 @@ class AiSchemaTests(unittest.TestCase):
                 "target_price": 102.2,
                 "notional_usdt": 12.5,
                 "hold_time_minutes": 15,
+                "price_basis": {"model": "expected_market_entry_structure_stop_target_v1"},
                 "ignored_extra": "drop-me",
                 "factor_scores": [
                     {
@@ -99,7 +106,10 @@ class AiSchemaTests(unittest.TestCase):
         payload = context.to_dict()
 
         self.assertEqual(payload["prompt_version"], "bfa-ai-decision-v2")
+        self.assertEqual(payload["candidate"]["features"]["atr_percent"], 1.2)
+        self.assertEqual(payload["candidate"]["features"]["rsi"], 62.0)
         self.assertEqual(payload["quant_setup"]["entry_price"], 100.0)
+        self.assertEqual(payload["quant_setup"]["price_basis"]["model"], "expected_market_entry_structure_stop_target_v1")
         self.assertNotIn("ignored_extra", payload["quant_setup"])
         self.assertNotIn("ignored_extra", payload["quant_setup"]["factor_scores"][0])
 

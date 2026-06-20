@@ -789,6 +789,17 @@ class CliTests(unittest.TestCase):
                         "long_score": 55,
                         "short_score": 18,
                         "edge_score": 37,
+                        "regime": "trend_expansion",
+                        "risk_reward_ratio": 1.8,
+                        "stop_distance_percent": 1.2,
+                        "target_distance_percent": 2.16,
+                        "price_basis": {
+                            "model": "expected_market_entry_structure_stop_target_v1",
+                            "support_price": 98.7,
+                            "resistance_price": 102.5,
+                            "stop_basis": {"anchor": "support_price"},
+                            "target_basis": {"anchor": "nearest_structure_with_min_rr"},
+                        },
                         "factor_scores": [{"name": "momentum", "weighted_score": 20}],
                         "reasons": ["quant_long_setup"],
                     }
@@ -859,6 +870,8 @@ class CliTests(unittest.TestCase):
             "risk_and_intent",
         ])
         self.assertEqual(payload["decision_flow"][1]["factor_scores"][0]["name"], "momentum")
+        self.assertEqual(payload["decision_flow"][1]["regime"], "trend_expansion")
+        self.assertEqual(payload["decision_flow"][1]["price_basis"]["stop_basis"]["anchor"], "support_price")
         self.assertEqual(payload["decision_flow"][3]["risk_reasons"], ["risk_accepted"])
 
     def test_ops_resume_check_requires_exchange_evidence(self):

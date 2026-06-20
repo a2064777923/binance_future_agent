@@ -32,6 +32,15 @@ class StrategySetupTests(unittest.TestCase):
             "kline_micro_momentum_percent": 0.4,
             "kline_close_position_percent": 78,
             "kline_quote_volume_change_percent": 35,
+            "support_price": 97.8,
+            "resistance_price": 103.2,
+            "vwap": 99.4,
+            "atr_percent": 1.05,
+            "ema_fast": 100.8,
+            "ema_slow": 99.6,
+            "ema_spread_percent": 1.2,
+            "rsi": 68.0,
+            "indicator_sample_size": 12,
             "reference_price": 100.0,
             "min_executable_notional": 5.0,
         }
@@ -56,10 +65,15 @@ class StrategySetupTests(unittest.TestCase):
         self.assertLessEqual(setup.notional_usdt, 25)
         self.assertGreaterEqual(setup.notional_usdt, 5)
         self.assertGreaterEqual(setup.risk_reward_ratio, 1.2)
+        self.assertEqual(setup.price_basis["model"], "expected_market_entry_structure_stop_target_v1")
+        self.assertEqual(setup.price_basis["stop_basis"]["anchor"], "support_price")
+        self.assertIn("target_basis", setup.price_basis)
         self.assertIn("quant_long_setup", setup.reasons)
-        self.assertGreaterEqual(len(setup.factor_scores), 8)
+        self.assertGreaterEqual(len(setup.factor_scores), 11)
         self.assertIn("momentum", {factor.name for factor in setup.factor_scores})
         self.assertIn("taker_flow", {factor.name for factor in setup.factor_scores})
+        self.assertIn("trend_structure", {factor.name for factor in setup.factor_scores})
+        self.assertIn("rsi_regime", {factor.name for factor in setup.factor_scores})
 
     def test_builds_short_setup_when_directional_factors_flip(self):
         setup = build_trade_setup(
@@ -71,6 +85,13 @@ class StrategySetupTests(unittest.TestCase):
                 kline_momentum_percent=-1.4,
                 kline_micro_momentum_percent=-0.3,
                 kline_close_position_percent=22,
+                support_price=96.0,
+                resistance_price=102.2,
+                vwap=100.7,
+                ema_fast=99.1,
+                ema_slow=100.4,
+                ema_spread_percent=-1.2948,
+                rsi=31.0,
             ),
             risk_limits=self.risk_limits(),
         )
@@ -90,6 +111,15 @@ class StrategySetupTests(unittest.TestCase):
                 kline_momentum_percent=0.05,
                 kline_micro_momentum_percent=0.0,
                 kline_close_position_percent=50,
+                kline_quote_volume_change_percent=0,
+                support_price=99.5,
+                resistance_price=100.5,
+                vwap=100.0,
+                atr_percent=1.0,
+                ema_fast=100.0,
+                ema_slow=100.0,
+                ema_spread_percent=0.0,
+                rsi=50.0,
             ),
             risk_limits=self.risk_limits(),
         )

@@ -102,6 +102,24 @@ projects or losing control of downside.
 - [x] **QBT-03**: Staged sweeps and hot-symbol matrix reports can include the
   `quant_setup` variant alongside legacy fixed hot-momentum variants.
 
+### Indicator-Based Setup Point Logic
+
+- [x] **QSI-01**: Live feature extraction and setup backtesting use a shared
+  dependency-free indicator snapshot for ATR, VWAP, EMA spread, RSI, support,
+  resistance, momentum, and volume impulse when kline data is available.
+
+- [x] **QSI-02**: Deterministic setup scoring includes trend structure,
+  RSI regime, and volume impulse factors in addition to momentum, liquidity,
+  open interest, taker flow, funding, volatility, narrative quality, and
+  tradability.
+
+- [x] **QSI-03**: Setup output includes a `price_basis` breakdown explaining
+  entry reference, support/resistance, ATR/volatility, stop anchor, target
+  anchor, and risk/reward geometry.
+
+- [x] **QSI-04**: AI context and read-only trade trace expose the new indicator
+  features and `price_basis` while preserving AI overlay/veto semantics.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -137,12 +155,16 @@ projects or losing control of downside.
 | QBT-01 | Phase 35 | Complete locally |
 | QBT-02 | Phase 35 | Complete locally |
 | QBT-03 | Phase 35 | Complete locally |
+| QSI-01 | Phase 36 | Complete locally |
+| QSI-02 | Phase 36 | Complete locally |
+| QSI-03 | Phase 36 | Complete locally |
+| QSI-04 | Phase 36 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 23 total
-- Mapped to phases: 23
+- v1.22 requirements: 27 total
+- Mapped to phases: 27
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 35 quant setup backtest calibration*
+*Last updated: 2026-06-20 after Phase 36 indicator-based setup point logic*

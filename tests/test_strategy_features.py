@@ -25,6 +25,10 @@ class StrategyFeatureTests(unittest.TestCase):
         self.assertEqual(btc.quote_volume, 5000000.0)
         self.assertEqual(btc.taker_buy_sell_ratio, 1.2)
         self.assertIsNotNone(btc.kline_range_percent)
+        self.assertIsNotNone(btc.support_price)
+        self.assertIsNotNone(btc.resistance_price)
+        self.assertIsNotNone(btc.atr_percent)
+        self.assertGreaterEqual(btc.indicator_sample_size, 1)
 
     def test_missing_features_add_quality_notes(self):
         packet = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -38,4 +42,3 @@ class StrategyFeatureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

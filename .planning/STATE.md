@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 35
+current_phase: 36
 status: active
-stopped_at: Phase 35 complete locally; broader quant_setup matrix calibration remains next
-last_updated: "2026-06-20T21:05:00+08:00"
+stopped_at: Phase 36 complete locally; broader indicator-based quant_setup matrix calibration remains next
+last_updated: "2026-06-20T22:20:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 32
-  completed_phases: 32
-  total_plans: 53
-  completed_plans: 53
+  total_phases: 33
+  completed_phases: 33
+  total_plans: 54
+  completed_plans: 54
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 35 — Quant Setup Backtest Calibration
-**Status:** Phase 35 complete locally; live timer remains paused while operator reviews SOLUSDT
+**Current phase:** Phase 36 — Indicator-Based Setup Point Logic
+**Status:** Phase 36 complete locally; live timer remains paused while operator reviews SOLUSDT
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Validate the deterministic setup layer with staged
-backtests/matrix sweeps before restoring live automation.
+**Current focus:** Validate the indicator-based deterministic setup layer with
+staged backtests/matrix sweeps before restoring live automation.
 
 ## Decisions
 
@@ -388,32 +388,42 @@ backtests/matrix sweeps before restoring live automation.
   `backtest sweep --variants quant_setup` both produce reports. No live env,
   server service state, exchange order, or risk profile was changed.
 
+- Phase 36 local implementation adds shared dependency-free indicator
+  snapshots for kline-derived ATR, VWAP, EMA spread, RSI, support/resistance,
+  momentum, and volume impulse. Live feature extraction and `quant_setup`
+  backtests now use the same indicator helper where kline data is available.
+  Deterministic setup scoring now includes trend structure, RSI regime, and
+  volume impulse factors, and setup output includes a trace-visible
+  `price_basis` explaining entry reference, stop anchor, target anchor, and
+  risk/reward geometry. AI remains overlay/veto only and cannot rewrite setup
+  prices.
+
 ## Next Command
 
-Run broader `quant_setup` matrix sweeps on recent hot-symbol data, then decide
-whether the deterministic setup is ready for forward paper/live small-size
-trial. Do not restore the live timer, execute adjustment orders, or apply
-`30u_10x_multi_dynamic` without explicit confirmation.
+Run broader indicator-based `quant_setup` matrix sweeps on recent hot-symbol
+data, then decide whether the deterministic setup is ready for forward
+paper/live small-size trial. Do not restore the live timer, execute adjustment
+orders, or apply `30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
 
-**Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 35 complete locally; broader quant_setup matrix calibration remains next
-**Resume file:** .planning/phases/35-quant-setup-backtest-calibration/35-01-SUMMARY.md
+**Last session:** 2026-06-20T22:20:00+08:00
+**Stopped at:** Phase 36 complete locally; broader indicator-based quant_setup matrix calibration remains next
+**Resume file:** .planning/phases/36-indicator-based-setup-point-logic/36-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 35 — Quant Setup Backtest Calibration
-Plan: 35-01 local implementation
+Phase: 36 — Indicator-Based Setup Point Logic
+Plan: 36-01 local implementation
 Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — quant_setup backtest variant implemented
+Last activity: 2026-06-20 — indicator-based setup point logic implemented
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Run recent hot-symbol matrix sweeps with `quant_setup` and compare against
-  old fixed variants before using the new setup live.
+- Run recent hot-symbol matrix sweeps with indicator-based `quant_setup` and
+  compare against old fixed variants before using the new setup live.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
 - Review the old SOLUSDT decision chain through read-only

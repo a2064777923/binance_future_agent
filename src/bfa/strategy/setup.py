@@ -54,6 +54,7 @@ class TradeSetup:
     stop_distance_percent: float | None
     target_distance_percent: float | None
     reasons: list[str]
+    price_basis: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -75,6 +76,7 @@ class TradeSetup:
             "risk_reward_ratio": self.risk_reward_ratio,
             "stop_distance_percent": self.stop_distance_percent,
             "target_distance_percent": self.target_distance_percent,
+            "price_basis": dict(self.price_basis),
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
         }
@@ -151,14 +153,25 @@ def build_trade_setup(
             risk_reward_ratio=None,
             stop_distance_percent=None,
             target_distance_percent=None,
+            price_basis={},
             reasons=_dedupe(["quant_setup_pass", *warnings]),
             warnings=warnings,
         )
 
     entry = _entry_price(reference, side, volatility)
-    stop_distance = _stop_distance_percent(volatility, features, side)
-    target_distance = _target_distance_percent(stop_distance, edge, volatility)
+    stop_distance, stop_basis = _stop_distance_percent(entry, volatility, features, side)
+    target_distance, target_basis = _target_distance_percent(entry, stop_distance, edge, volatility, features, side)
     stop, target = _stop_target(entry, side, stop_distance, target_distance)
+    price_basis = _price_basis(
+        reference=reference,
+        entry=entry,
+        stop=stop,
+        target=target,
+        side=side,
+        features=features,
+        stop_basis=stop_basis,
+        target_basis=target_basis,
+    )
     notional, sizing_warnings = _setup_notional(
         entry_price=entry,
         stop_price=stop,
@@ -198,6 +211,7 @@ def build_trade_setup(
             risk_reward_ratio=None,
             stop_distance_percent=None,
             target_distance_percent=None,
+            price_basis=price_basis,
             reasons=reasons,
             warnings=_dedupe(warnings),
         )
@@ -220,6 +234,7 @@ def build_trade_setup(
         risk_reward_ratio=round(target_distance / stop_distance, 4),
         stop_distance_percent=round(stop_distance, 4),
         target_distance_percent=round(target_distance, 4),
+        price_basis=price_basis,
         reasons=reasons,
         warnings=_dedupe(warnings),
     )
@@ -250,6 +265,9 @@ def persist_trade_setup(
 def _factor_scores(payload: Mapping[str, Any], features: Mapping[str, Any]) -> list[FactorScore]:
     return [
         _momentum_factor(features),
+        _trend_factor(features),
+        _rsi_factor(features),
+        _volume_impulse_factor(features),
         _liquidity_factor(features),
         _oi_factor(features),
         _taker_flow_factor(features),
@@ -282,6 +300,67 @@ def _momentum_factor(features: Mapping[str, Any]) -> FactorScore:
             score -= 4.0
             reasons.append("close_near_range_low")
     return FactorScore("momentum", kline if kline is not None else change_24h, _clip(score, -35.0, 35.0), 1.5, reasons=reasons)
+
+
+def _trend_factor(features: Mapping[str, Any]) -> FactorScore:
+    spread = _float(features.get("ema_spread_percent"))
+    reference = _float(features.get("reference_price"))
+    vwap = _float(features.get("vwap"))
+    if spread is None and reference is None:
+        return FactorScore("trend_structure", None, 0.0, 1.2, reasons=["missing_trend_structure"])
+    score = _clip((spread or 0.0) * 12.0, -22.0, 22.0)
+    reasons: list[str] = []
+    if spread is not None:
+        if spread >= 0.15:
+            reasons.append("ema_trend_up")
+        elif spread <= -0.15:
+            reasons.append("ema_trend_down")
+        else:
+            reasons.append("ema_trend_flat")
+    if reference is not None and vwap is not None and vwap > 0:
+        vwap_delta = ((reference - vwap) / vwap) * 100.0
+        score += _clip(vwap_delta * 3.0, -8.0, 8.0)
+        if vwap_delta >= 0.2:
+            reasons.append("price_above_vwap")
+        elif vwap_delta <= -0.2:
+            reasons.append("price_below_vwap")
+    return FactorScore("trend_structure", spread, _clip(score, -26.0, 26.0), 1.2, reasons=reasons)
+
+
+def _rsi_factor(features: Mapping[str, Any]) -> FactorScore:
+    rsi = _float(features.get("rsi"))
+    if rsi is None:
+        return FactorScore("rsi_regime", None, 0.0, 0.8, reasons=["missing_rsi"])
+    score = _clip((rsi - 50.0) * 0.55, -18.0, 18.0)
+    reasons: list[str] = []
+    if 45 <= rsi <= 65:
+        reasons.append("rsi_balanced")
+    elif 65 < rsi <= 80:
+        reasons.append("rsi_bullish_momentum")
+    elif 20 <= rsi < 35:
+        reasons.append("rsi_bearish_momentum")
+    elif rsi > 80:
+        score -= 8.0
+        reasons.append("rsi_overbought_caution")
+    elif rsi < 20:
+        score += 8.0
+        reasons.append("rsi_oversold_caution")
+    return FactorScore("rsi_regime", rsi, _clip(score, -20.0, 20.0), 0.8, reasons=reasons)
+
+
+def _volume_impulse_factor(features: Mapping[str, Any]) -> FactorScore:
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    momentum = _float(features.get("kline_micro_momentum_percent")) or _float(features.get("kline_momentum_percent"))
+    if volume_change is None or momentum is None:
+        return FactorScore("volume_impulse", None, 0.0, 0.8, reasons=["missing_volume_impulse"])
+    impulse = min(max(volume_change, -50.0), 120.0) / 6.0
+    direction = 1.0 if momentum >= 0 else -1.0
+    score = impulse * direction
+    reasons = ["volume_expands_with_move"] if volume_change >= 20 else ["volume_neutral"]
+    if volume_change < -20:
+        reasons = ["volume_fades_move"]
+        score *= 0.5
+    return FactorScore("volume_impulse", volume_change, _clip(score, -16.0, 16.0), 0.8, reasons=reasons)
 
 
 def _liquidity_factor(features: Mapping[str, Any]) -> FactorScore:
@@ -398,22 +477,76 @@ def _entry_price(reference: float, side: str, volatility: float | None) -> float
     return reference * (1.0 - slippage_buffer)
 
 
-def _stop_distance_percent(volatility: float | None, features: Mapping[str, Any], side: str) -> float:
-    base = max((volatility or 1.0) * 0.9, 0.65)
+def _stop_distance_percent(
+    entry: float,
+    volatility: float | None,
+    features: Mapping[str, Any],
+    side: str,
+) -> tuple[float, dict[str, Any]]:
+    atr = _float(features.get("atr_percent"))
+    base_volatility = atr or volatility or 1.0
+    base = max(base_volatility * 1.15, 0.65)
     close_position = _float(features.get("kline_close_position_percent"))
     if side == "long" and close_position is not None and close_position >= 80:
         base *= 0.9
     if side == "short" and close_position is not None and close_position <= 20:
         base *= 0.9
-    return min(max(base, 0.45), 3.2)
+    structure_price = _positive_float(features.get("support_price" if side == "long" else "resistance_price"))
+    structure_distance: float | None = None
+    if structure_price is not None:
+        if side == "long" and structure_price < entry:
+            structure_distance = ((entry - structure_price) / entry) * 100.0 + max(base_volatility * 0.18, 0.08)
+        if side == "short" and structure_price > entry:
+            structure_distance = ((structure_price - entry) / entry) * 100.0 + max(base_volatility * 0.18, 0.08)
+    if structure_distance is not None:
+        stop_distance = max(base, min(structure_distance, base * 2.1))
+        anchor = "support_price" if side == "long" else "resistance_price"
+    else:
+        stop_distance = base
+        anchor = "atr_volatility"
+    stop_distance = min(max(stop_distance, 0.45), 4.2)
+    return stop_distance, {
+        "anchor": anchor,
+        "atr_percent": atr,
+        "volatility_percent": volatility,
+        "structure_distance_percent": structure_distance,
+        "raw_stop_distance_percent": stop_distance,
+    }
 
 
-def _target_distance_percent(stop_distance: float, edge: float, volatility: float | None) -> float:
+def _target_distance_percent(
+    entry: float,
+    stop_distance: float,
+    edge: float,
+    volatility: float | None,
+    features: Mapping[str, Any],
+    side: str,
+) -> tuple[float, dict[str, Any]]:
     reward_multiple = 1.35 + min(edge / 60.0, 0.65)
+    trend = abs(_float(features.get("ema_spread_percent")) or 0.0)
+    if trend >= 0.35:
+        reward_multiple += 0.15
     target = stop_distance * reward_multiple
     if volatility is not None:
-        target = min(target, max(volatility * 1.8, stop_distance * 1.25))
-    return min(max(target, stop_distance * 1.2), 6.0)
+        target = min(target, max(volatility * 2.0, stop_distance * 1.25))
+    structure_price = _positive_float(features.get("resistance_price" if side == "long" else "support_price"))
+    structure_distance: float | None = None
+    if structure_price is not None:
+        if side == "long" and structure_price > entry:
+            structure_distance = ((structure_price - entry) / entry) * 100.0
+        if side == "short" and structure_price < entry:
+            structure_distance = ((entry - structure_price) / entry) * 100.0
+    anchor = "edge_reward_multiple"
+    if structure_distance is not None and structure_distance >= stop_distance * 1.2:
+        target = min(max(target, structure_distance), stop_distance * 2.4)
+        anchor = "nearest_structure_with_min_rr"
+    target = min(max(target, stop_distance * 1.2), 7.0)
+    return target, {
+        "anchor": anchor,
+        "reward_multiple": reward_multiple,
+        "structure_distance_percent": structure_distance,
+        "raw_target_distance_percent": target,
+    }
 
 
 def _stop_target(entry: float, side: str, stop_distance: float, target_distance: float) -> tuple[float, float]:
@@ -482,10 +615,13 @@ def _confidence(edge: float, factors: list[FactorScore]) -> float:
 
 def _regime(volatility: float | None, features: Mapping[str, Any]) -> str:
     momentum = abs(_float(features.get("kline_momentum_percent")) or _float(features.get("price_change_percent")) or 0.0)
+    trend = abs(_float(features.get("ema_spread_percent")) or 0.0)
     if volatility is None:
         return "unknown"
     if volatility >= 5.0:
         return "high_volatility"
+    if trend >= 0.5 and momentum >= 1.0:
+        return "trend_expansion"
     if momentum >= 2.5 and volatility >= 0.5:
         return "momentum_expansion"
     if volatility < 0.35:
@@ -495,10 +631,43 @@ def _regime(volatility: float | None, features: Mapping[str, Any]) -> str:
 
 def _volatility_percent(features: Mapping[str, Any]) -> float | None:
     return (
-        _float(features.get("kline_range_mean_percent"))
+        _float(features.get("atr_percent"))
+        or _float(features.get("kline_range_mean_percent"))
         or _float(features.get("kline_range_percent"))
         or _float(features.get("kline_range_max_percent"))
     )
+
+
+def _price_basis(
+    *,
+    reference: float,
+    entry: float,
+    stop: float,
+    target: float,
+    side: str,
+    features: Mapping[str, Any],
+    stop_basis: Mapping[str, Any],
+    target_basis: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "model": "expected_market_entry_structure_stop_target_v1",
+        "side": side,
+        "reference_price": reference,
+        "entry_price": round(entry, 8),
+        "stop_price": round(stop, 8),
+        "target_price": round(target, 8),
+        "support_price": _float(features.get("support_price")),
+        "resistance_price": _float(features.get("resistance_price")),
+        "vwap": _float(features.get("vwap")),
+        "atr_percent": _float(features.get("atr_percent")),
+        "ema_fast": _float(features.get("ema_fast")),
+        "ema_slow": _float(features.get("ema_slow")),
+        "ema_spread_percent": _float(features.get("ema_spread_percent")),
+        "rsi": _float(features.get("rsi")),
+        "indicator_sample_size": _float(features.get("indicator_sample_size")),
+        "stop_basis": dict(stop_basis),
+        "target_basis": dict(target_basis),
+    }
 
 
 def _high_crowding(features: Mapping[str, Any], side: str) -> bool:
