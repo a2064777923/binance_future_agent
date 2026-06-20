@@ -24,6 +24,7 @@
   with live timer paused for open-position review.
 - ✅ **v1.12 Timer Resume Gate** — Phase 20, completed 2026-06-20.
 - ✅ **v1.13 Closed Trade Outcome Reconciliation** — Phase 21, completed 2026-06-20.
+- ✅ **v1.14 Risk Change Readiness Gate** — Phase 22, completed 2026-06-20.
 
 ## Phases
 
@@ -345,6 +346,32 @@ repeat reconciliation.
 6. Repeated reconciliation does not duplicate fills or outcomes in the event
    store.
 
+### Phase 22: Risk Change Readiness Gate
+
+**Goal:** Make leverage or risk-cap changes auditable and fail-closed before
+the server profile is modified.
+
+**Requirements:** RCG-01, RCG-02, RCG-03
+
+**Status:** Complete. The live BNBUSDT position correctly blocks an 8x target
+with `keep_current_profile` until the position closes and outcome evidence is
+persisted.
+
+**Success Criteria:**
+
+1. `ops risk-change-check` returns `risk_change_allowed` only when exchange
+   evidence is present, there are no active positions, no normal open orders,
+   no open algo orders, no active AI backoff, and every submitted order intent
+   has a persisted outcome.
+2. Active protected positions return `keep_current_profile` and a non-zero exit
+   code rather than allowing leverage/risk changes.
+3. Unprotected active positions or orphan orders return `urgent_attention` and
+   a non-zero exit code.
+4. Submitted order intents missing outcome artifacts return
+   `keep_current_profile`.
+5. Server read-only verification under the current BNBUSDT live position blocks
+   the proposed 8x change without modifying exchange or env state.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -370,15 +397,17 @@ repeat reconciliation.
 | 19 | v1.11 | 1/1 | Complete, timer paused for open-position review | 2026-06-20 |
 | 20 | v1.12 | 1/1 | Complete | 2026-06-20 |
 | 21 | v1.13 | 1/1 | Complete | 2026-06-20 |
+| 22 | v1.14 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.13 requirements: 47
-- Mapped: 47
+- v1.1-v1.14 requirements: 50
+- Mapped: 50
 - Unmapped: 0
 
 ## Next Step
 
-Observe the current BNBUSDT live position under the 30U/5x profile. After it
-closes, run `ops trade-outcome --symbol BNBUSDT --persist` to add its final
-fill/outcome evidence before making any risk-cap or leverage increase.
+Observe the current BNBUSDT live position. After it closes, run
+`ops trade-outcome --symbol BNBUSDT --persist`, then rerun
+`ops risk-change-check --target-leverage 8`; only if it returns
+`risk_change_allowed=true` should the server profile be changed.

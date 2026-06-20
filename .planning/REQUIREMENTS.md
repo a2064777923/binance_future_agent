@@ -208,6 +208,19 @@ v1.0 requirements are archived at
 - [x] **CTOR-03**: The command can persist fill and outcome artifacts into the
   existing event store without changing exchange state.
 
+### Risk Change Readiness Gate
+
+- [x] **RCG-01**: Provide a read-only `ops risk-change-check` command for
+  deciding whether leverage or live risk caps may be changed.
+
+- [x] **RCG-02**: The command blocks risk changes when active positions, normal
+  open orders, open algo orders, or AI backoff are present or exchange evidence
+  is missing.
+
+- [x] **RCG-03**: The command blocks risk changes while submitted order intents
+  lack persisted outcome artifacts, so closed trades are reconciled before any
+  profile increase.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -268,13 +281,16 @@ v1.0 requirements are archived at
 | CTOR-01 | Phase 21 | Complete - `ops trade-outcome` reconstructs ZECUSDT fills from signed `userTrades` |
 | CTOR-02 | Phase 21 | Complete - live ZECUSDT report includes gross PnL, commission, net PnL, net quantity, fill times, and `closed` status |
 | CTOR-03 | Phase 21 | Complete - persisted 2 fills and 1 outcome locally without changing exchange state; repeat run inserted no duplicates |
+| RCG-01 | Phase 22 | Complete - `ops risk-change-check` reports readiness for leverage/risk-cap changes |
+| RCG-02 | Phase 22 | Complete - live BNBUSDT active protected position blocks an 8x target with `keep_current_profile` |
+| RCG-03 | Phase 22 | Complete - BNBUSDT submitted intent without an outcome blocks profile changes until reconciled |
 
 **Coverage:**
 
-- v1.1-v1.13 requirements: 47 total
-- Mapped to phases: 47
+- v1.1-v1.14 requirements: 50 total
+- Mapped to phases: 50
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.13 closed-trade outcome reconciliation*
+*Last updated: 2026-06-20 after verifying v1.14 risk-change readiness gate*

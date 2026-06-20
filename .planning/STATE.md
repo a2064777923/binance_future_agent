@@ -1,27 +1,27 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.13
-milestone_name: Closed Trade Outcome Reconciliation
-current_phase: Phase 21 - Closed Trade Outcome Reconciliation
+milestone: v1.14
+milestone_name: Risk Change Readiness Gate
+current_phase: Phase 22 - Risk Change Readiness Gate
 status: completed
-stopped_at: Phase 21 verified; ZECUSDT outcome persisted; BNBUSDT live position remains protected
-last_updated: "2026-06-20T11:58:00.000+08:00"
+stopped_at: Phase 22 verified; risk-change gate blocks 8x while BNBUSDT is open and unreconciled
+last_updated: "2026-06-20T12:09:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Closed ZECUSDT live trade reconciled net of commission; current BNBUSDT position remains protected
+last_activity_desc: Risk-change readiness gate deployed and verified against current BNBUSDT live position
 progress:
-  total_phases: 13
-  completed_phases: 13
-  total_plans: 13
-  completed_plans: 13
+  total_phases: 14
+  completed_phases: 14
+  total_plans: 14
+  completed_plans: 14
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 21 - Closed Trade Outcome Reconciliation
-**Status:** v1.13 complete; ZECUSDT fill/outcome accounting is persisted and
-live timer remains active under the 30U/5x profile
+**Current phase:** Phase 22 - Risk Change Readiness Gate
+**Status:** v1.14 complete; `ops risk-change-check` blocks leverage/risk-cap
+profile changes while positions/orders or unreconciled submitted intents remain
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -83,12 +83,15 @@ projects or losing control of downside.
 - The first closed live ZECUSDT trade is reconciled from Binance fills:
   gross PnL `0.12288` USDT, commission `0.0150272` USDT, net PnL
   `0.1078528` USDT, and `status=closed`.
+- `ops risk-change-check --target-leverage 8` currently returns
+  `keep_current_profile` because BNBUSDT is still open, protected by two algo
+  orders, and its submitted intent event `138150` has no persisted outcome yet.
 
 ## Next Command
 
-Observe the current BNBUSDT live position under the 30U/5x profile. After it
-closes, run `ops trade-outcome --symbol BNBUSDT --persist` before any further
-risk-limit or leverage increase.
+After BNBUSDT closes, run `ops trade-outcome --symbol BNBUSDT --persist`, then
+rerun `ops risk-change-check --target-leverage 8` before changing the live
+profile.
 
 ## Session
 
@@ -98,16 +101,17 @@ risk-limit or leverage increase.
 
 ## Current Position
 
-Phase: Phase 21 - Closed Trade Outcome Reconciliation
-Plan: 21-01 complete
-Status: `ops trade-outcome` deployed; ZECUSDT outcome persisted; timer active;
-current BNBUSDT LONG is protected by stop-loss and take-profit algo orders
-Last activity: 2026-06-20 - Phase 21 verified
+Phase: Phase 22 - Risk Change Readiness Gate
+Plan: 22-01 complete
+Status: `ops risk-change-check` deployed; current BNBUSDT LONG blocks an 8x
+target with `keep_current_profile`
+Last activity: 2026-06-20 - Phase 22 verified
 
 ## Operator Next Steps
 
 - Observe the current BNBUSDT live position and its protective orders.
 - Run `ops trade-outcome --symbol BNBUSDT --persist` after BNBUSDT closes.
+- Rerun `ops risk-change-check --target-leverage 8` before any leverage change.
 - Do not raise leverage/risk caps while a live position is open unless
   explicitly reviewed.
 - Run `ops resume-check` before any future manual timer resume.

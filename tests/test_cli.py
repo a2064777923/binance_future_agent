@@ -740,6 +740,37 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "keep_paused")
         self.assertIn("exchange_evidence_missing", payload["reasons"])
 
+    def test_ops_risk_change_check_requires_exchange_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "risk-change-check",
+                "--skip-binance",
+                "--target-leverage",
+                "8",
+                "--db",
+                str(db_path),
+                env={
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_MAX_LEVERAGE": "5",
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertFalse(payload["risk_change_allowed"])
+        self.assertEqual(payload["status"], "keep_current_profile")
+        self.assertEqual(payload["target_leverage"], 8)
+        self.assertEqual(payload["current_max_leverage"], 5.0)
+        self.assertIn("exchange_evidence_missing", payload["reasons"])
+
     def test_ops_trade_outcome_persists_latest_submitted_trade(self):
         class FakeSignedClient:
             def user_trades(self, symbol, *, start_time=None, limit=500):

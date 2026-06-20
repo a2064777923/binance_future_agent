@@ -92,6 +92,8 @@ control of downside.
   exchange positions, normal orders, algo orders, and AI backoff are clear.
 - Phase 21 adds closed-trade outcome reconciliation from Binance fills and
   persists net-of-commission fill/outcome evidence idempotently.
+- Phase 22 adds a read-only readiness gate before any leverage or risk-cap
+  profile change.
 
 ### Active
 
@@ -128,6 +130,8 @@ control of downside.
 - [x] Gate future timer resume with read-only exchange and AI-backoff checks.
 - [x] Persist closed live trade fill/outcome evidence with gross PnL,
   commission, net PnL, and closed/open status.
+- [x] Gate leverage/risk-cap profile changes on clear exchange state and
+  reconciled submitted-trade outcomes.
 
 ### Out of Scope
 
@@ -193,7 +197,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 21 are complete and verified. The project is installable as an
+Phases 1 through 22 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -208,6 +212,7 @@ explicit configurable margin mode, explicit position mode, account-balance
 preflight, DeepSeek support, and 30U/5x trial runtime caps.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
+Phase 22 adds a stricter gate for leverage/risk-cap changes.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -299,7 +304,7 @@ protected ZECUSDT position, then returned `resume_allowed` after the position
 and algo orders cleared. The timer was re-enabled, and the first resumed cycle
 plus the next scheduled cycle submitted no order.
 
-## Current Milestone: v1.13 Closed Trade Outcome Reconciliation
+## Previous Milestone: v1.13 Closed Trade Outcome Reconciliation
 
 **Goal:** Turn completed live trades into replayable fill/outcome records with
 net PnL after commission.
@@ -314,6 +319,21 @@ net PnL after commission.
 outcome, net realized PnL `0.1078528` USDT, and repeat reconciliation inserts
 no duplicates. The current BNBUSDT live position remains protected and should be
 reconciled after it closes.
+
+## Current Milestone: v1.14 Risk Change Readiness Gate
+
+**Goal:** Prevent leverage or risk-cap changes unless the exchange state is
+clear and submitted live trades have outcome evidence.
+
+**Target features:**
+- Add `ops risk-change-check`.
+- Block profile changes when positions, normal orders, algo orders, AI backoff,
+  or missing exchange evidence are present.
+- Block profile changes when submitted order intents lack persisted outcomes.
+- Preserve read-only behavior; do not mutate env or exchange state.
+
+**Status:** Complete. Current live BNBUSDT position does cause the gate to
+return `keep_current_profile` for an 8x target.
 
 ## Key Decisions
 
@@ -341,8 +361,9 @@ reconciled after it closes.
 | Switch to 30U/5x trial profile | User wants to fund 30 USDT for a first live trial; higher leverage is allowed only with tighter absolute notional/loss/concurrency caps. | Phase 19 complete; timer paused for open-position review |
 | Gate timer resume with exchange state | Timer resume should be a read-only decision based on live positions, open orders, algo orders, and AI backoff rather than manual JSON interpretation. | Phase 20 complete |
 | Persist closed-trade outcomes | Live strategy changes need net-of-fee realized PnL evidence, not only submitted order records. | Phase 21 complete |
+| Gate risk profile changes | Higher leverage should require clear exchange state and reconciled trade outcomes, not just operator intent. | Phase 22 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.13 closed-trade outcome reconciliation.*
+*Last updated: 2026-06-20 after verifying v1.14 risk-change readiness gate.*

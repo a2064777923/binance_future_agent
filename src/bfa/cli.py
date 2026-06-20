@@ -34,6 +34,7 @@ from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.live_status import build_live_status_report
+from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.store import persist_candidates
@@ -302,6 +303,19 @@ def _build_parser() -> argparse.ArgumentParser:
     trade_outcome.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     trade_outcome.add_argument("--symbol", help="optional symbol filter, e.g. ZECUSDT")
     trade_outcome.add_argument("--persist", action="store_true", help="persist fills and outcome into the event store")
+
+    risk_change_check = ops_subparsers.add_parser(
+        "risk-change-check",
+        help="read-only gate for deciding whether leverage/risk caps may be changed",
+    )
+    risk_change_check.add_argument("--env-file", help="optional env file to load before environment overrides")
+    risk_change_check.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    risk_change_check.add_argument("--target-leverage", type=int, help="optional proposed new max leverage")
+    risk_change_check.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
 
     agent = subparsers.add_parser(
         "agent",
@@ -725,6 +739,15 @@ def _run_ops(
         payload = {"found": outcome is not None, "outcome": outcome.to_dict() if outcome else None}
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return 0 if outcome is not None else 1
+    if args.ops_command == "risk-change-check":
+        report = build_risk_change_check_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            target_leverage=args.target_leverage,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.risk_change_allowed else 1
     return 2
 
 
