@@ -21,6 +21,9 @@
 - ✅ **v1.24 Server Readiness And Paper Promotion** — Phases 53-55,
   shipped 2026-06-21 ([archive](milestones/v1.24-ROADMAP.md)).
 
+- ◆ **v1.25 Live Resume Clearance And Adaptive Pilot** — Phases 56-60,
+  active.
+
 ## Phases
 
 <details>
@@ -108,6 +111,99 @@
 
 </details>
 
+<details open>
+<summary>◆ v1.25 Live Resume Clearance And Adaptive Pilot (Phases 56-60) — ACTIVE</summary>
+
+- [ ] Phase 56: Exposure Clearance And Manual Loss Intake (0/1 plan)
+- [ ] Phase 57: Adaptive Forward-Paper Observation (0/1 plan)
+- [ ] Phase 58: Promotion Matrix And Loss Review (0/1 plan)
+- [ ] Phase 59: Confirmation-Gated Live Resume Path (0/1 plan)
+- [ ] Phase 60: Server Evidence And Pilot Resume Packet (0/1 plan)
+
+</details>
+
+## Active Phase Details
+
+**Phase 56: Exposure Clearance And Manual Loss Intake**
+
+Goal: Make the current `resolve_exposure` blocker actionable and capture manual
+liquidation/failure cases as structured evidence before any live resume.
+
+Requirements: EXP-01, EXP-02, EXP-03, LOSS-01
+
+Success criteria:
+1. Read-only exposure clearance command/report classifies exchange positions,
+   normal orders, algo orders, and local intents as agent-managed, manual,
+   stale-attributed, or unknown.
+2. The report explains symbol-level blockers and non-mutating next actions.
+3. Operator resume decision can consume or align with exposure clearance state.
+4. Manual liquidation/failure incidents can be captured without secrets and
+   without changing exchange or server runtime state.
+
+**Phase 57: Adaptive Forward-Paper Observation**
+
+Goal: Turn zero-signal guarded paper runs into diagnosable observation while
+keeping live trading disabled.
+
+Requirements: STRAT-02, STRAT-03, DATA-01, DATA-02
+
+Success criteria:
+1. Forward-paper runs record generated signals, skip reasons, guard blocks, and
+   setup factor snapshots for broad hot-symbol universes.
+2. Paper-only exploration can shadow rejected candidates without creating live
+   order intents.
+3. Auto-hot observation covers at least 40 current USDT USD-M symbols while the
+   live allowlist remains separate.
+4. Source-health evidence explains whether Square/manual/RSS/social fallback
+   sources contributed to hotness.
+
+**Phase 58: Promotion Matrix And Loss Review**
+
+Goal: Re-test current strategy variants and compare manual loss incidents
+against deterministic guard/risk rules.
+
+Requirements: STRAT-01, STRAT-04, LOSS-02, RISK-02
+
+Success criteria:
+1. Current-data matrix runs with completed candles, next-candle entries, fees,
+   slippage, and small-account caps.
+2. Promotion check distinguishes collect-more-paper, forward-paper candidate,
+   and live-resume eligibility.
+3. Manual loss incidents are compared against setup and risk guards.
+4. Public Lana/Square/X claims remain design inputs, not promotion evidence.
+
+**Phase 59: Confirmation-Gated Live Resume Path**
+
+Goal: Build the mutation path for live resume, but keep it locked behind
+readiness and confirmation.
+
+Requirements: LIVE-01, LIVE-02, RISK-01
+
+Success criteria:
+1. Operator can preview target profile, timer/service changes, readiness
+   artifact, and confirmation token without mutation.
+2. Confirmed resume refuses to mutate unless the operator packet is
+   `eligible_for_operator_resume`.
+3. The `30u_10x_multi_dynamic` path remains bounded by portfolio, notional,
+   margin, concentration, per-trade risk, and daily-loss caps.
+
+**Phase 60: Server Evidence And Pilot Resume Packet**
+
+Goal: Deploy and verify the v1.25 controls on the isolated server, then produce
+an operator packet that either keeps live paused or prepares a separate
+operator-confirmed resume.
+
+Requirements: LIVE-03, RISK-03
+
+Success criteria:
+1. Server deployment is scoped to `/opt/binance-futures-agent` and
+   `/etc/binance-futures-agent`.
+2. Local and server tests pass after deployment.
+3. Live service/timer state and paper timer state are recorded before and after
+   deployment.
+4. Any resumed live cycle records active-position review, adjustment-plan,
+   entry-capacity preflight, and trace identifiers.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
@@ -117,6 +213,7 @@
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
+| v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 0/5 | Active | - |
 
 ## Requirement Coverage
 
@@ -125,10 +222,10 @@
 - v1.22 requirements: archived at `.planning/milestones/v1.22-REQUIREMENTS.md`
 - v1.23 requirements: archived at `.planning/milestones/v1.23-REQUIREMENTS.md`
 - v1.24 requirements: archived at `.planning/milestones/v1.24-REQUIREMENTS.md`
+- v1.25 requirements: `.planning/REQUIREMENTS.md`
 
 ## Next Step
 
-Start the next milestone with `$gsd-new-milestone`. Live automation remains
-paused: the v1.24 operator packet currently returns `resolve_exposure`, not
-live eligibility, with manual/unattributed `ETHUSDT` and `BTWUSDT` exposure
-plus insufficient guarded paper evidence.
+Plan Phase 56 with `$gsd-plan-phase 56`. Live automation remains paused until
+exposure clearance, strategy/paper gates, server state, and a separate
+operator-confirmed resume path all pass.

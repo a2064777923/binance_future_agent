@@ -21,6 +21,13 @@ access is less stable than futures market APIs.
 small notional, low leverage, daily loss stop, kill switch, and complete
 journaling.
 
+**v1.25 update:** The public Lana/Square/X material remains incomplete and
+cannot prove profitability. The useful reproducible pattern is a hot-symbol
+engine with broad observation, deterministic multi-factor setup scoring,
+paper/backtest promotion gates, and fast post-trade review. Screenshots of
+small-capital gains should be treated as unverified narrative inputs, not as
+strategy evidence.
+
 ## Implications For Roadmap
 
 1. Build isolated project scaffolding and secret hygiene first.
@@ -30,6 +37,11 @@ journaling.
 4. Build storage and replay before live execution.
 5. Add OpenAI decisions only after candidate packets are deterministic.
 6. Add live execution last, behind risk gates and server isolation.
+7. For live resume, clear manual/unattributed exposure first, then require
+   post-change paper outcomes and a separate operator confirmation before any
+   timer/profile mutation.
+8. Keep AI on the slow path as an overlay/veto. Entry side, point geometry,
+   sizing, stop, target, and hold-time must remain deterministic and traceable.
 
 ## Sources
 
@@ -41,3 +53,6 @@ journaling.
   recommended structured-output API shape.
 - Existing stock repository codebase map used only as architectural inspiration,
   not as an implementation dependency.
+- User-provided June 2026 screenshot of Square/X discussion around Lana-style
+  AI futures trading, used only for design themes: hot narratives, AI overlay,
+  small-capital compounding claims, and operator-visible review.

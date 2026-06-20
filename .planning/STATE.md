@@ -1,27 +1,23 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.24
-milestone_name: Server Readiness And Paper Promotion
-current_phase: v1.24 — Server Readiness And Paper Promotion
-status: completed
-stopped_at: v1.24 milestone archived; ready for next milestone planning.
-last_updated: "2026-06-21T02:40:38+08:00"
+milestone: v1.25
+milestone_name: Live Resume Clearance And Adaptive Pilot
+status: planning
+last_updated: "2026-06-21T02:53:42+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Milestone v1.24 completed and archived
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
-current_phase_name: Milestone Archived
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** v1.24 — Server Readiness And Paper Promotion
-**Status:** v1.24 milestone complete
+**Current phase:** Phase 56 — Exposure Clearance And Manual Loss Intake
+**Status:** v1.25 planning active
 **Last planned:** 2026-06-21
 **Plan count:** 3
 
@@ -32,9 +28,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Start the next milestone. Live automation remains paused
-because the archived v1.24 packet returns `resolve_exposure`, not live
-eligibility.
+**Current focus:** Plan and execute Phase 56 so exposure blockers and manual
+loss incidents are classified before any live-resume mutation is considered.
 
 ## Decisions
 
@@ -63,6 +58,11 @@ eligibility.
 - v1.24 direction: move the readiness workflow onto the isolated server, collect
   guarded post-change paper evidence, and produce an operator-facing resume
   decision packet before any separate live resume confirmation flow.
+
+- v1.25 direction: clear manual/unattributed exposure, capture manual
+  liquidation/failure lessons, restore productive paper evidence collection,
+  and build a separate confirmation-gated live resume path only after the
+  operator packet is eligible.
 
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -581,24 +581,23 @@ eligibility.
 
 ## Next Command
 
-Run `$gsd-new-milestone` to define the next milestone. Keep live automation
-disabled. Do not enable unattended live auto-hot, restore live automation,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while the archived
-v1.24 operator packet remains `resolve_exposure`.
+Run `$gsd-plan-phase 56` for exposure clearance and manual loss intake. Keep
+live automation disabled until exposure, strategy, paper, server, and separate
+operator-confirmation gates pass.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** v1.24 requirements and roadmap initialized.
-**Resume file:** .planning/milestones/v1.24-REQUIREMENTS.md
+**Stopped at:** v1.25 requirements and roadmap initialized.
+**Resume file:** .planning/REQUIREMENTS.md
 
 ## Current Position
 
-Phase: Milestone v1.24 complete
+Phase: 56 — Exposure Clearance And Manual Loss Intake
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-21 — Milestone v1.24 completed and archived
+Status: Ready to plan
+Last activity: 2026-06-21 — Milestone v1.25 roadmap initialized
 
 ## Operator Next Steps
 
-- Start the next milestone with `$gsd-new-milestone`.
+- Plan Phase 56 with `$gsd-plan-phase 56`.

@@ -209,6 +209,22 @@ control of downside.
 - [x] Produce a single operator-facing resume decision packet that separates
   "collect more paper evidence" from "eligible for separately confirmed live
   resume".
+- [ ] Resolve or explicitly classify manual/unattributed exchange exposure so
+  live-resume readiness no longer mixes operator trades with agent evidence.
+- [ ] Make guarded paper evidence productive again by broadening observation,
+  exposing skip reasons, and supporting paper-only exploration when strict
+  guards generate zero signals.
+- [ ] Re-run current-data matrix and forward-paper promotion gates before any
+  live resume, using completed candles, fees, slippage, small-account caps, and
+  post-change evidence boundaries.
+- [ ] Capture user/manual liquidation incidents as structured learning input
+  and compare them with deterministic setup and risk guards.
+- [ ] Add a separate confirmation-gated live resume path that can only enable
+  the target profile/timer after exposure, strategy, paper, server, and
+  operator-confirmation gates pass.
+- [ ] Keep Lana/public hot-coin claims as design inspiration only; all promotion
+  and sizing decisions must come from local backtest, paper, exchange, and live
+  outcome evidence.
 
 ### Out of Scope
 
@@ -274,8 +290,8 @@ The user's chosen direction:
 
 ## Current State
 
-Milestones v1.0, v1.21, v1.22, and v1.23 are archived. Phases 1 through 52 are
-complete, and the current server deployment is installed under the isolated
+Milestones v1.0, v1.21, v1.22, v1.23, and v1.24 are archived. Phases 1 through
+55 are complete, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
@@ -380,6 +396,26 @@ readiness artifact returns `status=resolve_exposure`, not live eligibility,
 with grouped strategy, paper, exchange/manual exposure, risk-profile, and
 confirmation blockers. It is read-only and cannot restore timers, apply
 profiles, create order intents, or place/cancel Binance orders.
+
+## Current Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
+
+**Goal:** Clear the current live-resume blockers, make paper evidence generate
+useful post-change samples again, and prepare a separately confirmed small live
+pilot resume path only after the evidence gates pass.
+
+**Target features:**
+- Classify current exchange/manual/unattributed exposure into an operator-facing
+  clearance packet without placing or canceling orders.
+- Broaden and instrument forward-paper collection so hot-symbol exploration
+  records signals, skips, guard blocks, and outcomes across a larger universe.
+- Recalibrate promotion evidence from current matrix and post-change
+  forward-paper runs before any live timer/profile change.
+- Capture manual failure cases, including liquidation, as structured incidents
+  for strategy/risk review.
+- Add a confirmation-gated live resume command/runbook that refuses to mutate
+  server timers, env, or Binance state unless the operator decision is eligible.
+- Deploy and collect server evidence while preserving isolation under
+  `/opt/binance-futures-agent` and keeping `F:\stock` untouched.
 
 ## Previous Milestone: v1.8 Position Mode And Entry Fail-Closed
 
@@ -682,6 +718,8 @@ remains paused.
 | Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | Phase 53 complete |
 | Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | Phase 54 complete; evidence not promoted |
 | Operator packet before live | Readiness JSON needs one operator-facing next action before any separate live resume confirmation flow is prepared. | Phase 55 complete; current packet says `resolve_exposure` |
+| Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 active |
+| Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | v1.25 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -705,4 +743,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after archiving v1.24 milestone.*
+*Last updated: 2026-06-21 after starting v1.25 milestone.*
