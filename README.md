@@ -85,6 +85,18 @@ The server deployment lives under `/opt/binance-futures-agent` with env at
 `/etc/binance-futures-agent/env` and a dedicated
 `binance-futures-agent.service` oneshot health-check unit.
 
+## Live Outcome Reconciliation
+
+Closed live trades can be reconstructed from signed Binance `userTrades` and
+persisted into the event store. Use the sweep command after protected live
+positions close; it skips already closed outcomes and writes only final closed
+results when `--persist-closed` is set.
+
+```bash
+python -m bfa.cli ops reconcile-outcomes --env-file .env --db runtime/agent.sqlite --persist-closed
+python -m bfa.cli ops risk-change-check --env-file .env --db runtime/agent.sqlite --target-leverage 8
+```
+
 ## Small-Capital Backtesting
 
 The project now includes a short-window backtest harness for the hot-momentum

@@ -26,6 +26,7 @@
 - ✅ **v1.13 Closed Trade Outcome Reconciliation** — Phase 21, completed 2026-06-20.
 - ✅ **v1.14 Risk Change Readiness Gate** — Phase 22, completed 2026-06-20.
 - ✅ **v1.15 Closed Outcome Risk Change Strictness** — Phase 23, completed 2026-06-20.
+- ✅ **v1.16 Outcome Reconciliation Sweep** — Phase 24, completed 2026-06-20.
 
 ## Phases
 
@@ -394,6 +395,29 @@ intents.
 4. Server read-only verification still blocks the 8x target while BNBUSDT lacks
    a closed outcome.
 
+### Phase 24: Outcome Reconciliation Sweep
+
+**Goal:** Add a one-shot operator sweep that reconciles all submitted live trade
+intents and persists only final closed outcomes.
+
+**Requirements:** ORS-01, ORS-02, ORS-03
+
+**Status:** Complete. The command is deployed on the server, skips already
+reconciled ZECUSDT, reports the current BNBUSDT position as `open_or_partial`,
+and inserts no outcome until the trade is finally closed.
+
+**Success Criteria:**
+
+1. `ops reconcile-outcomes` scans submitted live order intents from the event
+   store and reads Binance fills with signed `userTrades`.
+2. Submitted intents that already have `outcome:{event_id}:closed` are skipped
+   by default.
+3. `--persist-closed` writes fills and outcomes only when the summarized result
+   is `closed`.
+4. `open_or_partial` results are reported but not persisted by default.
+5. Unit, CLI, local full-suite, server full-suite, and live read-only sweep
+   verification pass.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -421,16 +445,17 @@ intents.
 | 21 | v1.13 | 1/1 | Complete | 2026-06-20 |
 | 22 | v1.14 | 1/1 | Complete | 2026-06-20 |
 | 23 | v1.15 | 1/1 | Complete | 2026-06-20 |
+| 24 | v1.16 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.15 requirements: 51
-- Mapped: 51
+- v1.1-v1.16 requirements: 54
+- Mapped: 54
 - Unmapped: 0
 
 ## Next Step
 
 Observe the current BNBUSDT live position. After it closes, run
-`ops trade-outcome --symbol BNBUSDT --persist`, then rerun
+`ops reconcile-outcomes --persist-closed`, then rerun
 `ops risk-change-check --target-leverage 8`; only if it returns
-`risk_change_allowed=true` should the server profile be changed.
+`risk_change_allowed=true` should a later phase change the server profile.

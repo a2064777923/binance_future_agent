@@ -225,6 +225,19 @@ v1.0 requirements are archived at
   reconciled only when they have a final `closed` outcome; `open_or_partial`
   outcomes remain blocking.
 
+### Outcome Reconciliation Sweep
+
+- [x] **ORS-01**: Provide an `ops reconcile-outcomes` command that scans
+  submitted live order intents and reconstructs their outcomes from read-only
+  Binance `userTrades`.
+
+- [x] **ORS-02**: The sweep skips submitted intents that already have
+  `outcome:{event_id}:closed` unless explicitly requested.
+
+- [x] **ORS-03**: With `--persist-closed`, the sweep persists fills and outcome
+  artifacts only for final `closed` results; `open_or_partial` results remain
+  report-only by default.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -289,13 +302,16 @@ v1.0 requirements are archived at
 | RCG-02 | Phase 22 | Complete - live BNBUSDT active protected position blocks an 8x target with `keep_current_profile` |
 | RCG-03 | Phase 22 | Complete - BNBUSDT submitted intent without an outcome blocks profile changes until reconciled |
 | RCG-04 | Phase 23 | Complete - partial/open outcomes do not clear submitted intents for profile changes |
+| ORS-01 | Phase 24 | Complete - `ops reconcile-outcomes` scans submitted intents and reads signed Binance `userTrades` |
+| ORS-02 | Phase 24 | Complete - ZECUSDT closed outcome is skipped by default in the server sweep |
+| ORS-03 | Phase 24 | Complete - BNBUSDT open/partial sweep reported status without inserting fills or outcomes |
 
 **Coverage:**
 
-- v1.1-v1.15 requirements: 51 total
-- Mapped to phases: 51
+- v1.1-v1.16 requirements: 54 total
+- Mapped to phases: 54
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.15 closed-outcome risk-change strictness*
+*Last updated: 2026-06-20 after verifying v1.16 outcome reconciliation sweep*

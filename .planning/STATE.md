@@ -1,27 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.15
-milestone_name: Closed Outcome Risk Change Strictness
-current_phase: Phase 23 - Closed Outcome Risk Change Strictness
+milestone: v1.16
+milestone_name: Outcome Reconciliation Sweep
+current_phase: Phase 24 - Outcome Reconciliation Sweep
 status: completed
-stopped_at: Phase 23 verified; partial outcomes cannot unlock leverage/risk changes
-last_updated: "2026-06-20T12:24:00.000+08:00"
+stopped_at: Phase 24 verified; outcome sweep reports BNBUSDT open/partial without persisting it
+last_updated: "2026-06-20T12:42:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Closed-outcome strictness deployed and verified for risk-change readiness
+last_activity_desc: Outcome reconciliation sweep deployed and verified against live server state
 progress:
-  total_phases: 15
-  completed_phases: 15
-  total_plans: 15
-  completed_plans: 15
+  total_phases: 16
+  completed_phases: 16
+  total_plans: 16
+  completed_plans: 16
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 23 - Closed Outcome Risk Change Strictness
-**Status:** v1.15 complete; partial/open outcomes must not unlock
-leverage/risk-cap profile changes
+**Current phase:** Phase 24 - Outcome Reconciliation Sweep
+**Status:** v1.16 complete; submitted-outcome sweep is available and verified
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -86,12 +85,15 @@ projects or losing control of downside.
 - `ops risk-change-check --target-leverage 8` currently returns
   `keep_current_profile` because BNBUSDT is still open, protected by two algo
   orders, and its submitted intent event `138150` has no persisted outcome yet.
+- `ops reconcile-outcomes --persist-closed` is deployed and verified on the
+  server. It skipped already reconciled ZECUSDT, checked BNBUSDT, reported
+  `open_or_partial`, and inserted no new fills or outcomes while BNBUSDT
+  remains open.
 
 ## Next Command
 
-After BNBUSDT closes, run `ops trade-outcome --symbol BNBUSDT --persist`, then
-rerun `ops risk-change-check --target-leverage 8` before changing the live
-profile.
+After BNBUSDT closes, run `ops reconcile-outcomes --persist-closed`, then rerun
+`ops risk-change-check --target-leverage 8` before changing the live profile.
 
 ## Session
 
@@ -101,16 +103,16 @@ profile.
 
 ## Current Position
 
-Phase: Phase 23 - Closed Outcome Risk Change Strictness
-Plan: 23-01 complete
-Status: risk-change gate now requires `closed` outcomes before submitted
-intents are considered reconciled for profile changes
-Last activity: 2026-06-20 - Phase 23 verified
+Phase: Phase 24 - Outcome Reconciliation Sweep
+Plan: 24-01 complete
+Status: outcome sweep command is deployed and verified; BNBUSDT remains
+open/partial and continues to block risk changes
+Last activity: 2026-06-20 - Phase 24 verified
 
 ## Operator Next Steps
 
 - Observe the current BNBUSDT live position and its protective orders.
-- Run `ops trade-outcome --symbol BNBUSDT --persist` after BNBUSDT closes.
+- Run `ops reconcile-outcomes --persist-closed` after BNBUSDT closes.
 - Rerun `ops risk-change-check --target-leverage 8` before any leverage change.
 - Do not raise leverage/risk caps while a live position is open unless
   explicitly reviewed.

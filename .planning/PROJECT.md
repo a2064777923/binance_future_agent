@@ -96,6 +96,8 @@ control of downside.
   profile change.
 - Phase 23 tightens that readiness gate so only final closed outcomes satisfy
   submitted-trade reconciliation.
+- Phase 24 adds a sweep command that scans submitted live intents, skips
+  already closed outcomes, and persists only final closed results.
 
 ### Active
 
@@ -134,6 +136,8 @@ control of downside.
   commission, net PnL, and closed/open status.
 - [x] Gate leverage/risk-cap profile changes on clear exchange state and
   reconciled submitted-trade outcomes.
+- [x] Sweep submitted live trade intents and persist only final closed outcomes
+  from Binance fill history.
 
 ### Out of Scope
 
@@ -199,7 +203,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 23 are complete and verified. The project is installable as an
+Phases 1 through 24 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -215,7 +219,9 @@ preflight, DeepSeek support, and 30U/5x trial runtime caps.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
 Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
-that gate to require final closed outcomes.
+that gate to require final closed outcomes. Phase 24 adds
+`ops reconcile-outcomes` so submitted live trades can be swept and closed
+outcomes persisted without symbol-by-symbol manual commands.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -232,7 +238,9 @@ the live timer was re-enabled. The first resumed cycles submitted no order, then
 a later timer cycle opened a separate BNBUSDT LONG under the 30U/5x profile.
 Current live-status shows that BNBUSDT position has exchange-visible stop-loss
 and take-profit algo orders; it has not yet been outcome-reconciled because it
-is still open.
+is still open. Phase 24 server verification swept submitted outcomes, skipped
+the already reconciled ZECUSDT trade, reported BNBUSDT as `open_or_partial`,
+and inserted no new fills or outcomes.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -338,7 +346,7 @@ clear and submitted live trades have outcome evidence.
 **Status:** Complete. Current live BNBUSDT position does cause the gate to
 return `keep_current_profile` for an 8x target.
 
-## Current Milestone: v1.15 Closed Outcome Risk Change Strictness
+## Previous Milestone: v1.15 Closed Outcome Risk Change Strictness
 
 **Goal:** Ensure partial/open outcome artifacts cannot unlock leverage or
 risk-cap profile changes.
@@ -351,6 +359,20 @@ risk-cap profile changes.
 **Status:** Complete. Partial/open outcome artifacts remain blocking; submitted
 intents require a final `closed` outcome before risk profile changes are
 allowed.
+
+## Current Milestone: v1.16 Outcome Reconciliation Sweep
+
+**Goal:** Make submitted-trade outcome cleanup a one-shot sweep instead of a
+manual symbol-by-symbol operation.
+
+**Target features:**
+- Add `ops reconcile-outcomes`.
+- Skip submitted intents that already have a final closed outcome.
+- Persist only `closed` outcomes when `--persist-closed` is used.
+- Keep open/partial outcomes report-only by default.
+
+**Status:** Complete. Server sweep shows ZECUSDT already reconciled and
+BNBUSDT still open/partial, with no new local fills or outcomes inserted.
 
 ## Key Decisions
 
@@ -380,8 +402,9 @@ allowed.
 | Persist closed-trade outcomes | Live strategy changes need net-of-fee realized PnL evidence, not only submitted order records. | Phase 21 complete |
 | Gate risk profile changes | Higher leverage should require clear exchange state and reconciled trade outcomes, not just operator intent. | Phase 22 complete |
 | Require closed outcomes before risk changes | Partial/open accounting should not unlock higher leverage. | Phase 23 complete |
+| Sweep submitted outcomes before risk changes | Operators should not need symbol-specific one-off commands to clear closed outcome evidence after positions exit. | Phase 24 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.15 closed-outcome risk-change strictness.*
+*Last updated: 2026-06-20 after verifying v1.16 outcome reconciliation sweep.*

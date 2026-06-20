@@ -25,7 +25,7 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
-from bfa.execution.outcome import build_latest_trade_outcome
+from bfa.execution.outcome import build_latest_trade_outcome, reconcile_submitted_trade_outcomes
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.market.snapshot_writer import write_jsonl_snapshots
@@ -303,6 +303,25 @@ def _build_parser() -> argparse.ArgumentParser:
     trade_outcome.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     trade_outcome.add_argument("--symbol", help="optional symbol filter, e.g. ZECUSDT")
     trade_outcome.add_argument("--persist", action="store_true", help="persist fills and outcome into the event store")
+
+    reconcile_outcomes = ops_subparsers.add_parser(
+        "reconcile-outcomes",
+        help="sweep submitted trade intents and reconcile closed outcomes from read-only Binance fills",
+    )
+    reconcile_outcomes.add_argument("--env-file", help="optional env file to load before environment overrides")
+    reconcile_outcomes.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    reconcile_outcomes.add_argument("--symbol", help="optional symbol filter, e.g. BNBUSDT")
+    reconcile_outcomes.add_argument(
+        "--persist-closed",
+        action="store_true",
+        help="persist fills/outcomes only for trades that summarize as closed",
+    )
+    reconcile_outcomes.add_argument(
+        "--include-reconciled",
+        action="store_true",
+        help="also fetch submitted intents that already have a closed outcome",
+    )
+    reconcile_outcomes.add_argument("--limit", type=int, default=500, help="maximum userTrades rows per intent")
 
     risk_change_check = ops_subparsers.add_parser(
         "risk-change-check",
@@ -739,6 +758,32 @@ def _run_ops(
         payload = {"found": outcome is not None, "outcome": outcome.to_dict() if outcome else None}
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return 0 if outcome is not None else 1
+    if args.ops_command == "reconcile-outcomes":
+        signed_client = _build_signed_client(config, signed_client_factory)
+        if signed_client is None:
+            payload = {
+                "found": False,
+                "report": None,
+                "error": "BFA_MODE must be live or testnet for ops reconcile-outcomes",
+            }
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+            return 1
+        connection = connect(args.db or config.get("BFA_DB_PATH"))
+        try:
+            store = EventStore(connection)
+            report = reconcile_submitted_trade_outcomes(
+                store,
+                signed_client,
+                symbol=args.symbol,
+                persist_closed=args.persist_closed,
+                include_reconciled=args.include_reconciled,
+                limit=args.limit,
+            )
+        finally:
+            connection.close()
+        payload = {"found": bool(report.items), "report": report.to_dict()}
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
+        return 0
     if args.ops_command == "risk-change-check":
         report = build_risk_change_check_report(
             config,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import json
 import sqlite3
@@ -12,7 +12,14 @@ from bfa.event_store.store import EventStore
 
 
 class TradeHistoryClient(Protocol):
-    def user_trades(self, symbol: str, *, start_time=None, limit: int = 500) -> list[dict[str, Any]]:
+    def user_trades(
+        self,
+        symbol: str,
+        *,
+        start_time=None,
+        end_time=None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
         ...
 
 
@@ -68,6 +75,62 @@ class TradeOutcome:
         }
 
 
+@dataclass(frozen=True)
+class TradeOutcomeSweepItem:
+    intent: LocalSubmittedIntent
+    status: str
+    fetched: bool
+    outcome: TradeOutcome | None = None
+    reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "intent": self.intent.to_dict(),
+            "status": self.status,
+            "fetched": self.fetched,
+            "reason": self.reason,
+            "outcome": self.outcome.to_dict() if self.outcome else None,
+        }
+
+
+@dataclass(frozen=True)
+class TradeOutcomeSweepReport:
+    persist_closed: bool
+    include_reconciled: bool
+    items: list[TradeOutcomeSweepItem] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "persist_closed": self.persist_closed,
+            "include_reconciled": self.include_reconciled,
+            "summary": {
+                "submitted_intents": len(self.items),
+                "checked": sum(1 for item in self.items if item.fetched),
+                "already_reconciled": sum(
+                    1 for item in self.items if item.status == "already_reconciled"
+                ),
+                "closed": sum(1 for item in self.items if item.status == "closed"),
+                "open_or_partial": sum(1 for item in self.items if item.status == "open_or_partial"),
+                "persisted_outcomes_inserted": sum(
+                    int((item.outcome.persisted or {}).get("outcome_inserted", 0))
+                    for item in self.items
+                    if item.outcome is not None
+                ),
+                "persisted_fills_inserted": sum(
+                    int((item.outcome.persisted or {}).get("fills", 0))
+                    for item in self.items
+                    if item.outcome is not None
+                ),
+                "existing_fills": sum(
+                    int((item.outcome.persisted or {}).get("fills_existing", 0))
+                    for item in self.items
+                    if item.outcome is not None
+                ),
+            },
+            "items": [item.to_dict() for item in self.items],
+        }
+
+
 def build_latest_trade_outcome(
     store: EventStore,
     client: TradeHistoryClient,
@@ -100,6 +163,52 @@ def build_latest_trade_outcome(
             persisted=persisted,
         )
     return outcome
+
+
+def reconcile_submitted_trade_outcomes(
+    store: EventStore,
+    client: TradeHistoryClient,
+    *,
+    symbol: str | None = None,
+    persist_closed: bool = False,
+    include_reconciled: bool = False,
+    limit: int = 500,
+) -> TradeOutcomeSweepReport:
+    intents = load_submitted_intents(store.connection, symbol=symbol)
+    items: list[TradeOutcomeSweepItem] = []
+    for index, intent in enumerate(intents):
+        if _has_closed_outcome_for_event(store.connection, intent.event_id) and not include_reconciled:
+            items.append(
+                TradeOutcomeSweepItem(
+                    intent=intent,
+                    status="already_reconciled",
+                    fetched=False,
+                    reason="closed_outcome_exists",
+                )
+            )
+            continue
+        trades = client.user_trades(
+            intent.symbol,
+            start_time=_iso_to_epoch_ms(intent.occurred_at),
+            end_time=_next_same_symbol_start_ms(intents, index),
+            limit=limit,
+        )
+        outcome = summarize_trade_outcome(intent, trades)
+        if persist_closed and outcome.status == "closed":
+            outcome = replace(outcome, persisted=persist_trade_outcome(store, outcome))
+        items.append(
+            TradeOutcomeSweepItem(
+                intent=intent,
+                status=outcome.status,
+                fetched=True,
+                outcome=outcome,
+            )
+        )
+    return TradeOutcomeSweepReport(
+        persist_closed=persist_closed,
+        include_reconciled=include_reconciled,
+        items=items,
+    )
 
 
 def load_latest_submitted_intent(
@@ -138,6 +247,47 @@ def load_latest_submitted_intent(
             leverage=int(intent.get("leverage", 0)),
         )
     return None
+
+
+def load_submitted_intents(
+    connection: sqlite3.Connection,
+    *,
+    symbol: str | None = None,
+) -> list[LocalSubmittedIntent]:
+    params: list[str] = []
+    where = ""
+    if symbol:
+        where = "WHERE symbol = ?"
+        params.append(symbol.upper())
+    rows = connection.execute(
+        f"""
+        SELECT event_id, occurred_at, symbol, payload_json
+        FROM order_intents
+        {where}
+        ORDER BY occurred_at ASC, id ASC
+        """,
+        params,
+    ).fetchall()
+    intents: list[LocalSubmittedIntent] = []
+    for row in rows:
+        payload = json.loads(str(row["payload_json"]))
+        if payload.get("status") != "submitted":
+            continue
+        intent = payload.get("intent")
+        if not isinstance(intent, Mapping):
+            continue
+        intents.append(
+            LocalSubmittedIntent(
+                event_id=int(row["event_id"]),
+                occurred_at=str(row["occurred_at"]),
+                symbol=str(row["symbol"] or intent.get("symbol", "")).upper(),
+                side=str(intent.get("side", "")).upper(),
+                quantity=float(intent.get("quantity", 0)),
+                entry_price=float(intent.get("entry_price", 0)),
+                leverage=int(intent.get("leverage", 0)),
+            )
+        )
+    return intents
 
 
 def summarize_trade_outcome(
@@ -238,6 +388,15 @@ def _iso_to_epoch_ms(value: str) -> int:
     return int(datetime.fromisoformat(normalized).timestamp() * 1000)
 
 
+def _next_same_symbol_start_ms(intents: list[LocalSubmittedIntent], current_index: int) -> int | None:
+    current = intents[current_index]
+    for later in intents[current_index + 1 :]:
+        if later.symbol != current.symbol:
+            continue
+        return max(_iso_to_epoch_ms(later.occurred_at) - 1, _iso_to_epoch_ms(current.occurred_at))
+    return None
+
+
 def _epoch_ms_to_iso(value: Any) -> str | None:
     try:
         return datetime.fromtimestamp(int(value) / 1000, tz=UTC).isoformat().replace("+00:00", "Z")
@@ -266,3 +425,7 @@ def _existing_event_id(connection: sqlite3.Connection, category: str, ref_id: st
     if row is None or row["event_id"] is None:
         return None
     return int(row["event_id"])
+
+
+def _has_closed_outcome_for_event(connection: sqlite3.Connection, event_id: int) -> bool:
+    return _existing_event_id(connection, "outcomes", f"outcome:{event_id}:closed") is not None

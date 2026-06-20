@@ -859,6 +859,127 @@ class CliTests(unittest.TestCase):
         self.assertEqual(fill_count, 2)
         self.assertEqual(outcome_count, 1)
 
+    def test_ops_reconcile_outcomes_persists_only_closed_outcomes(self):
+        class FakeSignedClient:
+            def user_trades(self, symbol, *, start_time=None, end_time=None, limit=500):
+                if symbol == "ZECUSDT":
+                    return [
+                        {
+                            "id": 10,
+                            "orderId": 100,
+                            "symbol": symbol,
+                            "side": "BUY",
+                            "qty": "0.032",
+                            "price": "467.68",
+                            "quoteQty": "14.96576",
+                            "realizedPnl": "0",
+                            "commission": "0.00748288",
+                            "commissionAsset": "USDT",
+                            "time": 1781923762837,
+                        },
+                        {
+                            "id": 11,
+                            "orderId": 101,
+                            "symbol": symbol,
+                            "side": "SELL",
+                            "qty": "0.032",
+                            "price": "471.49",
+                            "quoteQty": "15.08768",
+                            "realizedPnl": "0.12192",
+                            "commission": "0.00754384",
+                            "commissionAsset": "USDT",
+                            "time": 1781924000000,
+                        },
+                    ]
+                return [
+                    {
+                        "id": 20,
+                        "orderId": 200,
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "qty": "0.01",
+                        "price": "581.47",
+                        "quoteQty": "5.8147",
+                        "realizedPnl": "0",
+                        "commission": "0.00232588",
+                        "commissionAsset": "USDT",
+                        "time": 1781926994383,
+                    }
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-20T02:49:17Z",
+                source="execution.live",
+                symbol="ZECUSDT",
+                ref_id="order_intent:ZECUSDT:2026-06-20T02:49:17Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "ZECUSDT",
+                        "side": "BUY",
+                        "quantity": 0.032,
+                        "entry_price": 467.68,
+                        "leverage": 3,
+                    },
+                },
+                event_type="order_intent",
+            )
+            store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-20T03:43:09Z",
+                source="execution.live",
+                symbol="BNBUSDT",
+                ref_id="order_intent:BNBUSDT:2026-06-20T03:43:09Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "BNBUSDT",
+                        "side": "BUY",
+                        "quantity": 0.01,
+                        "entry_price": 581.47,
+                        "leverage": 5,
+                    },
+                },
+                event_type="order_intent",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "reconcile-outcomes",
+                "--db",
+                str(db_path),
+                "--persist-closed",
+                env={
+                    "BFA_MODE": "live",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+            check = sqlite3.connect(db_path)
+            try:
+                fill_count = check.execute("SELECT COUNT(*) FROM fills").fetchone()[0]
+                outcome_count = check.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0]
+            finally:
+                check.close()
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["report"]["summary"]["closed"], 1)
+        self.assertEqual(payload["report"]["summary"]["open_or_partial"], 1)
+        self.assertEqual(payload["report"]["summary"]["persisted_outcomes_inserted"], 1)
+        self.assertEqual(fill_count, 2)
+        self.assertEqual(outcome_count, 1)
+
     def test_backtest_fetch_klines_uses_fake_client_and_writes_dataset(self):
         class FakeClient:
             def __init__(self):
