@@ -329,9 +329,9 @@ The user's chosen direction:
   fees/slippage.
 - **Execution**: Live mode is allowed, but default code paths must start in
   dry-run/test mode and require explicit environment configuration for live.
-- **Risk**: Current live pilot caps are max 10x leverage, max 150 USDT
+- **Risk**: Current live pilot caps are max 10x leverage, max 200 USDT
   contract notional per bot-managed position, max 0.7 USDT risk per trade,
-  max 2 USDT daily loss, and max 16 bot-managed concurrent positions, with
+  max 2 USDT daily loss, and max 20 bot-managed concurrent positions, with
   portfolio margin/notional and same-direction caps still enforced. Contract
   notional is not the same as initial margin; approximate margin is
   `notional / leverage`.
@@ -351,8 +351,8 @@ The user's chosen direction:
 
 ## Current State
 
-Milestones v1.0, v1.21, v1.22, v1.23, and v1.24 are archived. Phases 1 through
-60 are complete, and the current server deployment is installed under the isolated
+Milestones v1.0, v1.21, v1.22, v1.23, v1.24, v1.25, and v1.26 are archived.
+Phases 1 through 65 are complete, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
@@ -406,10 +406,11 @@ secret-safe health check passed after deployment.
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
 out of band. The active trial profile is 45 USDT configured account capital,
-10x max leverage, 150 USDT max bot-managed position notional, 0.7 USDT max
-per-trade risk, 2 USDT max daily loss, and 16 bot-managed open positions under
-dynamic sizing and portfolio caps. Manual symbols such as `BTWUSDT` remain
-visible in diagnostics but do not consume bot entry capacity.
+10x max leverage, 200 USDT max bot-managed position notional, 0.7 USDT max
+per-trade risk, 2 USDT max daily loss, 20 bot-managed open positions,
+1600 USDT portfolio notional cap, and 1200 USDT same-direction notional cap
+under dynamic sizing and portfolio caps. Manual symbols such as `BTWUSDT`
+remain visible in diagnostics but do not consume bot entry capacity.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`
@@ -439,7 +440,9 @@ ZECUSDT, WLDUSDT, XRPUSDT, AVAXUSDT, BNBUSDT, DOGEUSDT, NEARUSDT, and ADAUSDT.
 The latest server forward-paper evidence is still negative: 212 paper signals,
 204 settled outcomes, win rate about `0.299`, total net PnL about `-7.245`
 USDT, and worst drawdown about `7.531` USDT for `quant_setup_selective` on
-`5m`. The paper timer remains active; live timer/service remain inactive.
+`5m`. The paper timer remains active. Live automation later resumed under the
+operator-approved pilot flow and currently runs through the live timer with
+one-shot services inactive between cycles.
 Phase 53 redeployed the current code to the isolated server and ran
 `ops live-resume-readiness` read-only. The server result is
 `status=keep_live_paused`, `live_resume_allowed=false`,
@@ -467,7 +470,7 @@ be considered cleared. Phase 56 also fixes a readiness false blocker so
 manual-symbol overrides only block when the symbol is actually active on the
 exchange.
 
-## Current Milestone: v1.26 Live Position Management And Pilot Learning (Complete, Pending Archive)
+## Completed Milestone: v1.26 Live Position Management And Pilot Learning
 
 **Goal:** Turn the running live pilot into an auditable position lifecycle
 system that can explain, plan, and safely execute agent-managed exits while
@@ -484,6 +487,18 @@ learning from closed live outcomes.
   lessons can adjust future guard recommendations.
 - Deploy and verify all v1.26 changes on the isolated server while preserving
   the live timer unless a safe deployment pause is required.
+
+**Status:** Complete and archived. Phases 61-65 are complete. The server canary
+packet is read-only, reports manual `BTWUSDT` separately from bot-managed
+capacity, and proves no order/env/systemd/risk/guard mutation during packet
+generation.
+
+## Next Milestone: v1.27 (Not Yet Defined)
+
+The next milestone should be defined with `$gsd-new-milestone` from the current
+server pilot evidence, live outcome ledger, widened capacity profile, and the
+operator's request for faster live iteration while preserving manual-position
+boundaries.
 
 ## Completed Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 
@@ -811,7 +826,7 @@ remains paused.
 | Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete; Phase 60 deployed |
 | Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | v1.26 complete through lifecycle, guarded exits, live outcome ledger, and pilot learning packet |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
-| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current configured pilot capital is 45 USDT with tight absolute loss caps. | Phase 65 complete |
+| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current configured pilot capital is 45 USDT with 10x leverage, 200 USDT per-position notional, 20 bot-managed positions, 0.7 USDT per-trade risk, and 2 USDT daily loss. | v1.26 archived |
 
 ## Evolution
 
@@ -833,4 +848,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 65 verification.*
+*Last updated: 2026-06-21 after v1.26 milestone archive.*

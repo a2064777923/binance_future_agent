@@ -1,5 +1,50 @@
 # Milestones
 
+## v1.26 Live Position Management And Pilot Learning (Shipped: 2026-06-21)
+
+**Phases completed:** 5 phases, 5 plans, 15 tasks
+
+**Archived artifacts:**
+
+- `.planning/milestones/v1.26-ROADMAP.md`
+- `.planning/milestones/v1.26-REQUIREMENTS.md`
+- `.planning/milestones/v1.26-MILESTONE-AUDIT.md`
+
+**Key accomplishments:**
+
+- Repaired close-review diagnostics so agent-managed positions expose exact
+  preconditions, exchange-filter state, urgency, and filter-aware close/reduce
+  candidates while manual `BTWUSDT` remains non-actionable.
+
+- Hardened operator-confirmed close/reduce execution with fresh plan tokens,
+  live-service guards, post-action position checks, and protective-order cleanup
+  deferral when cross-side algo orders make cleanup unsafe.
+
+- Persisted active-position lifecycle decisions before every live new-entry
+  scan and added dormant env-gated auto-management controls.
+
+- Added live outcome ledger with optional idempotent reconciliation,
+  attribution by symbol/side/setup/factor/exit/hold behavior, and
+  recommendation-only guard feedback.
+
+- Deployed the read-only pilot learning packet on the isolated server with
+  lifecycle, cap, exit, ledger, trace, manual-symbol, and mutation-proof
+  evidence.
+
+**Known deferred items at close:**
+
+- The pilot learning packet is an evidence bundle, not proof of strategy
+  profitability; future risk increases still require repeated positive live
+  outcomes, drawdown checks, and profit-factor gates.
+
+- Automatic position management exists but remains env-disabled unless the
+  operator explicitly enables it.
+
+- Manual `BTWUSDT` remains excluded from bot-managed entry capacity and
+  position-management actions.
+
+---
+
 ## v1.25 Live Resume Clearance And Adaptive Pilot (Shipped: 2026-06-21)
 
 **Phases completed:** 5 phases, 5 plans, 0 tasks

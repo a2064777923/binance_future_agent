@@ -337,13 +337,70 @@
 - The system should make trade-management decisions explicit enough that the
   operator can audit why a position is held, reviewed, reduced, or closed.
 
+## Milestone: v1.26 — Live Position Management And Pilot Learning
+
+**Shipped:** 2026-06-21
+**Phases:** 5
+**Plans:** 5
+
+### What Was Built
+
+- Close-review diagnostics and filter-aware close/reduce plan candidates for
+  agent-managed positions, while manual `BTWUSDT` stays non-actionable.
+- Guarded `ops position-adjustment-execute` behavior with fresh tokens,
+  live-service blocks, post-action size checks, and protective cleanup
+  deferral.
+- Live-cycle lifecycle persistence before new-entry scanning, plus dormant
+  env-gated auto-management controls.
+- `ops live-outcome-ledger` with attribution and recommendation-only guard
+  feedback.
+- Read-only `ops pilot-learning-packet` deployed to the isolated server with
+  lifecycle, cap, exit, ledger, trace, manual-symbol, and mutation-proof
+  evidence.
+
+### What Worked
+
+- The manual-position boundary held across lifecycle, entry-capacity, exit-plan,
+  execution-preview, and server packet flows.
+- The packet gave one operator-readable view of the live pilot without placing
+  orders, writing env files, changing systemd state, or applying guard/risk
+  changes.
+- Outcome attribution became useful enough to inform next-milestone scope
+  without pretending five closed outcomes prove profitability.
+
+### What Was Inefficient
+
+- Milestone archival tooling mis-counted all historical phases and plans during
+  the first close attempt, so v1.26 required a manual correction pass.
+- Several server evidence artifacts live under runtime paths and must be
+  regenerated when the current account state changes.
+- Auto-management is intentionally dormant, so the operator still needs a
+  separate decision before exits become unattended.
+
+### Patterns Established
+
+- Position stewardship must happen before entry generation in every live cycle.
+- Learning artifacts should include explicit mutation proof, not just "read-only"
+  prose.
+- Guard feedback should recommend changes but never apply strategy/risk changes
+  by itself.
+
+### Key Lessons
+
+- A readable active-position lifecycle is as important as a readable entry
+  decision for high-leverage futures.
+- Scaling caps because the bot can open more trades is different from proving
+  the strategy deserves more risk.
+- Archive tooling output must be checked against the milestone scope before it
+  becomes project history.
+
 ## Cross-Milestone Trends
 
 | Trend | Evidence | Next Action |
 |-------|----------|-------------|
 | Safety gates are moving from docs into code | Protective orders, kill switch, AI timeout, resume/risk-change/time-exit gates | Keep new live actions behind read-only preview plus confirmation |
 | External credentials are configured out of band | Binance and AI credentials are present on the server without being committed | Continue treating env files and keys as non-repo secrets |
-| Risk increases require evidence, not enthusiasm | HYPEUSDT/manual exposure and negative paper evidence block formal live resume; v1.25 caps were widened only within absolute portfolio/risk gates | Reconcile agent-managed positions after close, keep manual symbols classified, and use live outcomes plus paper evidence before further scale-up |
+| Risk increases require evidence, not enthusiasm | HYPEUSDT/manual exposure and negative paper evidence block formal live resume; v1.25/v1.26 caps were widened only within absolute portfolio/risk gates | Use live outcomes, packet evidence, paper evidence, drawdown, and profit factor before further scale-up |
 | Tiny-account futures constraints shape the product | Binance filters, notional-vs-margin, spread, and fees drive sizing | Keep tradability filters and staged backtests before further scaling |
-| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates; v1.24 adds the operator decision packet; v1.25 adds the confirmation-gated resume plan/apply path | Use `ops operator-resume-decision` before any formal resume apply, even when the operator-started live pilot is already running |
-| Manual positions need first-class isolation | ETH/ETHUSDT, BTWUSDT, and NEARUSDT evidence showed how quickly manual and bot exposure can mix | Keep manual symbols explicit and exclude them from bot-managed reduction/entry decisions |
+| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates; v1.24 adds the operator decision packet; v1.25 adds the confirmation-gated resume plan/apply path; v1.26 adds the pilot learning packet | Use operator packets and pilot learning packets before formal profile/risk changes, even when the live timer is already running |
+| Manual positions need first-class isolation | ETH/ETHUSDT, BTWUSDT, and NEARUSDT evidence showed how quickly manual and bot exposure can mix | Keep manual symbols explicit and exclude them from bot-managed reduction/entry decisions; verify every packet still classifies `BTWUSDT` as manual |

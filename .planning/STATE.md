@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.26
 milestone_name: Live Position Management And Pilot Learning
-current_phase: Phase 65 — Server Canary And Pilot Learning Packet
-current_phase_name: Server Canary And Pilot Learning Packet
-status: ready_to_complete_milestone
-stopped_at: Phase 65 complete; pilot learning packet deployed and server timers restored;
-last_updated: "2026-06-21T07:25:25+08:00"
+current_phase: Planning next milestone
+status: completed
+stopped_at: v1.26 milestone archived; next milestone scope pending
+last_updated: "2026-06-21T07:45:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 65 complete; pilot learning packet deployed and verified
+last_activity_desc: Milestone v1.26 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 5
   completed_plans: 5
   percent: 100
+current_phase_name: Planning next milestone
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 65 — Server Canary And Pilot Learning Packet
-**Status:** Phase 65 complete; v1.26 ready for milestone closeout
+**Current phase:** Planning next milestone
+**Status:** v1.26 milestone complete and archived
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -32,8 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Reconcile closed live outcomes quickly and turn
-lifecycle/exit evidence into recommendation-only guard feedback.
+**Current focus:** Plan the next milestone from current live pilot evidence,
+manual `BTWUSDT` isolation, and the operator's request for faster live
+iteration.
 
 ## Decisions
 
@@ -45,11 +46,11 @@ lifecycle/exit evidence into recommendation-only guard feedback.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 30 USDT account capital, 10x max leverage, 100 USDT max
-  bot-managed position notional, 0.4 USDT max per-trade risk, 1 USDT max daily
-  loss, and 10 bot-managed open positions under dynamic sizing and portfolio
-  caps. Manual symbols such as `BTWUSDT` remain visible in diagnostics but do
-  not consume bot entry capacity.
+- Active trial profile: 45 USDT configured account capital, 10x max leverage,
+  200 USDT max bot-managed position notional, 0.7 USDT max per-trade risk,
+  2 USDT max daily loss, and 20 bot-managed open positions under dynamic sizing
+  and portfolio caps. Manual symbols such as `BTWUSDT` remain visible in
+  diagnostics but do not consume bot entry capacity.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -781,9 +782,9 @@ lifecycle/exit evidence into recommendation-only guard feedback.
 
 ## Next Command
 
-Complete milestone v1.26 with `$gsd-complete-milestone`: archive the completed
-Live Position Management And Pilot Learning milestone and prepare the next
-milestone scope.
+Start the next milestone with `$gsd-new-milestone`: use the current live pilot
+packet, widened capacity profile, and manual `BTWUSDT` boundary to define the
+next iteration.
 
 ## Session
 
@@ -794,11 +795,11 @@ on the isolated server without order/env/systemd/risk mutation.
 
 ## Current Position
 
-Phase: 65 — Server Canary And Pilot Learning Packet
-Plan: 1/1 complete
-Status: Ready to complete milestone
-Last activity: 2026-06-21 — Phase 65 complete
+Phase: Planning next milestone
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-21 — Milestone v1.26 completed and archived
 
 ## Operator Next Steps
 
-- Complete milestone v1.26 with `$gsd-complete-milestone`.
+- Start the next milestone with `$gsd-new-milestone`.

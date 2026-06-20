@@ -24,8 +24,8 @@
 - ✅ **v1.25 Live Resume Clearance And Adaptive Pilot** — Phases 56-60,
   shipped 2026-06-21 ([archive](milestones/v1.25-ROADMAP.md)).
 
-- ◆ **v1.26 Live Position Management And Pilot Learning** — Phases 61-65,
-  complete; pending milestone archive.
+- ✅ **v1.26 Live Position Management And Pilot Learning** — Phases 61-65,
+  shipped 2026-06-21 ([archive](milestones/v1.26-ROADMAP.md)).
 
 ## Phases
 
@@ -125,8 +125,8 @@
 
 </details>
 
-<details open>
-<summary>◆ v1.26 Live Position Management And Pilot Learning (Phases 61-65) — COMPLETE, PENDING ARCHIVE</summary>
+<details>
+<summary>✅ v1.26 Live Position Management And Pilot Learning (Phases 61-65) — SHIPPED 2026-06-21</summary>
 
 - [x] Phase 61: Close-Review Exit Plan Repair (1/1 plan) (completed 2026-06-21)
 - [x] Phase 62: Guarded Position Exit Execution (1/1 plan) (completed 2026-06-21)
@@ -135,118 +135,6 @@
 - [x] Phase 65: Server Canary And Pilot Learning Packet (1/1 plan) (completed 2026-06-21)
 
 </details>
-
-## Active Phase Details
-
-### Phase 61: Close-Review Exit Plan Repair
-
-**Goal:** Explain and repair why agent-managed `close_review` positions can be
-review-required but still fail to produce an executable close/reduce plan.
-
-**Requirements:** POS-01, POS-02, POS-04
-
-**Plans:** 1/1 plans complete
-**Status:** Complete
-
-**Success criteria:**
-
-1. `ops time-exit-plan` or a companion diagnostic reports exact failed
-   preconditions for each `close_review` position.
-
-2. Agent-managed positions can produce filter-aware close/reduce plan candidates
-   when Binance quantity/notional constraints allow.
-
-3. Manual positions such as `BTWUSDT` remain classified as `manual_hold` and
-   never become close/reduce candidates.
-
-4. Unprotected or deteriorating positions are surfaced with higher urgency than
-   normal hold-time expiry.
-
-### Phase 62: Guarded Position Exit Execution
-
-**Goal:** Make close/reduce execution safe for agent-managed positions through
-fresh tokens, live-service guards, post-action checks, and protective-order
-cleanup.
-
-**Requirements:** EXIT-01, EXIT-03, RISK-04
-
-**Plans:** 1/1 plans complete
-**Status:** Complete
-
-**Success criteria:**
-
-1. Operator-confirmed close/reduce execution refuses to run without a fresh
-   matching plan token.
-
-2. Execution refuses manual symbols and refuses plans that violate Binance
-   filters, current risk caps, daily-loss limits, or live-service safety gates.
-
-3. Post-action checks verify the intended position side is flat or reduced
-   before canceling protective algo orders.
-
-4. All execution attempts persist secret-safe artifacts and trace IDs.
-
-### Phase 63: Live Cycle Position Stewardship
-
-**Goal:** Run active-position stewardship before new-entry scanning in every
-live cycle, with optional env-gated deterministic auto-management.
-
-**Requirements:** POS-03, EXIT-02
-
-**Plans:** 1/1 plans complete
-**Status:** Complete
-
-**Success criteria:**
-
-1. Every live cycle records lifecycle decisions for active positions before
-   candidate scanning or AI calls.
-
-2. Optional auto-management is disabled unless explicit env flags are enabled.
-3. When enabled, auto-management only touches agent-managed positions and stays
-   inside current caps and manual-symbol exclusions.
-
-4. New-entry scans still run when capacity remains after stewardship decisions.
-
-### Phase 64: Live Outcome Ledger And Guard Feedback
-
-**Goal:** Reconcile closed live outcomes quickly and turn live result
-attribution into recommendation-only guard feedback.
-
-**Requirements:** LEARN-01, LEARN-02, LEARN-03
-
-**Plans:** 1/1 plans complete
-**Status:** Complete
-
-**Success criteria:**
-
-1. A single command or scheduled path reconciles recently closed live outcomes
-   idempotently with fills, commission, net PnL, and matching intent IDs.
-
-2. Operator can review live performance by symbol, side, setup profile, factors,
-   exit reason, and holding behavior.
-
-3. Losing or weak groups generate recommendation-only guard updates.
-4. Guard recommendations cannot raise risk or change live env by themselves.
-
-### Phase 65: Server Canary And Pilot Learning Packet
-
-**Goal:** Deploy v1.26 to the isolated server and produce a current pilot
-learning packet from live-cycle, exit, outcome, and guard evidence.
-
-**Requirements:** OPS-01, OPS-02
-
-**Plans:** 1/1 plan complete
-**Status:** Complete
-
-**Success criteria:**
-
-1. Server deployment is scoped to `/opt/binance-futures-agent` and
-   `/etc/binance-futures-agent`.
-
-2. Local and server tests pass after deployment.
-3. Live and paper timers are restored after any deployment pause.
-4. Server artifacts include lifecycle decisions, manual exclusions, cap usage,
-   exit-plan status, and entry/exit trace IDs.
 
 ## Progress
 
@@ -258,7 +146,7 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
 | v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
-| v1.26 Live Position Management And Pilot Learning | 61-65 | 5/5 | Complete | - |
+| v1.26 Live Position Management And Pilot Learning | 61-65 | 5/5 | Complete | 2026-06-21 |
 
 ## Requirement Coverage
 
@@ -268,10 +156,10 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 - v1.23 requirements: archived at `.planning/milestones/v1.23-REQUIREMENTS.md`
 - v1.24 requirements: archived at `.planning/milestones/v1.24-REQUIREMENTS.md`
 - v1.25 requirements: archived at `.planning/milestones/v1.25-REQUIREMENTS.md`
-- v1.26 requirements: `.planning/REQUIREMENTS.md`
+- v1.26 requirements: archived at `.planning/milestones/v1.26-REQUIREMENTS.md`
 
 ## Next Step
 
-Complete milestone v1.26 with `$gsd-complete-milestone`. Phase 65 has deployed
-the server canary and pilot learning packet; the immediate focus is archiving
-v1.26 and choosing the next milestone scope.
+Start the next milestone with `$gsd-new-milestone`. Use the current server pilot
+evidence, live outcome ledger, manual `BTWUSDT` boundary, and operator priority
+for faster live iteration as inputs to the next scope.
