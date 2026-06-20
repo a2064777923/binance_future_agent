@@ -233,8 +233,8 @@ The user's chosen direction:
 
 ## Current State
 
-Milestones v1.0 and v1.21 are archived. Phases 1 through 47 are complete, and
-the current server deployment is installed under the isolated
+Milestones v1.0, v1.21, and v1.22 are archived. Phases 1 through 47 are
+complete, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
@@ -313,6 +313,10 @@ several hot-coin symbols can currently fit. Candidate generation rejects
 cap-incompatible symbols before AI calls instead of relying only on later
 order-intent rejection. The default pilot universe uses: HYPEUSDT, SOLUSDT,
 ZECUSDT, WLDUSDT, XRPUSDT, AVAXUSDT, BNBUSDT, DOGEUSDT, NEARUSDT, and ADAUSDT.
+The latest server forward-paper evidence is still negative: 212 paper signals,
+204 settled outcomes, win rate about `0.299`, total net PnL about `-7.245`
+USDT, and worst drawdown about `7.531` USDT for `quant_setup_selective` on
+`5m`. The paper timer remains active; live timer/service remain inactive.
 
 ## Previous Milestone: v1.8 Position Mode And Entry Fail-Closed
 
@@ -519,18 +523,24 @@ confirmation-gated.
 **Status:** Complete and deployed. Server plan and blocked-apply verification
 passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 
-## Next Milestone Goals
+## Current Milestone: v1.23 Strategy Evidence And Live Resume Readiness
 
-- Deploy Phase 30 to `/opt/binance-futures-agent/app` and run focused/full
-  server tests plus a secret-safe health check.
-- Preview `ops exposure-status` and `ops risk-profile-plan --profile
-  30u_10x_multi_dynamic` against current live exchange state.
-- Do not silently switch the live env; apply `30u_10x_multi_dynamic` only after
-  the operator confirms the fresh token and accepts the 30U/10x/two-position
-  portfolio caps.
-- Phase 32 adds active-position adjustment planning and confirmation-gated
-  execution so periodic review can produce partial take-profit or full-close
-  reduce orders before the bot scans for new entries.
+**Goal:** Turn the negative forward-paper evidence into a tighter,
+evidence-backed strategy workflow and define the exact gates required before
+any small live automation can be resumed.
+
+**Target features:**
+
+- Produce a compact evidence baseline from current paper performance, loss
+  attribution, adaptive guard output, and server timer/env state.
+- Recalibrate deterministic setup profiles from loss attribution, especially
+  stop-loss geometry, time-exit behavior, weak symbols, sides, and factors.
+- Run refreshed multi-window hot-symbol backtests and forward-paper checks so
+  promotion is based on repeated evidence rather than one selected interval.
+- Keep live auto-hot and higher-risk profiles disabled until read-only dry-run
+  and readiness gates pass.
+- Add a single live-resume readiness report that separates strategy evidence,
+  server state, exchange/manual exposure, and operator confirmation.
 
 ## Key Decisions
 
@@ -572,8 +582,9 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 | Manage active positions before new entries | Each live cycle should inspect active positions and expose deterministic adjustment plans before scanning for new trades. | Phase 32 complete locally |
 | Filter reduce orders before confirmation | Tiny-account partial exits must satisfy Binance quantity and notional filters before the system exposes an executable token. | Phase 33 complete and deployed |
 | Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
+| Evidence before live resume | The latest paper evidence is negative, so v1.23 prioritizes strategy evidence, recalibration, and explicit readiness gates over restoring unattended live automation. | v1.23 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after Phase 33 filter-aware adjustment implementation.*
+*Last updated: 2026-06-21 after starting v1.23 strategy evidence milestone.*

@@ -1,30 +1,25 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.22
-milestone_name: Portfolio Risk And Multi-Position
-current_phase: Phase 47 — Forward-Paper Adaptive Candidate Guard
-status: completed
-stopped_at: Phase 47 deployed and server verification recorded.
-last_updated: "2026-06-20T16:22:45.765Z"
+milestone: v1.23
+milestone_name: Strategy Evidence And Live Resume Readiness
+status: planning
+last_updated: "2026-06-20T16:45:16.645Z"
 last_activity: 2026-06-20
-last_activity_desc: Milestone v1.22 completed and archived
 progress:
-  total_phases: 18
-  completed_phases: 18
-  total_plans: 18
-  completed_plans: 18
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 47 — Forward-Paper Adaptive Candidate Guard
-**Status:** v1.22 milestone complete
-auto-hot disabled in server env; live service/timer remain inactive while
-strategy and paper evidence remain negative
-**Last planned:** 2026-06-20
-**Plan count:** 1
+**Current phase:** Phase 48 — Strategy Evidence Baseline
+**Status:** v1.23 planning
+**Last planned:** 2026-06-21
+**Plan count:** 0
 
 ## Project Reference
 
@@ -33,8 +28,9 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Collect paper-only forward evidence and keep live resume
-gated by all-interval strategy evidence.
+**Current focus:** Build a compact evidence baseline, recalibrate weak setup
+conditions, and define exact read-only gates before any small live automation
+can resume.
 
 ## Decisions
 
@@ -55,6 +51,12 @@ gated by all-interval strategy evidence.
   coin scanning when capacity remains, evaluate the top-N hot-symbol queue
   instead of one all-or-nothing candidate, and reject new entries against
   portfolio-level margin, margin-fraction, notional, and same-direction caps.
+
+- v1.23 direction: keep live automation paused while current forward-paper
+  evidence is negative. First produce a compact evidence baseline, then
+  recalibrate setup profiles from loss attribution, re-run multi-window
+  backtests and post-change forward-paper checks, and only then report whether
+  live resume is ready.
 
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -569,25 +571,24 @@ gated by all-interval strategy evidence.
 
 ## Next Command
 
-Complete the current milestone audit/closure path. Keep live automation
-disabled. Do not enable unattended live auto-hot, restore live automation,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while the default
-all-interval promotion gate returns `keep_live_paused` and paper performance
-is negative.
+Start Phase 48. Keep live automation disabled. Do not enable unattended live
+auto-hot, restore live automation, execute adjustment orders, or apply
+`30u_10x_multi_dynamic` while strategy matrix evidence and forward-paper
+performance are negative.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 47 deployed and server verification recorded.
-**Resume file:** .planning/phases/47-forward-paper-adaptive-candidate-guard/47-01-PLAN.md
+**Stopped at:** v1.23 milestone initialized.
+**Resume file:** .planning/REQUIREMENTS.md
 
 ## Current Position
 
-Phase: Milestone v1.22 complete
+Phase: 48 — Strategy Evidence Baseline
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-20 — Milestone v1.22 completed and archived
+Status: Ready to plan
+Last activity: 2026-06-21 — Milestone v1.23 requirements and roadmap defined
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Run /gsd-plan-phase 48
