@@ -4,7 +4,7 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 30
 status: active
-stopped_at: Phase 30 local implementation complete; server deployment pending
+stopped_at: Phase 30 deployed and previewed; live env switch awaits operator token
 last_updated: "2026-06-20T17:35:50+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
@@ -20,7 +20,8 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 30 — Portfolio Risk And Multi-Position Profile
-**Status:** v1.22 local implementation complete; server deployment pending
+**Status:** v1.22 deployed; 10x multi-position profile preview is ready and
+operator-gated
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,9 +32,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Deploy and verify portfolio-level risk caps and the
-confirmation-gated `30u_10x_multi_dynamic` profile without silently changing the
-live server env.
+**Current focus:** Decide whether to apply the confirmation-gated
+`30u_10x_multi_dynamic` profile after reviewing the deployed preview evidence.
 
 ## Decisions
 
@@ -241,31 +241,53 @@ live server env.
   env. Full local test suite passed with `278` tests after the candidate queue
   and target-readiness additions.
 
+- Phase 30 server deployment is complete under `/opt/binance-futures-agent/app`.
+  The live timer was paused during deploy, the package was reinstalled editable
+  in `/opt/binance-futures-agent/.venv`, focused server tests passed with `88`
+  tests, the full server suite passed with `278` tests, and a secret-safe
+  health check passed. The live timer was restored afterwards.
+
+- Server read-only preview for `30u_10x_multi_dynamic` reports
+  `ready_for_profile_switch`: current HYPEUSDT exposure is `0.16` LONG, active
+  notional about `11.38` USDT, active initial margin about `2.28` USDT, two
+  exchange-visible algo protection orders, no normal open orders, no AI
+  backoff, and one unreconciled submitted intent that matches the active
+  HYPEUSDT position. The target profile is 30U/10x, two positions, per-position
+  notional cap 25 USDT, portfolio margin cap 5 USDT, portfolio notional cap 45
+  USDT, same-direction notional cap 30 USDT, and dynamic sizing enabled.
+
+- No live profile apply was run. The server env remains 30U/5x/12U/one-position,
+  dynamic sizing disabled, multi-position disabled. After timer restore, the
+  next live cycle exited successfully with `entry_capacity_blocked`,
+  `submitted=false`, zero market/candidate/narrative records, and
+  `risk_reasons=["multi_position_disabled","max_open_positions_reached"]`.
+
 ## Next Command
 
-Deploy Phase 30 to `/opt/binance-futures-agent/app`, run focused/full server
-tests, and preview `30u_10x_multi_dynamic`. Do not apply the profile until the
-operator explicitly confirms the token and accepts the live portfolio caps.
+Operator decision point: apply `30u_10x_multi_dynamic` only if the operator
+explicitly confirms the fresh profile token and accepts the 30U/10x/two-position
+portfolio caps. Otherwise keep running the unchanged 5x/12U/one-position live
+profile.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 30 local implementation complete; server deployment pending
+**Stopped at:** Phase 30 deployed and previewed; live env switch awaits operator token
 **Resume file:** .planning/phases/30-portfolio-risk-and-multi-position-profile/30-01-SUMMARY.md
 
 ## Current Position
 
 Phase: 30 — Portfolio Risk And Multi-Position Profile
 Plan: 30-01 complete locally
-Status: Server deployment pending; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — portfolio caps and 30u_10x_multi_dynamic profile added locally
+Status: Deployed; current live profile remains 5x/12U/one-position until token-confirmed apply
+Last activity: 2026-06-20 — portfolio caps, candidate queue, and 30u_10x_multi_dynamic preview deployed
 
 ## Operator Next Steps
 
-- Deploy Phase 30 code to the isolated server path.
-- Run focused server tests for execution risk, agent runner, risk profile, config,
-  and exposure status.
-- Run the full server test suite and secret-safe health check.
-- Preview `ops risk-profile-plan --profile 30u_10x_multi_dynamic` on the server.
-- Do not apply `30u_10x_multi_dynamic` unless the operator explicitly confirms
-  the profile token after reviewing active HYPEUSDT exposure and portfolio caps.
+- Review the deployed `30u_10x_multi_dynamic` preview and decide whether to
+  apply it.
+- If applying, use `ops risk-profile-apply` only with the fresh confirmation
+  token from the server preview and only while the live service is inactive.
+- If not applying, keep the current 5x/12U/one-position timer running.
+- Next strategy milestone should add periodic active-position review plus
+  staged exit/trailing-stop management.
