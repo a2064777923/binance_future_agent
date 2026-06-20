@@ -105,6 +105,15 @@ python -m bfa.cli ops position-hold-check --env-file .env --db runtime/agent.sql
 python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 ```
 
+Use the exposure status command when reviewing why the bot can or cannot open a
+new position under the current live caps. It is read-only and reports current
+sizing, long/short direction support, active-position capacity, and the
+confirmation-gated `30u_8x_dynamic` preview.
+
+```bash
+python -m bfa.cli ops exposure-status --env-file .env --db runtime/agent.sqlite --hypothetical-symbol HYPEUSDT --hypothetical-side long
+```
+
 ## Small-Capital Backtesting
 
 The project now includes a short-window backtest harness for the hot-momentum

@@ -34,6 +34,7 @@ from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
+from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
 from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
@@ -412,6 +413,34 @@ def _build_parser() -> argparse.ArgumentParser:
         "--service-active",
         action="store_true",
         help="fail closed when the live systemd service is currently active",
+    )
+
+    exposure_status = ops_subparsers.add_parser(
+        "exposure-status",
+        help="read-only explanation of current sizing, direction support, and entry capacity",
+    )
+    exposure_status.add_argument("--env-file", help="optional env file to load before environment overrides")
+    exposure_status.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    exposure_status.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
+    exposure_status.add_argument(
+        "--target-profile",
+        default="30u_8x_dynamic",
+        help="optional risk profile to preview; use empty string to disable",
+    )
+    exposure_status.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="preview target profile with two concurrent positions enabled",
+    )
+    exposure_status.add_argument("--hypothetical-symbol", help="optional symbol for a hypothetical new entry")
+    exposure_status.add_argument(
+        "--hypothetical-side",
+        choices=("long", "short"),
+        help="optional side for a hypothetical new entry",
     )
 
     agent = subparsers.add_parser(
@@ -937,6 +966,21 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.applied else 1
+    if args.ops_command == "exposure-status":
+        report = build_exposure_status_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if not args.skip_binance
+            else None,
+            target_profile=args.target_profile or None,
+            allow_two_positions=args.allow_two_positions,
+            hypothetical_symbol=args.hypothetical_symbol,
+            hypothetical_side=args.hypothetical_side,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
     return 2
 
 

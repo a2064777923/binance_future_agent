@@ -9,6 +9,8 @@ from pathlib import Path
 from bfa.ai.client import OpenAIResponse
 from bfa.cli import main
 from bfa.event_store.store import EventStore
+from bfa.execution.models import OrderIntent, RiskDecision
+from bfa.execution.store import persist_exchange_response, persist_order_intent
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
 
@@ -835,6 +837,104 @@ class CliTests(unittest.TestCase):
         self.assertEqual(changed["BFA_MAX_LEVERAGE"], "8")
         self.assertEqual(changed["BFA_DYNAMIC_POSITION_SIZING_ENABLED"], "true")
         self.assertTrue(payload["confirmation_token"].startswith("RISK-PROFILE-30U_8X_DYNAMIC-"))
+
+    def test_ops_exposure_status_explains_blocked_entry_capacity(self):
+        class FakeSignedClient:
+            def account(self):
+                return {"availableBalance": "27.9", "totalWalletBalance": "30.1"}
+
+            def position_risk(self):
+                return [
+                    {
+                        "symbol": "HYPEUSDT",
+                        "positionAmt": "0.16",
+                        "positionSide": "LONG",
+                        "entryPrice": "70.266",
+                        "markPrice": "70.69",
+                        "unRealizedProfit": "0.0678",
+                    }
+                ]
+
+            def open_orders(self):
+                return []
+
+            def open_algo_orders(self):
+                return [
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            intent = OrderIntent(
+                symbol="HYPEUSDT",
+                side="BUY",
+                quantity=0.16,
+                notional_usdt=11.24256,
+                entry_price=70.266,
+                stop_price=69.6,
+                target_price=71.5,
+                leverage=5,
+                mode="live",
+                decided_at="2026-06-20T05:26:07Z",
+            )
+            persist_order_intent(
+                store,
+                intent=intent,
+                status="submitted",
+                risk=RiskDecision(True, ["risk_accepted"]),
+            )
+            persist_exchange_response(
+                store,
+                intent=intent,
+                response={
+                    "entry_order": {"orderId": 1},
+                    "stop_loss_order": {"algoId": 2},
+                    "take_profit_order": {"algoId": 3},
+                },
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "exposure-status",
+                "--db",
+                str(db_path),
+                "--hypothetical-symbol",
+                "HYPEUSDT",
+                "--hypothetical-side",
+                "long",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BFA_ACCOUNT_CAPITAL_USDT": "30",
+                    "BFA_MAX_LEVERAGE": "5",
+                    "BFA_MAX_POSITION_NOTIONAL_USDT": "12",
+                    "BFA_MAX_RISK_PER_TRADE_USDT": "0.3",
+                    "BFA_MAX_DAILY_LOSS_USDT": "1",
+                    "BFA_MAX_OPEN_POSITIONS": "1",
+                    "BFA_POSITION_MODE": "hedge",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "keep_current_profile")
+        self.assertTrue(payload["direction_support"]["long_entries_supported"])
+        self.assertTrue(payload["direction_support"]["short_entries_supported"])
+        self.assertFalse(payload["entry_capacity"]["can_open_new_position"])
+        self.assertIn("max_open_positions_reached", payload["entry_capacity"]["reasons"])
+        self.assertEqual(payload["target_profile"]["target_leverage"], 8)
+        self.assertFalse(payload["risk_change"]["risk_change_allowed"])
 
     def test_ops_risk_profile_apply_blocks_active_position_without_writing_env(self):
         class FakeSignedClient:
