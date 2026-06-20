@@ -4,8 +4,8 @@ milestone: v1.7
 milestone_name: Configurable Margin Mode
 current_phase: Phase 15 - Configurable Margin Mode
 status: completed
-stopped_at: Phase 15 complete; pending server deploy with explicit cross margin mode
-last_updated: "2026-06-20T01:45:00.000Z"
+stopped_at: Phase 15 deployed with cross margin mode; awaiting future submitted entry for LVA-05 evidence
+last_updated: "2026-06-20T01:55:00.000Z"
 last_activity: 2026-06-20
 last_activity_desc: Phase 15 complete
 progress:
@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 15 - Configurable Margin Mode
-**Status:** v1.7 complete; live timer active on server pending cross-mode deploy
+**Status:** v1.7 complete and deployed; live timer active under pilot caps
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -86,8 +86,8 @@ projects or losing control of downside.
 
 ## Next Command
 
-Deploy Phase 15, set server `BFA_MARGIN_MODE=cross`, rerun health checks, and
-observe the live timer under unchanged 100 USDT pilot caps.
+Keep live timer active under `BFA_MARGIN_MODE=cross`. After the first submitted
+live entry, use `ops live-status` to verify protective-order evidence.
 
 ## Session
 
@@ -99,13 +99,13 @@ observe the live timer under unchanged 100 USDT pilot caps.
 
 Phase: Phase 15 - Configurable Margin Mode
 Plan: 15-01 complete
-Status: Margin mode can be explicitly set to isolated or cross without changing pilot caps
+Status: Margin mode is deployed as cross on the server without changing pilot caps
 Last activity: 2026-06-20 — Phase 15 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
-- Confirm live cycles use `BFA_MARGIN_MODE=cross` on the Multi-Assets account and still fail closed on weak/no-trade signals.
+- Observe future cycles; if a trade submits, verify protective orders before any risk-limit change.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.
