@@ -407,7 +407,9 @@ Phase 56 adds local read-only `ops exposure-clearance`, append-only
 `ops manual-loss-record`, and `--exposure-clearance-report` support for
 `ops operator-resume-decision`. Local verification passed, but these tools
 still need server deployment/evidence before the server's current exposure can
-be considered cleared.
+be considered cleared. Phase 56 also fixes a readiness false blocker so
+manual-symbol overrides only block when the symbol is actually active on the
+exchange.
 
 ## Current Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 

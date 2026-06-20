@@ -426,7 +426,7 @@ def _exchange_review(
     agent_managed = [symbol for symbol in active_symbols if symbol in agent_symbols and symbol not in manual_set]
     manual_or_unattributed = _dedupe(
         [
-            *manual_symbols,
+            *[symbol for symbol in manual_symbols if symbol in active_symbols],
             *[symbol for symbol in active_symbols if symbol not in agent_symbols or symbol in manual_set],
         ]
     )

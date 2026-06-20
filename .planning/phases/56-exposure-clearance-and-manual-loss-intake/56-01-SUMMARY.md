@@ -22,6 +22,9 @@ requirements_completed:
   - `ops manual-loss-record`
 - Extended `ops operator-resume-decision` with
   `--exposure-clearance-report`.
+- Fixed a live-resume readiness false blocker: symbols passed through
+  `--manual-exposure-symbols` no longer count as manual exposure unless the
+  symbol is actually active on the exchange.
 - Added focused unit and CLI coverage for exposure classification, manual loss
   recording, and operator-decision clearance blocking.
 
@@ -54,6 +57,8 @@ timestamp. It does not call Binance or mutate server runtime state.
 - `python -m unittest tests.test_ops_exposure_clearance tests.test_ops_manual_loss tests.test_ops_operator_resume_decision tests.test_cli`
   passed: 59 tests.
 - `python -m unittest discover -s tests` passed: 366 tests.
+- After the readiness false-blocker fix, `python -m unittest discover -s tests`
+  passed: 367 tests.
 - `git diff --check` passed.
 - Secret scan for the user-provided server password and AI keys found no
   matches in changed content.

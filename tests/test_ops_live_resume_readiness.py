@@ -117,6 +117,35 @@ class LiveResumeReadinessTests(unittest.TestCase):
             payload["reasons"]["exchange_state"],
         )
 
+    def test_manual_symbol_without_active_position_does_not_block_exchange_review(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            db = _paper_db(root, [0.2, -0.04, 0.18])
+            matrix = _matrix_report(root)
+
+            report = build_live_resume_readiness_report(
+                _config(root),
+                db_path=str(db),
+                matrix_report_path=str(matrix),
+                min_outcomes=3,
+                min_win_rate=0.5,
+                min_profit_factor=1.1,
+                check_systemd=False,
+                server_state_overrides={
+                    "paper.timer": "active",
+                    "live.timer": "inactive",
+                    "live.service": "inactive",
+                },
+                signed_client=FakeSignedClient(),
+                manual_exposure_symbols=["ETHUSDT", "BTWUSDT"],
+                require_operator_confirmation=False,
+            )
+
+        payload = report.to_dict()
+        self.assertEqual(payload["exchange_review"]["manual_or_unattributed_symbols"], [])
+        self.assertEqual(payload["reasons"]["exchange_state"], [])
+
     def test_matrix_suite_mixed_verdict_blocks_live_resume(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

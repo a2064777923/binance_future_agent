@@ -19,6 +19,8 @@ verified: 2026-06-21
 |---------|--------|
 | `python -m unittest tests.test_ops_exposure_clearance tests.test_ops_manual_loss tests.test_ops_operator_resume_decision tests.test_cli` | Passed, 59 tests |
 | `python -m unittest discover -s tests` | Passed, 366 tests |
+| `python -m unittest tests.test_ops_live_resume_readiness tests.test_ops_operator_resume_decision tests.test_ops_exposure_clearance tests.test_cli` | Passed, 62 tests after readiness false-blocker fix |
+| `python -m unittest discover -s tests` | Passed, 367 tests after readiness false-blocker fix |
 | `git diff --check` | Passed |
 | Secret scan for provided password/API-key literals | Passed, no matches |
 
