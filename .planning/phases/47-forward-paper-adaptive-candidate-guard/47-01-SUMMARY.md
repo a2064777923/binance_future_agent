@@ -34,6 +34,18 @@ completed: 2026-06-21
 - `python -m unittest discover -s tests` passed: 339 tests.
 - `git diff --check` passed.
 - Secret scan over the diff found no committed API keys/passwords.
+- Server code-only deployment to `/opt/binance-futures-agent/app` completed
+  from commit `e7edd86`.
+- Server focused tests passed: `45` tests.
+- Server full suite passed: `339` tests.
+- Server health-check passed with network checks skipped.
+- A server paper-only `ops forward-paper-run --auto-hot-symbols --top-n 40`
+  reported `paper_guard.status=active`, `signal_count=201`,
+  `outcome_count=170`, `total_net_pnl_usdt=-5.78143363`, and guarded symbols
+  `BEATUSDT`, `BICOUSDT`, `BTWUSDT`, `GUAUSDT`, and `SLXUSDT`.
+- Deployment paused and restored `binance-futures-agent-paper.timer`; after
+  verification the paper timer was `active` and both live service/timer were
+  `inactive`.
 
 ## Operational Notes
 
@@ -41,5 +53,5 @@ completed: 2026-06-21
   `insufficient_evidence` and do not change selection behavior.
 - The guard does not enable live automation, live auto-hot, risk-profile
   switching, or adjustment execution.
-- Server code-only deployment is still required before claiming server
-  completion.
+- Server code-only deployment is complete; live automation remains disabled
+  because paper evidence is still negative.

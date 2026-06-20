@@ -12,7 +12,7 @@
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
 
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-45, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-47, active.
 
 ## Phases
 
@@ -521,7 +521,7 @@ server env.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Phase 47 complete locally; adaptive paper guard ready for server verification | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Phase 47 complete and deployed; adaptive paper guard active in paper evidence | Pending |
 
 ## Requirement Coverage
 
@@ -534,9 +534,8 @@ server env.
 Keep live automation paused while the latest calibrated `quant_setup` matrix
 and forward-paper evidence remain negative. The paper timer uses auto-hot
 symbol selection rather than the 10-symbol live pilot allowlist. Latest server
-forward-paper evidence grew to 157 signals and 132 settled outcomes with win
-rate `0.31818182`, total net PnL `-4.54251922` USDT, profit factor
-`0.60054605`, and worst drawdown `5.02186198` USDT. Phase 47 now converts
+forward-paper evidence grew to 201 signals and 170 settled outcomes with win
+rate `0.32352941` and total net PnL `-5.78143363` USDT. Phase 47 now converts
 that paper loss evidence into an adaptive candidate/setup guard: with enough
 settled outcomes it can block repeatedly losing symbols and reject losing
 side/factor conditions before agent or paper runs keep sampling them; without
@@ -577,7 +576,8 @@ side/factor conditions before agent or paper runs keep sampling them.
 
 **Requirements:** FPG-05, FLA-05, ACG-01, ACG-02, ACG-03, ACG-04
 **Depends on:** Phase 46
-**Status:** Complete locally; server code-only deployment pending verification.
+**Status:** Complete and deployed; paper guard active in server forward-paper
+evidence while live automation remains inactive.
 
 **Plans:** 1 plan
 
@@ -600,7 +600,7 @@ side/factor conditions before agent or paper runs keep sampling them.
 5. Config defaults and deploy examples expose the guard safely without enabling
    live automation or changing risk profiles.
 
-6. Focused and full local tests pass before server deployment.
+6. Focused and full local/server tests pass before operational claims.
 
 Plans:
 

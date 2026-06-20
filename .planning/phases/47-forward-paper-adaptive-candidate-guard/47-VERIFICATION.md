@@ -24,6 +24,12 @@ verified: 2026-06-21
 | `python -m unittest discover -s tests` | Passed, 339 tests |
 | `git diff --check` | Passed |
 | Secret scan over diff | No matches |
+| Server code-only deploy | Passed, commit `e7edd86` deployed under `/opt/binance-futures-agent/app` |
+| Server focused tests | Passed, 45 tests |
+| Server full suite | Passed, 339 tests |
+| Server health-check | Passed with network checks skipped |
+| Server paper guard smoke | Passed: guard active, 201 signals, 170 outcomes, guarded symbols `BEATUSDT`, `BICOUSDT`, `BTWUSDT`, `GUAUSDT`, `SLXUSDT` |
+| Server service state | Passed: paper timer active; live timer inactive; live service inactive |
 
 ## Residual Risk
 

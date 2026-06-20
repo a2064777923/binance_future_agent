@@ -4,10 +4,10 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 47
 status: active
-stopped_at: Phase 47 complete locally; server code-only deployment pending
+stopped_at: Phase 47 deployed; paper guard active on server evidence
 last_updated: "2026-06-21T00:00:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Added adaptive forward-paper candidate guard and local verification
+last_activity_desc: Deployed adaptive forward-paper guard and verified server evidence
 progress:
   total_phases: 42
   completed_phases: 40
@@ -20,9 +20,9 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 47 — Forward-Paper Adaptive Candidate Guard
-**Status:** Phase 47 complete locally; paper-only timer active; live auto-hot
-disabled in server env; live service/timer remain inactive while strategy and
-paper evidence remain negative
+**Status:** Phase 47 complete and deployed; paper-only timer active; live
+auto-hot disabled in server env; live service/timer remain inactive while
+strategy and paper evidence remain negative
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -553,31 +553,44 @@ gated by all-interval strategy evidence.
   focused tests passed and the full local suite passed with `339` tests. No
   live env, timer, risk profile, or exchange mutation was performed.
 
+- Phase 47 server deployment is complete under
+  `/opt/binance-futures-agent/app` from commit `e7edd86`. The paper timer was
+  paused during deployment and restored afterwards. Server focused tests passed
+  with `45` tests, the full server suite passed with `339` tests, and
+  health-check passed with network checks skipped. A paper-only server
+  `ops forward-paper-run --auto-hot-symbols --top-n 40 --interval 5m --variant
+  quant_setup_selective --limit 36` reported `paper_guard.status=active`,
+  `signal_count=201`, `outcome_count=170`, `win_rate=0.32352941`,
+  `total_net_pnl_usdt=-5.78143363`, guarded symbols `BEATUSDT`, `BICOUSDT`,
+  `BTWUSDT`, `GUAUSDT`, and `SLXUSDT`, short-side blocking, and factor blocks
+  for `ema_trend_down` and `rsi_bearish_momentum`. After verification,
+  `binance-futures-agent-paper.timer` was active and both
+  `binance-futures-agent-live.timer` and
+  `binance-futures-agent-live.service` were inactive.
+
 ## Next Command
 
-Deploy Phase 47 as a code-only update, with the paper timer paused during
-deployment and restored afterwards. Keep live automation disabled. Do not
-enable unattended live auto-hot, restore live automation, execute adjustment
-orders, or apply `30u_10x_multi_dynamic` while the default all-interval
-promotion gate returns `keep_live_paused` and paper performance is negative.
+Complete the current milestone audit/closure path. Keep live automation
+disabled. Do not enable unattended live auto-hot, restore live automation,
+execute adjustment orders, or apply `30u_10x_multi_dynamic` while the default
+all-interval promotion gate returns `keep_live_paused` and paper performance
+is negative.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 47 complete locally; server deployment pending.
+**Stopped at:** Phase 47 deployed and server verification recorded.
 **Resume file:** .planning/phases/47-forward-paper-adaptive-candidate-guard/47-01-PLAN.md
 
 ## Current Position
 
 Phase: 47 — Forward-Paper Adaptive Candidate Guard
 Plan: 47-01 adaptive guard
-Status: Complete locally; server code-only deployment pending verification
-Last activity: 2026-06-21 — local full suite passed with 339 tests
+Status: Complete and deployed; server paper guard active; live automation inactive
+Last activity: 2026-06-21 — server focused/full suites and health-check passed
 
 ## Operator Next Steps
 
-- Deploy the adaptive guard code-only update to `/opt/binance-futures-agent`
-  and verify server focused/full tests plus health-check.
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, now with the adaptive guard active once enough
   local paper outcomes meet guard thresholds.
