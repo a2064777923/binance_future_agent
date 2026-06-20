@@ -4,12 +4,12 @@
 
 | # | Criterion | Status | Evidence |
 |---|-----------|--------|----------|
-| 1 | Config exposes live auto-hot symbol selection and keeps it disabled by default. | VERIFIED LOCALLY | `tests.test_config` checks default `BFA_LIVE_AUTO_HOT_SYMBOLS=false` and positive top-N validation. |
-| 2 | Runner can derive a wider hot-symbol universe from Binance 24h ticker data. | VERIFIED LOCALLY | `test_run_once_can_scan_auto_hot_symbols_beyond_fixed_live_allowlist` selects `HOTUSDT,ALTUSDT` while `BFA_MARKET_SYMBOLS=BTCUSDT`. |
-| 3 | Runner falls back to `BFA_MARKET_SYMBOLS` when auto-hot returns empty. | VERIFIED LOCALLY | `test_run_once_auto_hot_falls_back_to_market_symbols_when_empty`. |
-| 4 | The selected universe drives collection, narrative matching, market heat, replay packet, and candidate allowlist. | VERIFIED LOCALLY | Agent runner test asserts `scan_symbols`, selected symbol, and candidate count from auto-hot symbols outside fixed allowlist. |
-| 5 | Wider scanning does not widen order authority by itself. | VERIFIED LOCALLY | `top_n=1` auto-hot test scans two symbols but evaluates one candidate; existing queue/risk tests still pass. |
-| 6 | Env examples document the new variables without enabling live auto-hot. | VERIFIED LOCALLY | `tests.test_deploy_assets` checks `BFA_LIVE_AUTO_HOT_SYMBOLS=false`. |
+| 1 | Config exposes live auto-hot symbol selection and keeps it disabled by default. | VERIFIED | Local/server config tests check default `BFA_LIVE_AUTO_HOT_SYMBOLS=false`; server health-check redacted config shows the same default. |
+| 2 | Runner can derive a wider hot-symbol universe from Binance 24h ticker data. | VERIFIED | `test_run_once_can_scan_auto_hot_symbols_beyond_fixed_live_allowlist` selects `HOTUSDT,ALTUSDT` while `BFA_MARKET_SYMBOLS=BTCUSDT`. |
+| 3 | Runner falls back to `BFA_MARKET_SYMBOLS` when auto-hot returns empty. | VERIFIED | `test_run_once_auto_hot_falls_back_to_market_symbols_when_empty`. |
+| 4 | The selected universe drives collection, narrative matching, market heat, replay packet, and candidate allowlist. | VERIFIED | Agent runner test asserts `scan_symbols`, selected symbol, and candidate count from auto-hot symbols outside fixed allowlist. |
+| 5 | Wider scanning does not widen order authority by itself. | VERIFIED | `top_n=1` auto-hot test scans two symbols but evaluates one candidate; existing queue/risk tests still pass. |
+| 6 | Env examples document the new variables without enabling live auto-hot. | VERIFIED | `tests.test_deploy_assets` checks `BFA_LIVE_AUTO_HOT_SYMBOLS=false`; server env was not enabled. |
 
 ## Commands
 
@@ -21,6 +21,10 @@
 | `python -m unittest discover -s tests` | Passed, 335 tests |
 | `git diff --check` | Passed |
 | Secret-pattern scan over `git diff` | Passed; no matches |
+| Server focused tests | Passed, 39 tests |
+| Server full suite | Passed, 335 tests |
+| Server `ops health-check --skip-network` | Passed, `ok=true` |
+| Server service state after deploy | Paper timer active; live service/timer inactive |
 
 ## Residual Risk
 
@@ -28,4 +32,5 @@
   it should be deployed disabled first and observed through dry-run/manual runs.
 - This phase improves candidate breadth, not strategy profitability. Promotion
   and live-resume gates still depend on backtest/paper/live evidence.
-- Server verification is still pending for this phase.
+- Enabling live auto-hot in `/etc/binance-futures-agent/env` remains a separate
+  operator decision and should start with dry-run/manual evidence.

@@ -491,7 +491,8 @@ existing candidate queue, setup, AI/quant, and risk gates.
 
 **Requirements:** LAC-01, LAC-02, LAC-03, LAC-04
 **Depends on:** Phase 44
-**Status:** Complete locally; server deployment pending.
+**Status:** Complete and deployed; live auto-hot capability remains disabled in
+server env.
 
 **Plans:** 1 plan
 
@@ -516,7 +517,7 @@ existing candidate queue, setup, AI/quant, and risk gates.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-45 | 16/16 | Phase 45 complete locally; deployment pending | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-45 | 16/16 | Phase 45 complete and deployed; live auto-hot disabled | Pending |
 
 ## Requirement Coverage
 

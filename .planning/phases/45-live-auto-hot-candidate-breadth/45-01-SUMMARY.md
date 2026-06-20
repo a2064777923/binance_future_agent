@@ -33,6 +33,20 @@
 - `git diff --check` passed.
 - Secret-pattern scan over `git diff` found no matches.
 
+## Server Result
+
+- Deployed to `/opt/binance-futures-agent/app` as a code-only update.
+- Server focused tests passed with `39` tests.
+- Server full suite passed with `335` tests.
+- Server `ops health-check --skip-network` passed with `ok=true`.
+- Server env now reads the new defaults from code and remains
+  `BFA_LIVE_AUTO_HOT_SYMBOLS=false`; no `/etc/binance-futures-agent/env`
+  enablement was applied.
+- `binance-futures-agent-paper.timer` was paused during deployment and restored
+  afterwards.
+- `binance-futures-agent-live.service` and
+  `binance-futures-agent-live.timer` remained `inactive`.
+
 ## Not Changed
 
 - Live timer was not restored.
@@ -51,6 +65,6 @@ one-order-per-cycle limit.
 
 ## Next
 
-Deploy the code-only change to the server without enabling
-`BFA_LIVE_AUTO_HOT_SYMBOLS`, then run dry-run/manual evidence before deciding
-whether live env should opt into wider scanning.
+Collect paper evidence as before. If the operator wants to test wider live
+scanning later, enable `BFA_LIVE_AUTO_HOT_SYMBOLS=true` only for a controlled
+dry-run/manual cycle first, not as an automatic live resume.

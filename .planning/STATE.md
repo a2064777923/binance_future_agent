@@ -4,10 +4,10 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 45
 status: active
-stopped_at: Phase 45 complete locally; server deployment pending
-last_updated: "2026-06-20T23:55:00+08:00"
+stopped_at: Phase 45 complete and deployed; live auto-hot disabled in server env
+last_updated: "2026-06-20T23:59:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Implemented live auto-hot candidate breadth locally
+last_activity_desc: Deployed live auto-hot candidate breadth with server env disabled
 progress:
   total_phases: 41
   completed_phases: 40
@@ -20,9 +20,10 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 45 — Live Auto-Hot Candidate Breadth
-**Status:** Phase 45 complete locally; paper-only timer active; live
-service/timer remain inactive while default all-interval strategy promotion and
-latest paper performance evidence fail
+**Status:** Phase 45 complete and deployed; paper-only timer active; live
+auto-hot disabled in server env; live service/timer remain inactive while
+default all-interval strategy promotion and latest paper performance evidence
+fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -544,26 +545,27 @@ gated by all-interval strategy evidence.
 
 ## Next Command
 
-Deploy Phase 45 as a code-only/server-assets update with
-`BFA_LIVE_AUTO_HOT_SYMBOLS=false` unchanged, then run server tests and a
-secret-safe health check. Do not enable live auto-hot in the server env, restore
-live automation, execute adjustment orders, or apply `30u_10x_multi_dynamic`
-while the default all-interval promotion gate returns `keep_live_paused` and
-paper performance is negative.
+Continue collecting forward-paper evidence. If wider live candidate scanning is
+tested later, first run a controlled dry-run/manual cycle with
+`BFA_LIVE_AUTO_HOT_SYMBOLS=true`; do not enable it in the unattended server env,
+restore live automation, execute adjustment orders, or apply
+`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
+`keep_live_paused` and paper performance is negative.
 
 ## Session
 
 **Last session:** 2026-06-20T23:23:00+08:00
-**Stopped at:** Phase 45 complete locally; server deployment pending.
+**Stopped at:** Phase 45 complete and deployed; live auto-hot disabled in server
+env.
 **Resume file:** .planning/phases/45-live-auto-hot-candidate-breadth/45-01-PLAN.md
 
 ## Current Position
 
 Phase: 45 — Live Auto-Hot Candidate Breadth
 Plan: 45-01 implementation
-Status: Complete locally; deployment pending
-Last activity: 2026-06-20 — optional live auto-hot scanning implemented with
-defaults disabled
+Status: Complete and deployed; server env keeps live auto-hot disabled
+Last activity: 2026-06-20 — server focused/full tests and health-check passed,
+paper timer restored, live service/timer inactive
 
 ## Operator Next Steps
 
