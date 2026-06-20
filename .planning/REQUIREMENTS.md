@@ -97,7 +97,7 @@ projects or losing control of downside.
 | APR-02 | Phase 31 | Complete locally |
 | APR-03 | Phase 31 | Complete locally |
 | APR-04 | Phase 32 | Complete locally |
-| APR-05 | Phase 33 | Complete locally |
+| APR-05 | Phase 33 | Complete and deployed |
 
 **Coverage:**
 - v1.22 requirements: 15 total

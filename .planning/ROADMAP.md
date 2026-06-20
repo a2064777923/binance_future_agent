@@ -139,7 +139,7 @@ minimum-notional constraints.
 
 **Requirements:** APR-05
 
-**Status:** Local verification passed; server deployment pending.
+**Status:** Complete and deployed.
 
 **Plans:** 1 plan
 
@@ -158,7 +158,7 @@ minimum-notional constraints.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-33 | 4/4 | Phase 33 server deploy pending | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-33 | 4/4 | Phase 33 deployed | Pending |
 
 ## Requirement Coverage
 
@@ -168,6 +168,6 @@ minimum-notional constraints.
 
 ## Next Step
 
-Deploy Phase 33 to the isolated server and preview filter-aware
-`ops position-adjustment-plan`. Do not execute adjustment orders or apply
-`30u_10x_multi_dynamic` without an explicit confirmation token.
+Monitor `SOLUSDT` through filter-aware `ops position-adjustment-plan`. Do not
+execute adjustment orders or apply `30u_10x_multi_dynamic` without an explicit
+confirmation token.

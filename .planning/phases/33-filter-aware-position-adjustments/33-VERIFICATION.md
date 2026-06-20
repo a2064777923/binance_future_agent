@@ -12,7 +12,7 @@ behavior_unverified: 0
 reduce orders whose quantities satisfy Binance step-size, minimum-quantity, and
 minimum-notional constraints.
 **Verified:** 2026-06-20
-**Status:** passed locally; server deployment pending
+**Status:** passed locally and on server
 
 ## Goal Achievement
 
@@ -30,6 +30,11 @@ minimum-notional constraints.
 |---------|--------|
 | `python -m unittest tests.test_ops_position_adjustment tests.test_cli tests.test_agent_runner` | Passed locally, `52` tests |
 | `python -m unittest discover -s tests` | Passed locally, `293` tests |
+| Server focused suite | Passed, `52` tests |
+| Server full suite | Passed, `293` tests |
+| Server health check | Passed with Binance public and DeepSeek API checks |
+| Server read-only adjustment preview | `SOLUSDT` full-close plan ready, `SELL MARKET 0.16`, `quantity_filter_checked` |
+| Follow-up read-only adjustment preview | Still `adjustment_plan_ready` at `2026-06-20T11:55:29Z`; live timer paused for operator review |
 
 ## Live Safety
 

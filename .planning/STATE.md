@@ -4,8 +4,8 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 33
 status: active
-stopped_at: Phase 33 local verification passed; server deployment pending
-last_updated: "2026-06-20T19:46:55+08:00"
+stopped_at: Phase 33 deployed; timer paused while SOLUSDT close decision is pending
+last_updated: "2026-06-20T19:55:29+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 33 — Filter-Aware Position Adjustments
-**Status:** Phase 33 local verification passed; server deployment pending
+**Status:** Phase 33 deployed and verified; live timer paused while operator reviews SOLUSDT
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -321,28 +321,57 @@ respect Binance symbol filters before any confirmation token can execute.
   live reduce order. Focused local suites passed with 52 tests and the full
   local suite passed with 293 tests.
 
+- Phase 33 server deployment is complete under
+  `/opt/binance-futures-agent/app`. The live timer was paused during deploy,
+  the package was reinstalled editable in `/opt/binance-futures-agent/.venv`,
+  server focused tests passed with 52 tests, server full suite passed with 293
+  tests, and the secret-safe health check passed with Binance public and
+  DeepSeek API checks enabled.
+
+- Server read-only `ops position-adjustment-plan` after Phase 33 deployment
+  reported
+  `adjustment_plan_ready` for the protected active `SOLUSDT` LONG `0.16`.
+  The filter-aware close plan is `SELL MARKET 0.16`, `positionSide=LONG`,
+  with `quantity_filter_checked`. The position was about 28.88 minutes into a
+  15-minute hold window, review recommendation `close_review`, urgency `high`,
+  and unrealized PnL about `0.06971011` USDT at the preview. No adjustment
+  execution was run.
+
+- Follow-up read-only SOLUSDT preview at `2026-06-20T11:55:29Z` still reports
+  `adjustment_plan_ready`: active `SOLUSDT` LONG `0.16`, protected by two algo
+  orders, no normal open orders, about 34.37 minutes into a 15-minute hold
+  window, unrealized PnL about `0.0576` USDT, and the same filter-aware full
+  close plan `SELL MARKET 0.16`, `positionSide=LONG`. The live timer is paused
+  while the operator reviews the open position and profile sizing.
+
+- Server `ops exposure-status --target-profile 30u_10x_multi_dynamic
+  --allow-two-positions` still reports `ready_for_profile_switch` with
+  confirmation token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
+  No profile apply was run and the live env remains 30U/5x/12U/one-position.
+
 ## Next Command
 
-Deploy Phase 33 to the isolated server and preview filter-aware
-`ops position-adjustment-plan`. Do not execute adjustment orders or apply
+Await operator decision on the active `SOLUSDT` adjustment/profile change.
+Do not restore the live timer, execute adjustment orders, or apply
 `30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 33 local implementation; server deployment pending
+**Stopped at:** Phase 33 deployed; timer paused while SOLUSDT decision is pending
 **Resume file:** .planning/phases/33-filter-aware-position-adjustments/33-01-SUMMARY.md
 
 ## Current Position
 
 Phase: 33 — Filter-Aware Position Adjustments
 Plan: 33-01 local implementation
-Status: Local verification passed; server deployment pending; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — filter-aware adjustment planning added locally
+Status: Deployed and verified; timer paused; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — filter-aware adjustment planning deployed
 
 ## Operator Next Steps
 
-- Deploy Phase 33 and run server verification.
+- Decide whether to close/review the active `SOLUSDT` position before restoring
+  the live timer.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
 - Apply `30u_10x_multi_dynamic` only if the operator explicitly confirms the
