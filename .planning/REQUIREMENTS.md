@@ -316,39 +316,39 @@ projects or losing control of downside.
 | HLP-03 | Phase 30 | Complete |
 | HLP-04 | Phase 30 | Complete |
 | QSR-01 | Phase 30 | Complete |
-| APR-01 | Phase 31 | Complete locally |
-| APR-02 | Phase 31 | Complete locally |
-| APR-03 | Phase 31 | Complete locally |
-| APR-04 | Phase 32 | Complete locally |
+| APR-01 | Phase 31 | Complete and deployed |
+| APR-02 | Phase 31 | Complete and deployed |
+| APR-03 | Phase 31 | Complete and deployed |
+| APR-04 | Phase 32 | Complete and deployed |
 | APR-05 | Phase 33 | Complete and deployed |
 | QSE-01 | Phase 34 | Complete and deployed |
 | QSE-02 | Phase 34 | Complete and deployed |
 | QSE-03 | Phase 34 | Complete and deployed |
 | QSE-04 | Phase 34 | Complete and deployed |
 | QSE-05 | Phase 34 | Complete and deployed |
-| QBT-01 | Phase 35 | Complete locally |
-| QBT-02 | Phase 35 | Complete locally |
-| QBT-03 | Phase 35 | Complete locally |
-| QSI-01 | Phase 36 | Complete locally |
-| QSI-02 | Phase 36 | Complete locally |
-| QSI-03 | Phase 36 | Complete locally |
-| QSI-04 | Phase 36 | Complete locally |
-| SPG-01 | Phase 37 | Complete locally |
-| SPG-02 | Phase 37 | Complete locally |
-| SPG-03 | Phase 37 | Complete locally |
-| SPG-04 | Phase 37 | Complete locally |
-| QSC-01 | Phase 38 | Complete locally |
-| QSC-02 | Phase 38 | Complete locally |
-| QSC-03 | Phase 38 | Complete locally |
-| QSC-04 | Phase 38 | Complete locally |
-| IFP-01 | Phase 39 | Complete locally |
-| IFP-02 | Phase 39 | Complete locally |
-| IFP-03 | Phase 39 | Complete locally |
-| IFP-04 | Phase 39 | Complete locally |
-| FPE-01 | Phase 40 | Complete locally |
-| FPE-02 | Phase 40 | Complete locally |
-| FPE-03 | Phase 40 | Complete locally |
-| FPE-04 | Phase 40 | Complete locally |
+| QBT-01 | Phase 35 | Complete |
+| QBT-02 | Phase 35 | Complete |
+| QBT-03 | Phase 35 | Complete |
+| QSI-01 | Phase 36 | Complete |
+| QSI-02 | Phase 36 | Complete |
+| QSI-03 | Phase 36 | Complete |
+| QSI-04 | Phase 36 | Complete |
+| SPG-01 | Phase 37 | Complete |
+| SPG-02 | Phase 37 | Complete |
+| SPG-03 | Phase 37 | Complete |
+| SPG-04 | Phase 37 | Complete |
+| QSC-01 | Phase 38 | Complete |
+| QSC-02 | Phase 38 | Complete |
+| QSC-03 | Phase 38 | Complete |
+| QSC-04 | Phase 38 | Complete |
+| IFP-01 | Phase 39 | Complete |
+| IFP-02 | Phase 39 | Complete |
+| IFP-03 | Phase 39 | Complete |
+| IFP-04 | Phase 39 | Complete |
+| FPE-01 | Phase 40 | Complete and deployed |
+| FPE-02 | Phase 40 | Complete and deployed |
+| FPE-03 | Phase 40 | Complete and deployed |
+| FPE-04 | Phase 40 | Complete and deployed |
 | FPS-01 | Phase 41 | Complete and deployed |
 | FPS-02 | Phase 41 | Complete and deployed |
 | FPS-03 | Phase 41 | Complete and deployed |
@@ -365,19 +365,19 @@ projects or losing control of downside.
 | FGC-02 | Phase 44 | Complete and deployed |
 | FGC-03 | Phase 44 | Complete and deployed |
 | FGC-04 | Phase 44 | Complete and deployed |
-| LAC-01 | Phase 45 | Complete locally |
-| LAC-02 | Phase 45 | Complete locally |
-| LAC-03 | Phase 45 | Complete locally |
-| LAC-04 | Phase 45 | Complete locally |
+| LAC-01 | Phase 45 | Complete and deployed |
+| LAC-02 | Phase 45 | Complete and deployed |
+| LAC-03 | Phase 45 | Complete and deployed |
+| LAC-04 | Phase 45 | Complete and deployed |
 | LAD-01 | Phase 46 | Complete and deployed |
 | LAD-02 | Phase 46 | Complete and deployed |
 | LAD-03 | Phase 46 | Complete and deployed |
-| FPG-05 | Phase 47 | Complete locally |
-| FLA-05 | Phase 47 | Complete locally |
-| ACG-01 | Phase 47 | Complete locally |
-| ACG-02 | Phase 47 | Complete locally |
-| ACG-03 | Phase 47 | Complete locally |
-| ACG-04 | Phase 47 | Complete locally |
+| FPG-05 | Phase 47 | Complete and deployed |
+| FLA-05 | Phase 47 | Complete and deployed |
+| ACG-01 | Phase 47 | Complete and deployed |
+| ACG-02 | Phase 47 | Complete and deployed |
+| ACG-03 | Phase 47 | Complete and deployed |
+| ACG-04 | Phase 47 | Complete and deployed |
 
 **Coverage:**
 - v1.22 requirements: 72 total

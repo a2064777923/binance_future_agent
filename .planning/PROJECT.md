@@ -233,9 +233,9 @@ The user's chosen direction:
 
 ## Current State
 
-Milestones v1.0 and v1.21 are archived. Phases 1 through 30 are complete
-locally; Phase 30 server deployment and live profile preview are pending. The
-project is installable as an isolated
+Milestones v1.0 and v1.21 are archived. Phases 1 through 47 are complete, and
+the current server deployment is installed under the isolated
+`/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
 output, a local SQLite event store, deterministic replay/report foundations,
@@ -482,9 +482,9 @@ confirmation gate.
   flat.
 - Persist time-exit execution evidence.
 
-**Status:** Complete locally. Server deployment must verify only non-trading
-behavior unless the operator explicitly approves closing the current BNBUSDT
-position.
+**Status:** Complete and deployed. Live execution remains confirmation-gated
+and no close order is submitted unless the operator explicitly approves the
+fresh token.
 
 ## Previous Milestone: v1.20 Dynamic Sizing And Multi-Position Guard
 

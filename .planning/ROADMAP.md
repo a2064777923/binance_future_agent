@@ -66,8 +66,8 @@ by portfolio-level risk budgets.
 **Requirements:** PRM-01, PRM-02, PRM-03, PRM-04, PRM-05, HLP-01, HLP-02,
 HLP-03, HLP-04, QSR-01
 
-**Status:** Complete locally. Server deployment and live env switching remain
-separate operator-gated actions.
+**Status:** Complete and deployed. Live env switching remains a separate
+operator-gated action.
 
 **Plans:** 1 plan
 
@@ -100,7 +100,7 @@ recommendations.
 
 **Requirements:** APR-01, APR-02, APR-03
 
-**Status:** Complete locally and deployed; read-only server preview verified.
+**Status:** Complete and deployed; read-only server preview verified.
 
 **Plans:** 1 plan
 
@@ -204,7 +204,7 @@ sweeps and hot-symbol matrix reporting.
 
 **Requirements:** QBT-01, QBT-02, QBT-03
 
-**Status:** Complete locally.
+**Status:** Complete; local/offline backtest calibration evidence recorded.
 
 **Plans:** 1 plan
 
@@ -230,7 +230,8 @@ and trace-visible stop/target rationale.
 
 **Requirements:** QSI-01, QSI-02, QSI-03, QSI-04
 
-**Status:** Complete locally.
+**Status:** Complete; indicator logic verified locally and used by later
+paper/deployed phases.
 
 **Plans:** 1 plan
 
@@ -259,7 +260,7 @@ pilot profitability and drawdown checks.
 
 **Requirements:** SPG-01, SPG-02, SPG-03, SPG-04
 
-**Status:** Complete locally.
+**Status:** Complete; read-only promotion gate verified locally.
 
 **Plans:** 1 plan
 
@@ -290,7 +291,7 @@ without changing live defaults.
 
 **Requirements:** QSC-01, QSC-02, QSC-03, QSC-04
 
-**Status:** Complete locally; latest matrix still fails total promotion.
+**Status:** Complete; latest matrix still fails total promotion.
 
 **Plans:** 1 plan
 
@@ -321,7 +322,7 @@ resume or risk-profile changes.
 
 **Requirements:** IFP-01, IFP-02, IFP-03, IFP-04
 
-**Status:** Complete locally; 5m selective is forward-paper allowed, live resume
+**Status:** Complete; 5m selective is forward-paper allowed, live resume
 remains blocked.
 
 **Plans:** 1 plan
@@ -351,7 +352,7 @@ quant setup variants without creating live or dry-run order intents.
 
 **Requirements:** FPE-01, FPE-02, FPE-03, FPE-04
 
-**Status:** Complete locally; server deployment/scheduling remains pending.
+**Status:** Complete and deployed; scheduling was added by Phase 41.
 
 **Plans:** 1 plan
 
