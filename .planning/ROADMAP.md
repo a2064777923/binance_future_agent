@@ -10,8 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phase 30, local
-  implementation complete; server deployment pending.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-31, active.
 
 ## Phases
 
@@ -86,13 +85,35 @@ separate operator-gated actions.
 6. `ops exposure-status` reports portfolio budget context.
 7. Full local test suite passes.
 
+### Phase 31: Active Position Review
+
+**Goal:** Add a read-only active-position review layer that turns exchange
+positions and submitted trade plans into deterministic hold/watch/trail/close
+recommendations.
+
+**Requirements:** APR-01, APR-02, APR-03
+
+**Status:** Planned and implemented locally; server deployment pending.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. `ops position-review` produces read-only recommendations for active
+   positions without placing or modifying orders.
+2. Review output includes PnL percent, R-multiple, target progress, hold-time
+   progress, protection count, and matching submitted intent.
+3. Unprotected, missing-plan, overdue, or near-stop positions produce
+   `close_review`; near-target or >=1R positions produce `trail_or_reduce`.
+4. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30 | 1/1 | Complete locally | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-31 | 2/2 | Phase 31 local | Pending |
 
 ## Requirement Coverage
 

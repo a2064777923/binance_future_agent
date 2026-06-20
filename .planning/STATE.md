@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 30
+current_phase: 31
 status: active
-stopped_at: Phase 30 deployed and previewed; live env switch awaits operator token
+stopped_at: Phase 31 active-position review implemented locally; server deployment pending
 last_updated: "2026-06-20T17:35:50+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
@@ -19,9 +19,8 @@ progress:
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 30 — Portfolio Risk And Multi-Position Profile
-**Status:** v1.22 deployed; 10x multi-position profile preview is ready and
-operator-gated
+**Current phase:** Phase 31 — Active Position Review
+**Status:** Phase 31 local implementation in progress; server deployment pending
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -32,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Decide whether to apply the confirmation-gated
-`30u_10x_multi_dynamic` profile after reviewing the deployed preview evidence.
+**Current focus:** Add deterministic active-position review before building
+execution-capable staged exits or trailing-stop management.
 
 ## Decisions
 
@@ -262,32 +261,37 @@ projects or losing control of downside.
   `submitted=false`, zero market/candidate/narrative records, and
   `risk_reasons=["multi_position_disabled","max_open_positions_reached"]`.
 
+- Phase 31 local implementation adds read-only `ops position-review`. It reuses
+  active exchange positions and matching submitted trade intents to report PnL
+  percent, stop-risk R multiple, target progress, hold-time progress,
+  protection count, and a deterministic recommendation: `hold`, `watch`,
+  `trail_or_reduce`, or `close_review`. It does not place, cancel, or modify
+  exchange orders.
+
 ## Next Command
 
-Operator decision point: apply `30u_10x_multi_dynamic` only if the operator
-explicitly confirms the fresh profile token and accepts the 30U/10x/two-position
-portfolio caps. Otherwise keep running the unchanged 5x/12U/one-position live
-profile.
+Run full local tests for Phase 31, then deploy to the isolated server and run a
+read-only `ops position-review` preview. Do not place trailing-stop or staged
+exit orders in this phase.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 30 deployed and previewed; live env switch awaits operator token
-**Resume file:** .planning/phases/30-portfolio-risk-and-multi-position-profile/30-01-SUMMARY.md
+**Stopped at:** Phase 31 local implementation; server deployment pending
+**Resume file:** .planning/phases/31-active-position-review/31-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 30 — Portfolio Risk And Multi-Position Profile
-Plan: 30-01 complete locally
-Status: Deployed; current live profile remains 5x/12U/one-position until token-confirmed apply
-Last activity: 2026-06-20 — portfolio caps, candidate queue, and 30u_10x_multi_dynamic preview deployed
+Phase: 31 — Active Position Review
+Plan: 31-01 local implementation
+Status: Local verification pending; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — read-only active-position review command added locally
 
 ## Operator Next Steps
 
-- Review the deployed `30u_10x_multi_dynamic` preview and decide whether to
-  apply it.
-- If applying, use `ops risk-profile-apply` only with the fresh confirmation
-  token from the server preview and only while the live service is inactive.
-- If not applying, keep the current 5x/12U/one-position timer running.
-- Next strategy milestone should add periodic active-position review plus
-  staged exit/trailing-stop management.
+- Run full local tests and `git diff --check`.
+- Deploy Phase 31 to `/opt/binance-futures-agent/app` after local verification.
+- Run server focused/full tests and secret-safe health check.
+- Preview `ops position-review` on the server.
+- Next strategy milestone should add confirmation-gated staged exit/trailing
+  stop management.

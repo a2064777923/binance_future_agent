@@ -51,11 +51,19 @@ projects or losing control of downside.
 
 ### Active Position Review
 
-- **APR-01**: Add an automated position review loop that re-scores open
-  positions at a configurable cadence and recommends hold, reduce, close, or
-  trail-stop actions before executing any change.
+- [x] **APR-01**: Add a read-only active-position review command that re-scores
+  open positions and recommends hold, watch, trail/reduce, or close-review
+  actions before executing any change.
 
-- **APR-02**: Add staged take-profit / trailing-stop order management for live
+- [x] **APR-02**: Review output includes deterministic PnL percent,
+  stop-risk R multiple, target progress, hold-time progress, protection count,
+  and matching submitted-intent evidence.
+
+- [x] **APR-03**: Review recommendations fail closed for unprotected,
+  missing-plan, overdue, or near-stop positions, while near-target or >=1R
+  positions are recommended for future trail/reduce handling.
+
+- **APR-04**: Add staged take-profit / trailing-stop order management for live
   positions after the exchange-order lifecycle is fully reconciled.
 
 ## Out of Scope
@@ -80,10 +88,13 @@ projects or losing control of downside.
 | HLP-03 | Phase 30 | Complete |
 | HLP-04 | Phase 30 | Complete |
 | QSR-01 | Phase 30 | Complete |
+| APR-01 | Phase 31 | Complete locally |
+| APR-02 | Phase 31 | Complete locally |
+| APR-03 | Phase 31 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 10 total
-- Mapped to phases: 10
+- v1.22 requirements: 13 total
+- Mapped to phases: 13
 - Unmapped: 0
 
 ---

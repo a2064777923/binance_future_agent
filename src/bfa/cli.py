@@ -37,6 +37,7 @@ from bfa.ops.health import run_health_checks
 from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
+from bfa.ops.position_review import build_position_review_report
 from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
@@ -336,6 +337,19 @@ def _build_parser() -> argparse.ArgumentParser:
     position_hold_check.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     position_hold_check.add_argument("--now", help="optional ISO timestamp for deterministic checks")
     position_hold_check.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
+
+    position_review = ops_subparsers.add_parser(
+        "position-review",
+        help="read-only review of active positions with hold/watch/trail/close recommendations",
+    )
+    position_review.add_argument("--env-file", help="optional env file to load before environment overrides")
+    position_review.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    position_review.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    position_review.add_argument(
         "--skip-binance",
         action="store_true",
         help="use only local event-store evidence instead of signed Binance reads",
@@ -906,6 +920,16 @@ def _run_ops(
         return 0
     if args.ops_command == "position-hold-check":
         report = build_position_hold_check_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 1 if report.action_required else 0
+    if args.ops_command == "position-review":
+        report = build_position_review_report(
             config,
             db_path=args.db,
             check_binance=not args.skip_binance,

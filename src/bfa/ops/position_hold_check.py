@@ -22,6 +22,9 @@ class PositionHoldIntent:
     side: str
     quantity: float | None = None
     leverage: int | None = None
+    entry_price: float | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
     hold_time_minutes: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -32,6 +35,9 @@ class PositionHoldIntent:
             "side": self.side,
             "quantity": self.quantity,
             "leverage": self.leverage,
+            "entry_price": self.entry_price,
+            "stop_price": self.stop_price,
+            "target_price": self.target_price,
             "hold_time_minutes": self.hold_time_minutes,
         }
 
@@ -413,6 +419,9 @@ def _latest_unclosed_submitted_intent(
             side=side,
             quantity=_float_or_none(intent_payload.get("quantity")),
             leverage=_int_or_none(intent_payload.get("leverage")),
+            entry_price=_float_or_none(intent_payload.get("entry_price")),
+            stop_price=_float_or_none(intent_payload.get("stop_price")),
+            target_price=_float_or_none(intent_payload.get("target_price")),
             hold_time_minutes=_int_or_none(metadata_payload.get("hold_time_minutes")),
         )
     return None

@@ -1373,6 +1373,85 @@ class CliTests(unittest.TestCase):
         self.assertEqual(order_plan["position_side"], "LONG")
         self.assertFalse(order_plan["reduce_only"])
 
+    def test_ops_position_review_outputs_read_only_recommendation(self):
+        class FakeSignedClient:
+            def account(self):
+                return {"availableBalance": "30", "totalWalletBalance": "30"}
+
+            def position_risk(self):
+                return [
+                    {
+                        "symbol": "BNBUSDT",
+                        "positionAmt": "0.01",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "107",
+                        "unRealizedProfit": "0.07",
+                    }
+                ]
+
+            def open_orders(self):
+                return []
+
+            def open_algo_orders(self):
+                return [
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-20T03:43:09Z",
+                source="execution.live",
+                symbol="BNBUSDT",
+                ref_id="order_intent:BNBUSDT:2026-06-20T03:43:09Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "BNBUSDT",
+                        "side": "BUY",
+                        "quantity": 0.01,
+                        "entry_price": 100,
+                        "stop_price": 96,
+                        "target_price": 108,
+                        "leverage": 5,
+                        "metadata": {"hold_time_minutes": 120},
+                    },
+                },
+                event_type="order_intent",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "position-review",
+                "--db",
+                str(db_path),
+                "--now",
+                "2026-06-20T04:00:00Z",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "review_ok")
+        self.assertEqual(payload["positions"][0]["recommendation"], "trail_or_reduce")
+        self.assertIn("near_target", payload["positions"][0]["reasons"])
+
     def test_ops_time_exit_execute_requires_token_before_order(self):
         class FakeSignedClient:
             def __init__(self):

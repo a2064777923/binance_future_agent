@@ -50,6 +50,8 @@ class PositionHoldCheckTests(unittest.TestCase):
                     "side": "BUY",
                     "quantity": 0.01,
                     "entry_price": 581.47,
+                    "stop_price": 575.0,
+                    "target_price": 593.0,
                     "leverage": 5,
                     "metadata": {"hold_time_minutes": hold_time_minutes},
                 },
@@ -75,6 +77,8 @@ class PositionHoldCheckTests(unittest.TestCase):
         self.assertFalse(result.action_required)
         self.assertEqual(result.status, "within_hold_window")
         self.assertEqual(result.positions[0].matching_intent.event_id, 1)
+        self.assertEqual(result.positions[0].matching_intent.stop_price, 575.0)
+        self.assertEqual(result.positions[0].matching_intent.target_price, 593.0)
         self.assertFalse(result.positions[0].overdue)
         self.assertAlmostEqual(result.positions[0].elapsed_minutes, 16.85)
 
