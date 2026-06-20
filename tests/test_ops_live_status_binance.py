@@ -23,6 +23,10 @@ class FakeSignedClient:
         self.calls.append("open_orders")
         return [{"symbol": "SOLUSDT", "clientOrderId": "bfa-solusdt", "status": "NEW"}]
 
+    def open_algo_orders(self):
+        self.calls.append("open_algo_orders")
+        return [{"symbol": "SOLUSDT", "clientAlgoId": "bfa-solusdt-sl", "triggerPrice": "96"}]
+
 
 class LiveStatusBinanceTests(unittest.TestCase):
     def test_live_status_can_include_read_only_binance_evidence(self):
@@ -48,6 +52,8 @@ class LiveStatusBinanceTests(unittest.TestCase):
         self.assertEqual(payload["exchange_evidence"]["account"]["can_trade"], True)
         self.assertEqual(len(payload["exchange_evidence"]["positions"]), 1)
         self.assertEqual(len(payload["exchange_evidence"]["open_orders"]), 1)
+        self.assertEqual(len(payload["exchange_evidence"]["open_algo_orders"]), 1)
+        self.assertEqual(payload["protective_evidence"]["details"]["exchange_open_algo_orders"], 1)
 
 
 if __name__ == "__main__":

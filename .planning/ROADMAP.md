@@ -9,8 +9,8 @@
 - ✅ **v1.0 Dry-Run Binance Futures Agent** — Phases 1-8, shipped 2026-06-19
   ([archive](milestones/v1.0-ROADMAP.md)).
 
-- ✅ **v1.1 Live Activation** — Phase 9, live timer active under pilot caps;
-  LVA-05 remains a future-entry evidence gate.
+- ✅ **v1.1 Live Activation** — Phase 9, live timer activation verified; LVA-05
+  was later satisfied by the first protected ZECUSDT live entry.
 - ✅ **v1.2 Backtest Calibration** — Phase 10, completed 2026-06-20.
 - ✅ **v1.3 Decision Robustness** — Phase 11, completed 2026-06-20.
 - ✅ **v1.4 Pilot Tradability Filter** — Phase 12, completed 2026-06-20.
@@ -20,6 +20,8 @@
 - ✅ **v1.8 Position Mode Entry Fail-Closed** — Phase 16, completed 2026-06-20.
 - ✅ **v1.9 Balance Preflight Gate** — Phase 17, completed 2026-06-20.
 - ✅ **v1.10 DeepSeek Provider Switch** — Phase 18, completed 2026-06-20.
+- ✅ **v1.11 30U Higher-Leverage Trial Profile** — Phase 19, completed 2026-06-20
+  with live timer paused for open-position review.
 
 ## Phases
 
@@ -47,10 +49,12 @@ protective-order, or isolation guarantees.
 
 **Requirements:** LVA-01, LVA-02, LVA-03, LVA-04, LVA-05, LVA-06
 
-**Status:** Complete for activation readiness. Live timer is enabled/active;
+**Status:** Complete for activation readiness. Live timer is currently paused
+for open-position review;
 market-heat fallback now produces candidates without Square/RSS input; a
 candidate-driven live cycle reached OpenAI and resulted in pass/no submission.
-OpenAI timeouts enter backoff. LVA-05 is conditional on a future submitted entry.
+OpenAI timeouts enter backoff. LVA-05 is now satisfied by the first ZECUSDT
+submitted entry and its protective algo orders.
 
 **Success Criteria:**
 
@@ -265,6 +269,34 @@ and all live risk caps.
 5. Full tests, DeepSeek smoke test, and server health checks pass after
    deployment.
 
+### Phase 19: 30U Higher-Leverage Trial Profile
+
+**Goal:** Reconfigure the live pilot for a 30 USDT funded trial with a modest
+5x leverage ceiling while keeping absolute downside caps tighter than the
+previous 100 USDT profile.
+
+**Requirements:** HLT-01, HLT-02, HLT-03
+
+**Status:** Complete; timer intentionally paused while a pre-switch ZECUSDT
+position remains open.
+
+**Success Criteria:**
+
+1. Server env changes only the active trial risk profile values:
+   `BFA_ACCOUNT_CAPITAL_USDT=30`, `BFA_MAX_LEVERAGE=5`,
+   `BFA_MAX_POSITION_NOTIONAL_USDT=12`,
+   `BFA_MAX_RISK_PER_TRADE_USDT=0.3`,
+   `BFA_MAX_DAILY_LOSS_USDT=1`, and `BFA_MAX_OPEN_POSITIONS=1`.
+2. DeepSeek provider, Binance credentials, `BFA_MARGIN_MODE=cross`,
+   `BFA_POSITION_MODE=hedge`, `BFA_REQUIRE_PROTECTIVE_ORDERS=true`, and
+   isolated systemd paths remain unchanged.
+3. Server health check and focused tests pass after the profile switch.
+4. Server live-status shows the current exchange state, including the existing
+   ZECUSDT position, zero normal open orders, two open algo protective orders,
+   and no active AI backoff.
+5. The live timer remains paused until the existing live position is closed or
+   the operator explicitly approves resuming cycles under the 1-position cap.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -287,16 +319,17 @@ and all live risk caps.
 | 16 | v1.8 | 1/1 | Complete | 2026-06-20 |
 | 17 | v1.9 | 1/1 | Complete | 2026-06-20 |
 | 18 | v1.10 | 1/1 | Complete | 2026-06-20 |
+| 19 | v1.11 | 1/1 | Complete, timer paused for open-position review | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.10 requirements: 38
-- Mapped: 38
+- v1.1-v1.11 requirements: 41
+- Mapped: 41
 - Unmapped: 0
 
 ## Next Step
 
-DeepSeek provider switch is deployed and the live timer is active. Keep 100
-USDT pilot caps unchanged. Funding the USD-M futures account is still required
-before the bot can submit a real entry; after the first submitted live entry,
-verify protective-order evidence with `ops live-status`.
+Review the open ZECUSDT position. Re-enable
+`binance-futures-agent-live.timer` only after the position closes, or after
+explicit operator approval to resume scanning while `BFA_MAX_OPEN_POSITIONS=1`
+blocks new entries.

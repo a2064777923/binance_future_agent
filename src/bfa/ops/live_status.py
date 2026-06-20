@@ -201,6 +201,7 @@ def _read_exchange_evidence(config: AppConfig) -> dict[str, Any]:
     account = client.account()
     positions = client.position_risk()
     open_orders = client.open_orders()
+    open_algo_orders = client.open_algo_orders()
     return {
         "account": {
             "can_trade": account.get("canTrade"),
@@ -209,6 +210,7 @@ def _read_exchange_evidence(config: AppConfig) -> dict[str, Any]:
         },
         "positions": [p for p in positions if _float(p.get("positionAmt")) != 0.0],
         "open_orders": open_orders,
+        "open_algo_orders": open_algo_orders,
     }
 
 
@@ -218,13 +220,15 @@ def _merge_protective_evidence(
 ) -> ProtectiveEvidence:
     positions = exchange_evidence.get("positions") or []
     open_orders = exchange_evidence.get("open_orders") or []
-    if not positions and not open_orders:
+    open_algo_orders = exchange_evidence.get("open_algo_orders") or []
+    if not positions and not open_orders and not open_algo_orders:
         return evidence
     details = dict(evidence.details)
     details.update(
         {
             "exchange_positions": len(positions),
             "exchange_open_orders": len(open_orders),
+            "exchange_open_algo_orders": len(open_algo_orders),
         }
     )
     return ProtectiveEvidence(

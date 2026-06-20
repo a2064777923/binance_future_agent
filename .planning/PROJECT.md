@@ -5,7 +5,7 @@
 Binance Futures Agent is an isolated crypto futures trading system for Binance
 USD-M contracts. It watches hot coins from Binance Square and other narrative
 sources, confirms them with futures-market anomalies, asks a configured AI
-provider for structured trade decisions, and can run a tightly capped 100 USDT
+provider for structured trade decisions, and can run a tightly capped small-USDT
 live pilot on a dedicated server.
 
 This project is separate from the existing HK/US stock repository. It may borrow
@@ -81,10 +81,13 @@ control of downside.
   margin with the current Multi-Assets account while preserving pilot caps.
 - Phase 16 added explicit position mode and entry-order fail-closed handling
   after live evidence showed the account expects Binance `positionSide`.
-- Phase 17 adds a live account-balance preflight so an unfunded USD-M futures
+- Phase 17 added a live account-balance preflight so an unfunded USD-M futures
   account rejects locally before margin setup or entry order placement.
 - Phase 18 adds DeepSeek provider support using Chat Completions JSON mode after
   the previous OpenAI-compatible endpoint produced invalid JSON/timeouts.
+- Phase 19 switches the active trial profile from 100 USDT/3x to a tighter 30
+  USDT/5x trial with lower absolute notional, trade-risk, daily-loss, and
+  concurrency caps.
 
 ### Active
 
@@ -97,15 +100,15 @@ control of downside.
   interest change, taker flow, funding state, and volatility.
 - [x] Use a configured AI provider to produce structured trade decisions with
   entry, invalidation, stop, target, time limit, and confidence.
-- [x] Implement risk-capped Binance live execution for a 100 USDT pilot account.
+- [x] Implement risk-capped Binance live execution for a small-USDT pilot account.
 - [x] Deploy on server `64.83.34.222` under a project-isolated directory and
   systemd unit without modifying existing services.
 - [x] Improve live AI decision quality so `trade` decisions include executable
   entry, stop, and target prices derived from market reference data.
 - [x] Avoid spending AI/live execution cycles on hot symbols whose Binance
-  minimum executable notional exceeds the 100 USDT pilot position cap.
+  minimum executable notional exceeds the active pilot position cap.
 - [x] Use a controlled pilot symbol universe that is compatible with current
-  Binance filters under the 20 USDT max-position-notional cap.
+  Binance filters under small max-position-notional caps.
 - [x] Fail closed when Binance margin/leverage setup cannot be applied before
   entry order submission.
 - [x] Support explicit cross margin setup for the current Binance Multi-Assets
@@ -114,13 +117,15 @@ control of downside.
   without increasing pilot caps.
 - [x] Reject live order intents before exchange order calls when Binance USD-M
   futures available balance is below estimated initial margin.
-- [ ] Capture LVA-05 protective-order evidence after the first submitted live
+- [x] Switch server runtime caps to the approved 30 USDT/5x trial profile and
+  verify health/live-status evidence.
+- [x] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
 
 ### Out of Scope
 
 - Full Hermes-style review workflow - too heavy for this faster crypto pilot.
-- Real-money scaling above the 100 USDT pilot - requires separate evidence and
+- Real-money scaling above the active trial capital - requires separate evidence and
   explicit approval.
 - Cross-exchange arbitrage - defer until Binance-only behavior is understood.
 - Fully autonomous model self-modification - the system may learn from journals,
@@ -143,7 +148,7 @@ The user's chosen direction:
 - Deployment target: server `64.83.34.222`, root user, isolated path
   `/opt/binance-futures-agent`.
 - Trading venue: Binance USD-M futures.
-- Initial capital: 100 USDT.
+- Current trial capital: 30 USDT, after starting from an initial 100 USDT planning profile.
 - Execution intent: live small-capital pilot, not only paper trading.
 - First strategy focus: hot coins, especially Binance Square narratives.
 - AI provider: DeepSeek for live use, with OpenAI Responses provider still
@@ -157,14 +162,14 @@ The user's chosen direction:
 - **Isolation**: The project must not modify `F:\stock` or server-side existing
   services. Use its own repo, virtualenv, systemd unit, data directory, logs,
   and runtime files.
-- **Capital**: Initial account capital is 100 USDT, so the first live risk model
+- **Capital**: Current trial capital is 30 USDT, so the live risk model
   must assume very small orders and high sensitivity to fees/slippage.
 - **Execution**: Live mode is allowed, but default code paths must start in
   dry-run/test mode and require explicit environment configuration for live.
-- **Risk**: Initial intelligent defaults are max 3x leverage, max 20 USDT
-  contract notional per position, max 1 USDT risk per trade, max 3 USDT daily
-  loss, and max two concurrent positions. Contract notional is not the same as
-  initial margin; approximate margin is `notional / leverage`.
+- **Risk**: Current trial defaults are max 5x leverage, max 12 USDT
+  contract notional per position, max 0.3 USDT risk per trade, max 1 USDT
+  daily loss, and max one concurrent position. Contract notional is not the
+  same as initial margin; approximate margin is `notional / leverage`.
 - **Exchange API**: Use official Binance USD-M futures APIs for market data,
   account state, and order placement.
 - **Narrative APIs**: Binance Square reading may require browser automation,
@@ -181,48 +186,40 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 18 are complete and verified. The project is installable as an
+Phases 1 through 19 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
-foundations, hot-coin candidate scoring, OpenAI structured decision validation,
+foundations, hot-coin candidate scoring, structured AI decision validation,
 redacted AI journaling, dry-run/live risk-gated execution, signed Binance
 execution helpers, reconciliation reports, deployment health checks, CLI smoke
 commands, automated one-cycle trading runner, live systemd timer assets,
-exchange-side protective order submission, AI provider selection,
-AI timeout/backoff behavior, market-heat fallback narratives, and
-pilot tradability filtering, a 10-symbol cap-compatible pilot universe,
-fail-closed margin setup handling, and explicit configurable margin mode. The
-system now also has explicit configurable position mode and entry-order
-fail-closed handling. The current live blocker is not code mode alignment but an
-unfunded USD-M futures account: available balance is 0, so Phase 17 deployed a
-local available-balance gate before margin setup and entry submission. The server
-deployment is installed under
-`/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
-and AI credentials are configured out of band, the live timer is enabled and
-active, and a candidate-driven live cycle has reached OpenAI and returned
-pass/no submission. Phase 18 switched live AI selection to DeepSeek because the
-previous OpenAI-compatible endpoint was intermittent and returned invalid JSON;
-post-deploy health checks and live timer cycles now reach DeepSeek and return
-validated pass decisions with no submission.
+exchange-side protective order submission, AI provider selection, AI
+timeout/backoff behavior, market-heat fallback narratives, pilot tradability
+filtering, a cap-compatible pilot universe, fail-closed margin setup handling,
+explicit configurable margin mode, explicit position mode, account-balance
+preflight, DeepSeek support, and 30U/5x trial runtime caps.
+
+The server deployment is installed under `/opt/binance-futures-agent` with a
+dedicated env file and systemd units. Binance and AI credentials are configured
+out of band. The active trial profile is 30 USDT account capital, 5x max
+leverage, 12 USDT max position notional, 0.3 USDT max per-trade risk, 1 USDT max
+daily loss, and 1 open position.
+
+A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
+window under the prior 3x settings. It filled at `467.68` for quantity `0.032`
+and has exchange-visible stop-loss and take-profit algo orders. Live-status now
+reports normal open orders and algo orders separately. The live timer is
+currently disabled intentionally while that position is reviewed; automation can
+be resumed after the position closes or after explicit operator approval to run
+while the one-position cap blocks new entries.
+
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
-be cap-incompatible under the 20 USDT max-position-notional pilot setting, while
-SOLUSDT can currently fit. Candidate generation now rejects cap-incompatible
-symbols before AI calls instead of relying only on later order-intent rejection.
-The default pilot universe now avoids BTC/ETH under current caps and uses:
-HYPEUSDT, SOLUSDT, ZECUSDT, WLDUSDT, XRPUSDT, AVAXUSDT, BNBUSDT, DOGEUSDT,
-NEARUSDT, and ADAUSDT.
-The first Phase 13 live cycle produced a ZECUSDT trade decision, but Binance
-rejected isolated-margin setup because the account is in Multi-Assets mode.
-Execution now records this as `margin_setup_failed` without submitting an entry
-order.
-`BFA_MARGIN_MODE=cross` is now available for the server account; it maps to
-Binance `CROSSED` while keeping the 100 USDT pilot caps and protective-order
-requirements unchanged.
-The first cross-mode live trade attempt reached entry order placement, but
-Binance rejected it because the account expects explicit `positionSide`. The
-execution path now supports `BFA_POSITION_MODE=hedge` and records entry order
-errors as rejected evidence rather than service crashes.
+be cap-incompatible under very small max-position-notional settings, while
+several hot-coin symbols can currently fit. Candidate generation rejects
+cap-incompatible symbols before AI calls instead of relying only on later
+order-intent rejection. The default pilot universe uses: HYPEUSDT, SOLUSDT,
+ZECUSDT, WLDUSDT, XRPUSDT, AVAXUSDT, BNBUSDT, DOGEUSDT, NEARUSDT, and ADAUSDT.
 
 ## Previous Milestone: v1.8 Position Mode And Entry Fail-Closed
 
@@ -235,7 +232,7 @@ preserving the same small-capital risk limits.
 - Persist entry-order failures as rejected, non-submitted evidence.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
-## Current Milestone: v1.9 Balance Preflight Gate
+## Previous Milestone: v1.9 Balance Preflight Gate
 
 **Goal:** Avoid repeated live order attempts when the Binance USD-M futures
 account has less available balance than the order intent's estimated initial
@@ -247,7 +244,7 @@ margin.
 - Reject account balance read errors before entry order placement.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
-## Current Milestone: v1.10 DeepSeek Provider Switch
+## Previous Milestone: v1.10 DeepSeek Provider Switch
 
 **Goal:** Switch live AI decisions to DeepSeek while preserving strict JSON
 validation and all pilot risk caps.
@@ -257,6 +254,23 @@ validation and all pilot risk caps.
 - Use DeepSeek Chat Completions JSON mode.
 - Extract fenced/prefixed JSON before schema validation.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
+
+## Current Milestone: v1.11 30U Higher-Leverage Trial Profile
+
+**Goal:** Configure the live system for a 30 USDT funded trial with a modest 5x
+leverage ceiling while lowering absolute exposure.
+
+**Target profile:**
+- Account capital: 30 USDT.
+- Max leverage: 5x.
+- Max position notional: 12 USDT.
+- Max risk per trade: 0.3 USDT.
+- Max daily loss: 1 USDT.
+- Max open positions: 1.
+
+**Status:** Complete. Server caps are verified, live-status shows the current
+ZECUSDT position and two protective algo orders, and the live timer is paused
+for open-position review.
 
 ## Key Decisions
 
@@ -281,8 +295,9 @@ validation and all pilot risk caps.
 | Make position mode explicit | The live account can require hedge `positionSide`; using it must be deliberate, validated, and still capped. | Phase 16 complete |
 | Add balance preflight before live orders | The live account can be unfunded even when order geometry is valid; avoid repeated exchange-side insufficient-margin errors. | Phase 17 complete |
 | Add DeepSeek provider support | The previous OpenAI-compatible endpoint was intermittent and returned invalid JSON; DeepSeek can use Chat Completions JSON mode behind the same validation gates. | Phase 18 complete and deployed |
+| Switch to 30U/5x trial profile | User wants to fund 30 USDT for a first live trial; higher leverage is allowed only with tighter absolute notional/loss/concurrency caps. | Phase 19 complete; timer paused for open-position review |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
-| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
+| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after completing and deploying v1.10 DeepSeek provider switch.*
+*Last updated: 2026-06-20 after verifying v1.11 30U higher-leverage trial profile.*

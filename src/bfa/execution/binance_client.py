@@ -205,6 +205,11 @@ class BinanceFuturesSignedClient:
         payload = self._signed_request("GET", "/fapi/v1/openOrders", params)
         return payload if isinstance(payload, list) else [payload]
 
+    def open_algo_orders(self, symbol: str | None = None) -> list[dict[str, Any]]:
+        params = {"symbol": _symbol(symbol)} if symbol else {}
+        payload = self._signed_request("GET", "/fapi/v1/openAlgoOrders", params)
+        return payload if isinstance(payload, list) else [payload]
+
     def position_risk(self, symbol: str | None = None) -> list[dict[str, Any]]:
         params = {"symbol": _symbol(symbol)} if symbol else {}
         payload = self._signed_request("GET", "/fapi/v2/positionRisk", params)
@@ -215,7 +220,7 @@ class BinanceFuturesSignedClient:
         method: str,
         endpoint: str,
         params: Mapping[str, str],
-    ) -> dict[str, Any]:
+    ) -> Any:
         signed_params = {key: str(value) for key, value in params.items()}
         signed_params["recvWindow"] = str(self.recv_window)
         signed_params["timestamp"] = str(self.timestamp_ms())
@@ -237,7 +242,7 @@ class BinanceFuturesSignedClient:
             raise _error_from_payload(endpoint, signed_params, status_code, payload, headers)
         if isinstance(payload, dict):
             return dict(payload)
-        return {"payload": payload}
+        return payload
 
 
 def _symbol(value: str | None) -> str:

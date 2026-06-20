@@ -130,11 +130,18 @@ class BinanceSignedClientTests(unittest.TestCase):
         client = self.client(transport)
 
         client.account()
-        client.open_orders("BTCUSDT")
-        client.position_risk("BTCUSDT")
+        open_orders = client.open_orders("BTCUSDT")
+        open_algo_orders = client.open_algo_orders("BTCUSDT")
+        positions = client.position_risk("BTCUSDT")
 
         paths = [urlparse(call["url"]).path for call in transport.calls]
-        self.assertEqual(paths, ["/fapi/v3/account", "/fapi/v1/openOrders", "/fapi/v2/positionRisk"])
+        self.assertEqual(
+            paths,
+            ["/fapi/v3/account", "/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders", "/fapi/v2/positionRisk"],
+        )
+        self.assertEqual(open_orders, [])
+        self.assertEqual(open_algo_orders, [])
+        self.assertEqual(positions, [])
 
     def test_error_payload_raises_structured_error_without_signature(self):
         transport = FakeSignedTransport(response=(400, {"code": -2019, "msg": "Margin is insufficient."}, {}))

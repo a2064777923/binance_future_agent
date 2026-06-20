@@ -31,7 +31,7 @@ v1.0 requirements are archived at
   no order intent is created when OpenAI is unavailable; API failures enter
   backoff and are retried after the configured recovery interval.
 
-- [ ] **LVA-05**: If a live entry order is submitted, prove protective
+- [x] **LVA-05**: If a live entry order is submitted, prove protective
   stop-loss and take-profit algo orders are submitted in the same execution
   path, or prove kill-switch plus emergency reduce-only close behavior.
 
@@ -167,11 +167,26 @@ v1.0 requirements are archived at
   Binance credentials, risk caps, margin mode, position mode, or service
   isolation.
 
+### 30U Higher-Leverage Trial Profile
+
+- [x] **HLT-01**: Server live config can switch from the 100 USDT pilot profile
+  to a 30 USDT trial profile without changing Binance credentials, DeepSeek
+  provider settings, margin mode, position mode, protective-order requirement,
+  or service isolation.
+
+- [x] **HLT-02**: The 30 USDT trial profile caps leverage at 5x, position
+  notional at 12 USDT, single-trade stop risk at 0.3 USDT, daily loss at 1 USDT,
+  and concurrent positions at 1.
+
+- [x] **HLT-03**: Server health and live-status checks pass after the profile
+  switch, and live-status reports the real exchange position and protective
+  algo-order state.
+
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Trading above 100 USDT pilot capital | Requires separate evidence and explicit approval. |
+| Trading above the active configured trial capital | Requires separate evidence and explicit approval. |
 | Running without a configured AI provider key | User selected model-driven decisions; fail-closed is safer than substituting another decision source. |
 | Enabling timer before one-cycle validation | Periodic live trading should start only after one reviewed cycle. |
 | Removing deterministic risk gates | LLM remains slow-path analyst/veto, not direct execution authority. |
@@ -184,7 +199,7 @@ v1.0 requirements are archived at
 | LVA-02 | Phase 9 | Complete - live config valid; OpenAI endpoint is intermittent |
 | LVA-03 | Phase 9 | Complete - candidate-driven live cycle observed |
 | LVA-04 | Phase 9 | Complete - timeout writes backoff and submits no order |
-| LVA-05 | Phase 9 | Not triggered - no live entry has been submitted yet |
+| LVA-05 | Phase 19 | Complete - first live ZECUSDT entry filled and stop-loss/take-profit algo orders are visible |
 | LVA-06 | Phase 9 | Complete - timer enabled and active |
 | BT-01 | Phase 10 | Complete - local harness added |
 | BT-02 | Phase 10 | Complete - staged sweep added |
@@ -218,13 +233,16 @@ v1.0 requirements are archived at
 | DSP-02 | Phase 18 | Complete - DeepSeek Chat Completions JSON mode client added |
 | DSP-03 | Phase 18 | Complete - JSON extraction and schema validation cover noisy AI output |
 | DSP-04 | Phase 18 | Complete - server can switch AI provider without risk cap changes |
+| HLT-01 | Phase 19 | Complete - server env switched while preserving credentials/provider/margin/position/service isolation |
+| HLT-02 | Phase 19 | Complete - 30U/5x/12U/0.3U/1U/1-position caps verified on server |
+| HLT-03 | Phase 19 | Complete - health/live-status checks passed and exchange evidence includes current position plus algo protection |
 
 **Coverage:**
 
-- v1.1-v1.10 requirements: 38 total
-- Mapped to phases: 38
+- v1.1-v1.11 requirements: 41 total
+- Mapped to phases: 41
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.10 DeepSeek provider switch*
+*Last updated: 2026-06-20 after verifying v1.11 30U higher-leverage trial profile*
