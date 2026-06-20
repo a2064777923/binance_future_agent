@@ -22,7 +22,7 @@
   shipped 2026-06-21 ([archive](milestones/v1.24-ROADMAP.md)).
 
 - ✅ **v1.25 Live Resume Clearance And Adaptive Pilot** — Phases 56-60,
-  shipped 2026-06-21.
+  shipped 2026-06-21 ([archive](milestones/v1.25-ROADMAP.md)).
 
 ## Phases
 
@@ -253,7 +253,7 @@ operator-confirmed resume.
 - v1.22 requirements: archived at `.planning/milestones/v1.22-REQUIREMENTS.md`
 - v1.23 requirements: archived at `.planning/milestones/v1.23-REQUIREMENTS.md`
 - v1.24 requirements: archived at `.planning/milestones/v1.24-REQUIREMENTS.md`
-- v1.25 requirements: `.planning/REQUIREMENTS.md`
+- v1.25 requirements: archived at `.planning/milestones/v1.25-REQUIREMENTS.md`
 
 ## Next Step
 

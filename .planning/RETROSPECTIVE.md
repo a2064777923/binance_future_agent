@@ -279,12 +279,71 @@
 - Archive tooling should be checked for timezone drift before final milestone
   commits.
 
+## Milestone: v1.25 — Live Resume Clearance And Adaptive Pilot
+
+**Shipped:** 2026-06-21
+**Phases:** 5
+**Plans:** 5
+
+### What Was Built
+
+- Read-only exposure clearance and append-only manual loss intake so manual,
+  unknown, stale-attributed, and agent-managed exchange exposure can be
+  separated before resume decisions.
+- Forward-paper observations for generated and rejected hot-symbol candidates,
+  including guard blocks, skip reasons, setup factors, and source health.
+- Promotion-stage reporting plus manual loss review, keeping public Lana/Square/X
+  claims as design inputs rather than promotion proof.
+- Confirmation-gated `ops live-resume-plan` and `ops live-resume-apply`.
+- Server Phase 60 evidence artifacts and a widened active pilot profile:
+  10x, 6 open positions, 60 USDT per-position notional, 360 USDT portfolio
+  notional, 300 USDT same-direction notional, 0.4 USDT per-trade risk, and
+  1 USDT daily loss.
+
+### What Worked
+
+- Manual `BTWUSDT` classification kept operator exposure out of bot-managed
+  adjustment logic.
+- Server artifacts made the state legible: entry capacity is available, but
+  formal live-resume apply remains blocked by current evidence.
+- Tight env-key allowlists let caps be widened without touching credentials or
+  unrelated server projects.
+
+### What Was Inefficient
+
+- The user needed live to run while iteration continued, so the workflow had to
+  support safe server changes around active timers instead of a clean paused
+  lab environment.
+- GSD archive tooling again used UTC and broad phase counts, requiring manual
+  correction for local date and v1.25-only stats.
+- Nyquist validation files had to be backfilled before the milestone audit could
+  pass cleanly.
+
+### Patterns Established
+
+- Live pilot caps can be adjusted in narrow, auditable steps while preserving
+  per-trade and daily-loss limits.
+- Manual positions must be listed in config and respected by hot-symbol,
+  position-review, and adjustment-plan flows.
+- "Resume workflow eligibility" and "operator-started live pilot is active" are
+  separate states; the former can remain fail-closed while the latter runs.
+
+### Key Lessons
+
+- Active-position handling is now the next bottleneck: `NEARUSDT` reached
+  `close_review`, but execution remains confirmation-gated/blocked.
+- Wider notional caps only matter if dynamic sizing fractions also allow larger
+  effective sizing.
+- The system should make trade-management decisions explicit enough that the
+  operator can audit why a position is held, reviewed, reduced, or closed.
+
 ## Cross-Milestone Trends
 
 | Trend | Evidence | Next Action |
 |-------|----------|-------------|
 | Safety gates are moving from docs into code | Protective orders, kill switch, AI timeout, resume/risk-change/time-exit gates | Keep new live actions behind read-only preview plus confirmation |
 | External credentials are configured out of band | Binance and AI credentials are present on the server without being committed | Continue treating env files and keys as non-repo secrets |
-| Risk increases require evidence, not enthusiasm | HYPEUSDT/manual exposure and negative paper evidence block profile increases or live resume | Reconcile agent-managed positions after close, mark manual ETH/ETHUSDT separately, then rerun readiness gates |
+| Risk increases require evidence, not enthusiasm | HYPEUSDT/manual exposure and negative paper evidence block formal live resume; v1.25 caps were widened only within absolute portfolio/risk gates | Reconcile agent-managed positions after close, keep manual symbols classified, and use live outcomes plus paper evidence before further scale-up |
 | Tiny-account futures constraints shape the product | Binance filters, notional-vs-margin, spread, and fees drive sizing | Keep tradability filters and staged backtests before further scaling |
-| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates; v1.24 adds the operator decision packet | Use `ops operator-resume-decision` before any live resume confirmation planning |
+| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates; v1.24 adds the operator decision packet; v1.25 adds the confirmation-gated resume plan/apply path | Use `ops operator-resume-decision` before any formal resume apply, even when the operator-started live pilot is already running |
+| Manual positions need first-class isolation | ETH/ETHUSDT, BTWUSDT, and NEARUSDT evidence showed how quickly manual and bot exposure can mix | Keep manual symbols explicit and exclude them from bot-managed reduction/entry decisions |
