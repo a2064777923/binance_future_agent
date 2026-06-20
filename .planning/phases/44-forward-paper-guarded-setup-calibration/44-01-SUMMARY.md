@@ -35,14 +35,34 @@ loss and drawdown improvement versus `quant_setup_selective`.
     drawdown `0.80730079` USDT, `39` trades.
   - Both variants remained `not_promoted`.
 
+## Server Result
+
+- Deployed to `/opt/binance-futures-agent/app`.
+- Server focused tests passed with `13` tests.
+- Server full suite passed with `333` tests.
+- Secret-safe health-check passed with network checks skipped.
+- `binance-futures-agent-live.service` and
+  `binance-futures-agent-live.timer` remained `inactive`.
+- `binance-futures-agent-paper.timer` was paused during deployment and restored
+  afterwards with its original `quant_setup_selective` variant.
+- Server guarded matrix completed but did not justify switching the paper
+  timer:
+  - `quant_setup_selective`: total net PnL `-0.18159441` USDT, worst drawdown
+    `0.94640703` USDT, `53` trades.
+  - `quant_setup_selective_guarded`: total net PnL `-0.2554113` USDT, worst
+    drawdown `0.72548103` USDT, `40` trades.
+  - Both variants remained `not_promoted`.
+
 ## Not Changed
 
 - Live timer is not restored by this phase.
 - Risk profile is not changed.
 - No exchange order, close, or position adjustment is executed.
+- The paper timer variant was not switched to guarded because server evidence
+  remained negative.
 
 ## Next
 
-Deploy guarded calibration, verify on the server, then decide whether to switch
-only the paper timer to `quant_setup_selective_guarded` for fresh
-out-of-sample collection.
+Continue researching a stronger calibration approach; the guarded variant
+reduced drawdown but did not improve server matrix PnL enough to use as the
+paper timer default.

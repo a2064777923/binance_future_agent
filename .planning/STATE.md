@@ -4,23 +4,25 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 44
 status: active
-stopped_at: Phase 44 in progress; guarded paper calibration local
-last_updated: "2026-06-20T23:23:00+08:00"
+stopped_at: Phase 44 complete and deployed; guarded not promoted
+last_updated: "2026-06-20T23:35:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Started guarded setup calibration from attribution evidence
+last_activity_desc: Deployed guarded setup calibration and kept paper default unchanged
 progress:
   total_phases: 40
-  completed_phases: 39
+  completed_phases: 40
   total_plans: 61
-  completed_plans: 60
-  percent: 98
+  completed_plans: 61
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 44 — Forward-Paper Guarded Setup Calibration
-**Status:** Phase 44 in progress; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
+**Status:** Phase 44 complete and deployed; paper-only timer active; live
+service/timer remain inactive while default all-interval strategy promotion and
+latest paper performance evidence fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -533,41 +535,48 @@ gated by all-interval strategy evidence.
   `rsi_bearish_momentum`, `taker_flow_acceleration`, `quant_short_setup`,
   `volume_neutral`, `ema_trend_down`, and `close_near_range_low`.
 
-- Phase 44 has been added to turn attribution into a paper/backtest guarded
-  setup variant. The first guard targets explicit side disabling and worst
-  symbol exclusion for paper calibration, without changing the default/live
-  setup profile or restoring live automation.
+- Phase 44 is deployed. It added a paper/backtest-only
+  `quant_setup_selective_guarded` variant with explicit side disabling and
+  worst-symbol exclusion from Phase 43 attribution, without changing the
+  default/live setup profile or restoring live automation. Server guarded
+  matrix evidence reduced drawdown but kept total PnL negative, so the paper
+  timer remains on the original `quant_setup_selective` variant.
 
 ## Next Command
 
-Implement and verify Phase 44 guarded setup calibration for
-`quant_setup_selective` 5m. Keep collecting out-of-sample
-`ops forward-paper-run` evidence from the active paper-only timer, then rerun
-`ops forward-paper-performance-check`. Do not restore the live timer, execute
-adjustment orders, or apply `30u_10x_multi_dynamic` while the default
-all-interval promotion gate returns `keep_live_paused` and paper performance is
-negative.
+Plan the next calibration phase around wider live candidate discovery and
+stronger multi-factor selection. The immediate design problem is that live
+trading still uses the fixed 10-symbol `BFA_MARKET_SYMBOLS` allowlist and
+`agent run-once --top-n 3`, while paper observation can auto-select 40 hot
+symbols. Add live auto-hot candidate breadth only behind explicit risk gates
+and evidence checks; do not restore live automation, execute adjustment orders,
+or apply `30u_10x_multi_dynamic` while the default all-interval promotion gate
+returns `keep_live_paused` and paper performance is negative.
 
 ## Session
 
 **Last session:** 2026-06-20T23:23:00+08:00
-**Stopped at:** Phase 44 in progress; guarded paper calibration local
-**Resume file:** .planning/phases/44-forward-paper-guarded-setup-calibration/44-01-PLAN.md
+**Stopped at:** Phase 44 complete and deployed; next phase should address
+candidate breadth and calibration.
+**Resume file:** none
 
 ## Current Position
 
 Phase: 44 — Forward-Paper Guarded Setup Calibration
-Plan: 44-01 local implementation
-Status: In progress locally; deployment pending
-Last activity: 2026-06-20 — guarded calibration phase added
+Plan: 44-01 implementation and deployment
+Status: Complete and deployed; guarded variant not promoted and paper timer not
+switched
+Last activity: 2026-06-20 — server guarded matrix recorded and paper timer
+restored on original variant
 
 ## Operator Next Steps
 
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
-- Use Phase 44 guarded setup calibration to test side/symbol guards in paper
-  before any live resume.
+- Plan a next phase that lets live evaluate a wider auto-hot candidate pool
+  without widening actual order authority beyond risk, liquidity, tradability,
+  setup-quality, and evidence gates.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

@@ -464,7 +464,8 @@ conditions before any live resume.
 
 **Depends on:** Phase 43
 
-**Status:** In progress locally.
+**Status:** Complete and deployed; guarded variant not promoted and not used as
+the paper timer default.
 
 **Plans:** 1 plan
 
@@ -477,6 +478,8 @@ conditions before any live resume.
    paper observation.
 4. Guarded variants are accepted by CLI/matrix/forward-paper paths.
 5. Full local and server tests pass before any paper timer switch.
+6. Server guarded matrix evidence is recorded before deciding whether to switch
+   the paper timer variant.
 
 ## Progress
 
@@ -484,7 +487,7 @@ conditions before any live resume.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-44 | 14/15 | Phase 44 in progress, guarded calibration local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-44 | 15/15 | Phase 44 complete and deployed; guarded not promoted | Pending |
 
 ## Requirement Coverage
 
@@ -507,7 +510,11 @@ deployed and the latest server gate returns `keep_live_paused` from negative
 total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Phase 43
 attribution is deployed and shows the clearest recalibration targets are
 short-side setups, stop-loss-heavy entries, and worst symbols such as
-`BICOUSDT`, `BEATUSDT`, and `SLXUSDT`. Current work should create a guarded
-paper/backtest variant from that evidence. Do not execute adjustment orders,
-restore the live timer, or apply `30u_10x_multi_dynamic` without an explicit
-confirmation token.
+`BICOUSDT`, `BEATUSDT`, and `SLXUSDT`. Phase 44 created and deployed the
+`quant_setup_selective_guarded` variant from that evidence. Server matrix
+evidence reduced drawdown but kept total PnL negative, so the paper timer stays
+on `quant_setup_selective` and the guarded variant is not promoted. Next work
+should improve selection/calibration beyond a static side/symbol guard,
+including live auto-hot candidate breadth under strict risk gates. Do not
+execute adjustment orders, restore the live timer, or apply
+`30u_10x_multi_dynamic` without an explicit confirmation token.

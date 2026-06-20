@@ -231,16 +231,16 @@ projects or losing control of downside.
 
 ### Forward-Paper Guarded Calibration
 
-- [ ] **FGC-01**: Setup profiles can explicitly disable selected trade sides
+- [x] **FGC-01**: Setup profiles can explicitly disable selected trade sides
   without changing the existing default/live profile.
 
-- [ ] **FGC-02**: Setup profiles can exclude symbols identified by
+- [x] **FGC-02**: Setup profiles can exclude symbols identified by
   forward-paper attribution.
 
-- [ ] **FGC-03**: Backtest and forward-paper paths expose a built-in guarded
+- [x] **FGC-03**: Backtest and forward-paper paths expose a built-in guarded
   quant setup variant derived from Phase 43 attribution.
 
-- [ ] **FGC-04**: Guarded calibration remains paper/backtest evidence only and
+- [x] **FGC-04**: Guarded calibration remains paper/backtest evidence only and
   does not restore live automation or change risk profiles.
 
 ## Out of Scope
@@ -310,10 +310,10 @@ projects or losing control of downside.
 | FLA-02 | Phase 43 | Complete and deployed |
 | FLA-03 | Phase 43 | Complete and deployed |
 | FLA-04 | Phase 43 | Complete and deployed |
-| FGC-01 | Phase 44 | In progress |
-| FGC-02 | Phase 44 | In progress |
-| FGC-03 | Phase 44 | In progress |
-| FGC-04 | Phase 44 | In progress |
+| FGC-01 | Phase 44 | Complete and deployed |
+| FGC-02 | Phase 44 | Complete and deployed |
+| FGC-03 | Phase 44 | Complete and deployed |
+| FGC-04 | Phase 44 | Complete and deployed |
 
 **Coverage:**
 - v1.22 requirements: 59 total
@@ -322,4 +322,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 during Phase 44 guarded setup calibration*
+*Last updated: 2026-06-20 after Phase 44 guarded setup deployment*
