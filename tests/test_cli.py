@@ -1436,6 +1436,156 @@ class CliTests(unittest.TestCase):
         self.assertEqual(fill_count, 2)
         self.assertEqual(outcome_count, 1)
 
+    def test_ops_live_outcome_ledger_outputs_read_only_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            intent_id = store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-20T10:00:00Z",
+                source="execution.live",
+                symbol="SOLUSDT",
+                ref_id="order_intent:SOLUSDT:2026-06-20T10:00:00Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "SOLUSDT",
+                        "side": "BUY",
+                        "quantity": 0.2,
+                        "entry_price": 100,
+                        "leverage": 10,
+                        "decided_at": "2026-06-20T10:00:00Z",
+                    },
+                },
+                event_type="order_intent",
+            )
+            store.insert_artifact(
+                "outcomes",
+                occurred_at="2026-06-20T10:30:00Z",
+                source="binance_usdm",
+                symbol="SOLUSDT",
+                ref_id=f"outcome:{intent_id}:closed",
+                payload={
+                    "intent": {"event_id": intent_id, "symbol": "SOLUSDT", "side": "BUY"},
+                    "status": "closed",
+                    "trade_count": 2,
+                    "gross_realized_pnl_usdt": -0.2,
+                    "commission_usdt": 0.0,
+                    "net_realized_pnl_usdt": -0.2,
+                    "first_trade_time": "2026-06-20T10:00:00Z",
+                    "last_trade_time": "2026-06-20T10:30:00Z",
+                    "exit_reason": "stop_loss",
+                },
+                event_type="outcome",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-outcome-ledger",
+                "--db",
+                str(db_path),
+                "--symbol",
+                "SOLUSDT",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_live_outcome_ledger_v1")
+        self.assertEqual(payload["status"], "ledger_ready")
+        self.assertEqual(payload["summary"]["outcome_count"], 1)
+        self.assertFalse(payload["mutation_proof"]["places_orders"])
+        self.assertFalse(payload["mutation_proof"]["cancels_orders"])
+        self.assertFalse(payload["mutation_proof"]["writes_env_files"])
+        self.assertFalse(payload["mutation_proof"]["raises_risk"])
+
+    def test_ops_live_outcome_ledger_can_reconcile_with_fake_signed_client(self):
+        class FakeSignedClient:
+            def user_trades(self, symbol, *, start_time=None, end_time=None, limit=500):
+                return [
+                    {
+                        "id": 110,
+                        "orderId": 1100,
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "qty": "0.05",
+                        "price": "100",
+                        "quoteQty": "5",
+                        "realizedPnl": "0",
+                        "commission": "0.002",
+                        "commissionAsset": "USDT",
+                        "time": 1781923762837,
+                    },
+                    {
+                        "id": 111,
+                        "orderId": 1101,
+                        "symbol": symbol,
+                        "side": "SELL",
+                        "qty": "0.05",
+                        "price": "104",
+                        "quoteQty": "5.2",
+                        "realizedPnl": "0.2",
+                        "commission": "0.00208",
+                        "commissionAsset": "USDT",
+                        "time": 1781924000000,
+                    },
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-20T10:00:00Z",
+                source="execution.live",
+                symbol="SOLUSDT",
+                ref_id="order_intent:SOLUSDT:2026-06-20T10:00:00Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "SOLUSDT",
+                        "side": "BUY",
+                        "quantity": 0.05,
+                        "entry_price": 100,
+                        "leverage": 10,
+                        "decided_at": "2026-06-20T10:00:00Z",
+                    },
+                },
+                event_type="order_intent",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-outcome-ledger",
+                "--db",
+                str(db_path),
+                "--symbol",
+                "SOLUSDT",
+                "--reconcile",
+                "--persist-closed",
+                env={
+                    "BFA_MODE": "live",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "ledger_ready")
+        self.assertEqual(payload["reconciliation"]["closed"], 1)
+        self.assertEqual(payload["summary"]["outcome_count"], 1)
+        self.assertTrue(payload["mutation_proof"]["persists_closed_fills_and_outcomes"])
+        self.assertFalse(payload["mutation_proof"]["places_orders"])
+
     def test_ops_position_hold_check_reports_expired_live_hold_window(self):
         class FakeSignedClient:
             def account(self):

@@ -46,6 +46,7 @@ from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.forward_paper import run_forward_paper
 from bfa.ops.forward_paper_loss_attribution import build_forward_paper_loss_attribution_report
 from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
+from bfa.ops.live_outcome_ledger import build_live_outcome_ledger_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.manual_loss import build_manual_loss_incident, record_manual_loss_incident
 from bfa.ops.manual_loss_review import build_manual_loss_review_report
@@ -437,6 +438,27 @@ def _build_parser() -> argparse.ArgumentParser:
     forward_paper_loss_attribution.add_argument("--since", help="only include paper signals opened at or after this ISO time")
     forward_paper_loss_attribution.add_argument("--min-group-outcomes", type=int, default=1, help="minimum outcomes per attribution group")
     forward_paper_loss_attribution.add_argument("--worst-limit", type=int, default=8, help="number of worst rows per grouping")
+
+    live_outcome_ledger = ops_subparsers.add_parser(
+        "live-outcome-ledger",
+        help="read-only live outcome ledger with recommendation-only guard feedback",
+    )
+    live_outcome_ledger.add_argument("--env-file", help="optional env file to load before environment overrides")
+    live_outcome_ledger.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    live_outcome_ledger.add_argument("--symbol", help="optional symbol filter, e.g. SOLUSDT")
+    live_outcome_ledger.add_argument("--since", help="only include outcomes closed at or after this ISO time")
+    live_outcome_ledger.add_argument("--latest-limit", type=int, default=10, help="number of recent outcomes to show")
+    live_outcome_ledger.add_argument("--min-group-outcomes", type=int, default=1, help="minimum outcomes per attribution group")
+    live_outcome_ledger.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="run the submitted-intent reconciliation sweep before reporting",
+    )
+    live_outcome_ledger.add_argument(
+        "--persist-closed",
+        action="store_true",
+        help="with --reconcile, persist idempotent fills/outcomes for closed trades",
+    )
 
     strategy_evidence_baseline = ops_subparsers.add_parser(
         "strategy-evidence-baseline",
@@ -1593,6 +1615,22 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.status == "loss_attribution_ready" else 1
+    if args.ops_command == "live-outcome-ledger":
+        report = build_live_outcome_ledger_report(
+            config,
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            symbol=args.symbol,
+            since=args.since,
+            latest_limit=args.latest_limit,
+            min_group_outcomes=args.min_group_outcomes,
+            reconcile=args.reconcile,
+            persist_closed=args.persist_closed,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if args.reconcile
+            else None,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 1 if report.status == "ledger_blocked" else 0
     if args.ops_command == "strategy-evidence-baseline":
         report = build_strategy_evidence_baseline_report(
             config,
