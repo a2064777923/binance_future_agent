@@ -22,7 +22,7 @@ projects or losing control of downside.
 
 ### Strategy And Paper Evidence
 
-- [ ] **STRAT-01**: Operator can run a current-data matrix over a broad
+- [x] **STRAT-01**: Operator can run a current-data matrix over a broad
   auto-hot Binance USD-M universe using completed candles, next-candle entries,
   fees, slippage, small-account sizing caps, and multiple quant setup variants.
 - [x] **STRAT-02**: Forward-paper collection records generated signals, skipped
@@ -31,7 +31,7 @@ projects or losing control of downside.
 - [x] **STRAT-03**: Paper-only exploration can collect shadow evidence for
   candidates rejected by strict live guards without creating order intents,
   changing live env, restoring live timers, or placing Binance orders.
-- [ ] **STRAT-04**: Promotion checks separate `collect_more_paper`,
+- [x] **STRAT-04**: Promotion checks separate `collect_more_paper`,
   `forward_paper_allowed`, and live-resume eligibility using minimum outcomes,
   total net PnL, win rate, profit factor, worst drawdown, and post-change
   evidence boundaries.
@@ -50,7 +50,7 @@ projects or losing control of downside.
 - [x] **LOSS-01**: Operator can record a manual liquidation or failed trade as
   a structured, secret-safe incident with symbol, side, leverage, entry/exit or
   liquidation price, stop-loss status, trigger reason, and lessons.
-- [ ] **LOSS-02**: Strategy review can compare manual loss incidents against
+- [x] **LOSS-02**: Strategy review can compare manual loss incidents against
   deterministic setup/risk rules and surface which guard would have blocked,
   reduced, or failed to catch the trade.
 
@@ -71,7 +71,7 @@ projects or losing control of downside.
 - [ ] **RISK-01**: The `30u_10x_multi_dynamic` path remains bounded by account
   capital, available balance, portfolio margin cap, portfolio notional cap,
   same-direction concentration cap, per-trade risk, and daily loss cap.
-- [ ] **RISK-02**: Public Lana/Square/X claims can influence factor design and
+- [x] **RISK-02**: Public Lana/Square/X claims can influence factor design and
   source selection, but no claim can count as proof of profitability or unlock
   live risk without local backtest, paper, and exchange evidence.
 - [ ] **RISK-03**: Server deployment and evidence collection remain isolated to
@@ -107,19 +107,19 @@ projects or losing control of downside.
 | EXP-01 | Phase 56 | Complete |
 | EXP-02 | Phase 56 | Complete |
 | EXP-03 | Phase 56 | Complete |
-| STRAT-01 | Phase 58 | Pending |
+| STRAT-01 | Phase 58 | Complete |
 | STRAT-02 | Phase 57 | Complete |
 | STRAT-03 | Phase 57 | Complete |
-| STRAT-04 | Phase 58 | Pending |
+| STRAT-04 | Phase 58 | Complete |
 | DATA-01 | Phase 57 | Complete |
 | DATA-02 | Phase 57 | Complete |
 | LOSS-01 | Phase 56 | Complete |
-| LOSS-02 | Phase 58 | Pending |
+| LOSS-02 | Phase 58 | Complete |
 | LIVE-01 | Phase 59 | Pending |
 | LIVE-02 | Phase 59 | Pending |
 | LIVE-03 | Phase 60 | Pending |
 | RISK-01 | Phase 59 | Pending |
-| RISK-02 | Phase 58 | Pending |
+| RISK-02 | Phase 58 | Complete |
 | RISK-03 | Phase 60 | Pending |
 
 **Coverage:**
@@ -129,4 +129,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 57 completion*
+*Last updated: 2026-06-21 after Phase 58 completion*

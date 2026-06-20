@@ -48,6 +48,7 @@ from bfa.ops.forward_paper_loss_attribution import build_forward_paper_loss_attr
 from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.manual_loss import build_manual_loss_incident, record_manual_loss_incident
+from bfa.ops.manual_loss_review import build_manual_loss_review_report
 from bfa.ops.live_resume_readiness import build_live_resume_readiness_report
 from bfa.ops.operator_resume_decision import (
     build_operator_resume_decision_packet,
@@ -863,6 +864,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     manual_loss_record.add_argument("--notes", help="optional extra notes without secrets")
     manual_loss_record.add_argument("--occurred-at", help="incident timestamp; defaults to current UTC time")
+
+    manual_loss_review = ops_subparsers.add_parser(
+        "manual-loss-review",
+        help="read-only review of manual loss incidents against risk and paper guards",
+    )
+    manual_loss_review.add_argument("--env-file", help="optional env file to load before environment overrides")
+    manual_loss_review.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    manual_loss_review.add_argument(
+        "--skip-paper-guard",
+        action="store_true",
+        help="compare only deterministic risk rules and skip forward-paper guard evidence",
+    )
 
     exposure_status = ops_subparsers.add_parser(
         "exposure-status",
@@ -1838,6 +1851,14 @@ def _run_ops(
         except ValueError as exc:
             print(json.dumps({"error": str(exc)}, indent=2, sort_keys=True), file=stdout)
             return 1
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
+    if args.ops_command == "manual-loss-review":
+        report = build_manual_loss_review_report(
+            config,
+            db_path=args.db,
+            include_paper_guard=not args.skip_paper_guard,
+        )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0
     if args.ops_command == "exposure-status":

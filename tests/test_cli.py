@@ -2653,6 +2653,56 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["incident"]["symbol"], "SOLUSDT")
         self.assertFalse(payload["read_only_exchange"]["places_orders"])
 
+    def test_ops_manual_loss_review_reports_risk_guard_comparison(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            db = root / "agent.sqlite"
+            env = {
+                "BFA_MODE": "live",
+                "BFA_DB_PATH": str(db),
+                "BFA_RUNTIME_DIR": str(root / "runtime"),
+                "BFA_MAX_LEVERAGE": "10",
+            }
+            self.invoke(
+                "ops",
+                "manual-loss-record",
+                "--db",
+                str(db),
+                "--symbol",
+                "SOLUSDT",
+                "--side",
+                "long",
+                "--leverage",
+                "20",
+                "--entry-price",
+                "100",
+                "--liquidation-price",
+                "99",
+                "--stop-loss-status",
+                "none",
+                "--occurred-at",
+                "2026-06-21T01:00:00Z",
+                env=env,
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "manual-loss-review",
+                "--db",
+                str(db),
+                "--skip-paper-guard",
+                env=env,
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_manual_loss_review_v1")
+        self.assertEqual(payload["status"], "review_ready")
+        self.assertEqual(payload["items"][0]["guard_outcome"], "would_block_by_risk_guard")
+        self.assertFalse(payload["read_only_exchange"]["writes_env_files"])
+
 
 if __name__ == "__main__":
     unittest.main()

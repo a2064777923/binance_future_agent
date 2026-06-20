@@ -92,15 +92,18 @@ class StrategyPromotionTests(unittest.TestCase):
 
         self.assertFalse(report.promotion_allowed)
         self.assertEqual(report.status, "keep_live_paused")
+        self.assertEqual(report.promotion_stage, "collect_more_paper")
         self.assertIn("variant_not_promoted", report.reasons)
         self.assertIn("variant_total_net_pnl_not_positive", report.reasons)
         self.assertIn("5m:cell_not_promoted", report.reasons)
+        self.assertFalse(report.to_dict()["evidence_boundaries"]["public_claims_count_as_promotion_evidence"])
 
     def test_promoted_matrix_allows_promotion(self):
         report = build_strategy_promotion_check_report(self.write_report(matrix_payload(promoted=True)))
 
         self.assertTrue(report.promotion_allowed)
         self.assertEqual(report.status, "promotion_allowed")
+        self.assertEqual(report.promotion_stage, "live_resume_eligible")
         self.assertEqual(report.reasons, ["strategy_matrix_promoted"])
         self.assertTrue(report.live_resume_allowed)
         self.assertTrue(report.cell_checks[0].passed)
@@ -128,6 +131,7 @@ class StrategyPromotionTests(unittest.TestCase):
         self.assertTrue(report.promotion_allowed)
         self.assertFalse(report.live_resume_allowed)
         self.assertEqual(report.status, "forward_paper_allowed")
+        self.assertEqual(report.promotion_stage, "forward_paper_allowed")
         self.assertEqual(report.scope, "selected-intervals")
         self.assertEqual(report.intervals, ["5m"])
         self.assertEqual(report.selected_summary["intervals"], ["5m"])

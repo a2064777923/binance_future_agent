@@ -116,7 +116,7 @@
 
 - [x] Phase 56: Exposure Clearance And Manual Loss Intake (1/1 plan) (completed 2026-06-21)
 - [x] Phase 57: Adaptive Forward-Paper Observation (1/1 plan) (completed 2026-06-21)
-- [ ] Phase 58: Promotion Matrix And Loss Review (0/1 plan)
+- [x] Phase 58: Promotion Matrix And Loss Review (1/1 plan) (completed 2026-06-21)
 - [ ] Phase 59: Confirmation-Gated Live Resume Path (0/1 plan)
 - [ ] Phase 60: Server Evidence And Pilot Resume Packet (0/1 plan)
 
@@ -176,6 +176,9 @@ against deterministic guard/risk rules.
 
 **Requirements:** STRAT-01, STRAT-04, LOSS-02, RISK-02
 
+**Plans:** 1/1 plan complete
+**Status:** Complete - 2026-06-21
+
 **Success criteria:**
 
 1. Current-data matrix runs with completed candles, next-candle entries, fees,
@@ -234,7 +237,7 @@ operator-confirmed resume.
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
-| v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 2/5 | Active | - |
+| v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 3/5 | Active | - |
 
 ## Requirement Coverage
 
@@ -247,6 +250,6 @@ operator-confirmed resume.
 
 ## Next Step
 
-Plan Phase 58 with `$gsd-plan-phase 58`. Live automation remains paused until
-strategy/paper gates, server state, and a separate operator-confirmed resume
-path all pass.
+Plan Phase 59 with `$gsd-plan-phase 59`. Phase 58 evidence says
+`collect_more_paper`; live automation is running by operator override, but a
+separate confirmation-gated resume/profile mutation path is still pending.

@@ -220,19 +220,19 @@ control of downside.
   resume".
 - [x] Resolve or explicitly classify manual/unattributed exchange exposure so
   live-resume readiness no longer mixes operator trades with agent evidence.
-- [ ] Make guarded paper evidence productive again by broadening observation,
+- [x] Make guarded paper evidence productive again by broadening observation,
   exposing skip reasons, and supporting paper-only exploration when strict
   guards generate zero signals.
-- [ ] Re-run current-data matrix and forward-paper promotion gates before any
+- [x] Re-run current-data matrix and forward-paper promotion gates before any
   live resume, using completed candles, fees, slippage, small-account caps, and
   post-change evidence boundaries.
 - [x] Capture user/manual liquidation incidents as structured learning input.
-- [ ] Compare manual liquidation incidents with deterministic setup and risk
+- [x] Compare manual liquidation incidents with deterministic setup and risk
   guards.
 - [ ] Add a separate confirmation-gated live resume path that can only enable
   the target profile/timer after exposure, strategy, paper, server, and
   operator-confirmation gates pass.
-- [ ] Keep Lana/public hot-coin claims as design inspiration only; all promotion
+- [x] Keep Lana/public hot-coin claims as design inspiration only; all promotion
   and sizing decisions must come from local backtest, paper, exchange, and live
   outcome evidence.
 
@@ -761,4 +761,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 57 completion.*
+*Last updated: 2026-06-21 after Phase 58 completion.*

@@ -2,28 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
-current_phase: 58
-current_phase_name: Promotion Matrix And Loss Review
+current_phase: 59
+current_phase_name: Confirmation-Gated Live Resume Path
 status: live-pilot-active
-stopped_at: Live pilot active with widened 10x multi-position caps; Phase 58 ready to plan.
-last_updated: "2026-06-21T04:09:22+08:00"
+stopped_at: Phase 58 complete; live pilot active; Phase 59 ready to plan.
+last_updated: "2026-06-21T04:21:58+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 57 complete
+last_activity_desc: Phase 58 complete
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 60
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 58 — Promotion Matrix And Loss Review
-**Status:** Live pilot active; Phase 58 ready to plan
+**Current phase:** Phase 59 — Confirmation-Gated Live Resume Path
+**Status:** Live pilot active; Phase 59 ready to plan
 **Last planned:** 2026-06-21
-**Plan count:** 0
+**Plan count:** 1
 
 ## Project Reference
 
@@ -32,10 +32,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan Phase 58 so current matrix, loss attribution, manual
-loss incidents, and the new paper observations decide whether the strategy
-still needs paper collection or can move toward a later confirmation-gated live
-resume path.
+**Current focus:** Plan Phase 59 so live resume/profile/timer mutation remains
+confirmation-gated and refuses to mutate unless evidence gates are eligible.
 
 ## Decisions
 
@@ -47,9 +45,9 @@ resume path.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 30 USDT account capital, 5x max leverage, 12 USDT max
-  position notional, 0.3 USDT max per-trade risk, 1 USDT max daily loss, and
-  1 open position.
+- Active trial profile: 30 USDT account capital, 10x max leverage, 40 USDT max
+  position notional, 0.4 USDT max per-trade risk, 1 USDT max daily loss, and
+  4 open positions under dynamic sizing and portfolio caps.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -678,33 +676,58 @@ resume path.
   `forward_paper_guard_factor:24h_momentum`. The live service deactivated
   successfully afterwards and the live timer remained active.
 
+- Phase 58 is complete. It adds `promotion_stage` to strategy-promotion checks
+  (`collect_more_paper`, `forward_paper_allowed`, `live_resume_eligible`),
+  records public Lana/Square/X claims as design inputs only, and adds read-only
+  `ops manual-loss-review` for comparing manual loss incidents against max
+  leverage, protective-stop, liquidation-distance, and adaptive paper-guard
+  symbol/side rules.
+
+- Phase 58 server verification is complete under
+  `/opt/binance-futures-agent/app`. Server focused tests passed with 62 tests,
+  full tests passed with 377 tests, and a read-only manual-loss-review smoke
+  returned `review_ready`, `would_block_by_risk_guard`, and
+  `mutates_exchange_state=False`. The live and paper timers were restored after
+  deploy; both services were inactive after verification.
+
+- Phase 58 current-data matrix evidence is stored at
+  `/opt/binance-futures-agent/app/runtime/phase58-current-matrix.json`. The run
+  selected 40 hot symbols across `5m` and `15m` for
+  `quant_setup_selective`, `quant_setup_selective_guarded`, and
+  `quant_setup_loss_recalibrated`. Overall verdict:
+  `mixed_candidate_collect_more_data`. `quant_setup_selective` produced total
+  net PnL `0.4862443` USDT and worst drawdown `0.62845092` USDT, while
+  `quant_setup_selective_guarded` produced total net PnL `0.87008078` USDT and
+  worst drawdown `0.59906869` USDT. Promotion checks for all intervals and
+  selected `5m` both returned `keep_live_paused` with
+  `promotion_stage=collect_more_paper`, `promotion_allowed=false`, and
+  `live_resume_allowed=false`.
+
 ## Next Command
 
-Continue Phase 58 with live automation already active. First priority is
-monitoring/reconciling the protected `NEARUSDT` live position and manual-held
-`BTWUSDT` exposure, then tune the forward-paper factor guard so live entries
-are not over-blocked by broad factors such as `24h_momentum` while preserving
-the multi-factor setup gate.
+Plan Phase 59 with live automation already active. Build the confirmation-gated
+resume/profile/timer mutation path, and ensure it refuses to mutate unless the
+operator packet is eligible. Current Phase 58 evidence still says
+`collect_more_paper`, so eligibility should remain fail-closed.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Live timer active; protected NEARUSDT live position open;
-BTWUSDT marked manual; widened 10x/4-position/40U dynamic caps deployed; Phase
-58 ready to plan.
-**Resume file:** .planning/phases/57-adaptive-forward-paper-observation/57-VERIFICATION.md
+**Stopped at:** Phase 58 complete; live timer active; protected NEARUSDT live
+position open; BTWUSDT marked manual; widened 10x/4-position/40U dynamic caps
+deployed; Phase 59 ready to plan.
+**Resume file:** .planning/phases/58-promotion-matrix-and-loss-review/58-VERIFICATION.md
 
 ## Current Position
 
-Phase: 58 — Promotion Matrix And Loss Review
+Phase: 59 — Confirmation-Gated Live Resume Path
 Plan: —
-Status: Live pilot active with widened caps
-Last activity: 2026-06-21 — live caps widened, BTWUSDT marked manual, and immediate live oneshot verified
+Status: Ready to plan with live pilot active and Phase 58 evidence fail-closed
+Last activity: 2026-06-21 — Phase 58 completed with collect-more-paper verdict
 
 ## Operator Next Steps
 
 - Monitor/reconcile the open protected `NEARUSDT` live position.
 - Keep `BTWUSDT` classified as manual unless the operator explicitly hands it
   to the agent.
-- Plan Phase 58 with forward-paper factor-guard tuning and promotion/loss
-  review.
+- Plan Phase 59 with confirmation-gated live resume/profile mutation controls.

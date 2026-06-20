@@ -51,9 +51,11 @@ class StrategyPromotionCheckReport:
     reasons: list[str]
     matrix_report_path: str
     variant: str
+    promotion_stage: str = "collect_more_paper"
     scope: str = ALL_INTERVALS_SCOPE
     intervals: list[str] = field(default_factory=list)
     live_resume_allowed: bool = False
+    evidence_boundaries: dict[str, Any] = field(default_factory=dict)
     matrix_overall: str | None = None
     variant_summary: dict[str, Any] = field(default_factory=dict)
     selected_summary: dict[str, Any] = field(default_factory=dict)
@@ -67,9 +69,11 @@ class StrategyPromotionCheckReport:
             "reasons": list(self.reasons),
             "matrix_report_path": self.matrix_report_path,
             "variant": self.variant,
+            "promotion_stage": self.promotion_stage,
             "scope": self.scope,
             "intervals": list(self.intervals),
             "live_resume_allowed": self.live_resume_allowed,
+            "evidence_boundaries": dict(self.evidence_boundaries),
             "matrix_overall": self.matrix_overall,
             "variant_summary": dict(self.variant_summary),
             "selected_summary": dict(self.selected_summary),
@@ -190,15 +194,24 @@ def build_strategy_promotion_check_report(
     allowed = not reasons
     status = _success_status(normalized_scope) if allowed else "keep_live_paused"
     success_reasons = _success_reasons(normalized_scope)
+    promotion_stage = _promotion_stage(
+        allowed=allowed,
+        scope=normalized_scope,
+        reasons=reasons,
+        variant_summary=variant_summary,
+        selected_summary=selected_summary,
+    )
     return StrategyPromotionCheckReport(
         status=status,
         promotion_allowed=allowed,
         reasons=reasons or success_reasons,
         matrix_report_path=str(path),
         variant=variant,
+        promotion_stage=promotion_stage,
         scope=normalized_scope,
         intervals=selected_intervals,
         live_resume_allowed=allowed and normalized_scope == ALL_INTERVALS_SCOPE,
+        evidence_boundaries=_evidence_boundaries(),
         matrix_overall=overall,
         variant_summary=dict(variant_summary),
         selected_summary=selected_summary,
@@ -303,6 +316,35 @@ def _success_reasons(scope: str) -> list[str]:
     return ["strategy_matrix_promoted"]
 
 
+def _promotion_stage(
+    *,
+    allowed: bool,
+    scope: str,
+    reasons: list[str],
+    variant_summary: Mapping[str, Any],
+    selected_summary: Mapping[str, Any],
+) -> str:
+    if allowed and scope == SELECTED_INTERVALS_SCOPE:
+        return "forward_paper_allowed"
+    if allowed:
+        return "live_resume_eligible"
+    if any(reason.startswith("selected_intervals_") for reason in reasons):
+        return "collect_more_paper"
+    if _float_or_zero(selected_summary.get("total_net_pnl_usdt")) > 0:
+        return "collect_more_paper"
+    if _float_or_zero(variant_summary.get("total_net_pnl_usdt")) > 0:
+        return "collect_more_paper"
+    return "collect_more_paper"
+
+
+def _evidence_boundaries() -> dict[str, Any]:
+    return {
+        "promotion_evidence_sources": ["matrix_report"],
+        "public_lana_square_x_claims_are_design_inputs_only": True,
+        "public_claims_count_as_promotion_evidence": False,
+    }
+
+
 def _report(
     path: Path,
     *,
@@ -319,8 +361,10 @@ def _report(
         reasons=reasons,
         matrix_report_path=str(path),
         variant=variant,
+        promotion_stage="invalid_report",
         scope=scope,
         intervals=intervals,
+        evidence_boundaries=_evidence_boundaries(),
         thresholds=dict(thresholds),
     )
 
