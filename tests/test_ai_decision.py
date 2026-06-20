@@ -48,6 +48,25 @@ class AiDecisionTests(unittest.TestCase):
         self.assertEqual(result.validation_errors, [])
         self.assertEqual(result.decision.side, "long")
 
+    def test_percent_confidence_is_normalized_with_warning(self):
+        payload = self.valid_trade()
+        payload["confidence"] = 72.0
+
+        result = validate_decision_payload(payload, self.context())
+
+        self.assertTrue(result.accepted)
+        self.assertAlmostEqual(result.decision.confidence, 0.72)
+        self.assertIn("confidence_percent_normalized", result.validation_warnings)
+
+    def test_confidence_above_percent_range_is_rejected(self):
+        payload = self.valid_trade()
+        payload["confidence"] = 101.0
+
+        result = validate_decision_payload(payload, self.context())
+
+        self.assertFalse(result.accepted)
+        self.assertIn("invalid_confidence", result.validation_errors)
+
     def test_pass_decision_is_accepted_without_prices(self):
         result = validate_decision_payload(
             {

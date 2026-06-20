@@ -105,6 +105,9 @@ def validate_decision_payload(
         errors.append("invalid_decision")
     if side not in {"long", "short", "flat"}:
         errors.append("invalid_side")
+    if confidence is not None and 1 < confidence <= 100:
+        confidence = confidence / 100
+        warnings.append("confidence_percent_normalized")
     if confidence is None or confidence < 0 or confidence > 1:
         errors.append("invalid_confidence")
         confidence = 0.0
