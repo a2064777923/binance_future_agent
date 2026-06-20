@@ -106,9 +106,9 @@ exposure state.
 
 **Requirements:** SRV-01, SRV-02, SRV-03
 
-**Status:** Not started.
+**Status:** Complete — 2026-06-21.
 
-**Plans:** 0/1 plans complete
+**Plans:** 1/1 plans complete
 
 **Success Criteria:**
 
@@ -187,7 +187,7 @@ confirmed live resume.
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
-| v1.24 Server Readiness And Paper Promotion | 53-55 | 0/3 | In progress | - |
+| v1.24 Server Readiness And Paper Promotion | 53-55 | 1/3 | In progress | - |
 
 ## Requirement Coverage
 
@@ -199,8 +199,8 @@ confirmed live resume.
 
 ## Next Step
 
-Start Phase 53 with `$gsd-plan-phase 53`. Keep live automation paused while
-server readiness and guarded paper evidence are being verified. The paper timer
-can continue collecting paper-only evidence; live auto-hot and live service/timer
+Start Phase 54 with `$gsd-plan-phase 54`. Keep live automation paused while
+guarded paper evidence is being collected and verified. The paper timer can
+continue collecting paper-only evidence; live auto-hot and live service/timer
 remain disabled until explicit readiness gates pass, manual exposure is
 classified separately, and the operator approves resume separately.

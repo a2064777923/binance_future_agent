@@ -130,6 +130,10 @@ control of downside.
   combines matrix, paper, server, exchange/manual exposure, risk-profile, and
   confirmation gates without restoring timers, applying profiles, or placing
   orders.
+- Phase 53 deploys that readiness command to the isolated server and captures a
+  secret-safe server artifact showing `keep_live_paused`, live timer/service
+  inactive, paper timer active, and manual ETHUSDT classified outside
+  agent-managed evidence.
 
 ### Active
 
@@ -188,7 +192,7 @@ control of downside.
 - [x] Allow protected active positions to be carried into a target
   multi-position profile only when exchange protection and target portfolio caps
   are both verified.
-- [ ] Deploy and run the Phase 52 live-resume readiness command on the server
+- [x] Deploy and run the Phase 52 live-resume readiness command on the server
   as a read-only check, with manual ETH/ETHUSDT exposure classified separately.
 - [ ] Collect post-change paper evidence for the selected guarded setup variant
   without creating live order intents or restoring live automation.
@@ -278,7 +282,8 @@ DeepSeek support, 30U/5x trial runtime caps, portfolio-level risk caps,
 candidate-queue evaluation, and a confirmation-gated 30U/10x/two-position
 profile preview. It also has read-only strategy evidence, loss-driven
 recalibration variants, multi-universe matrix reporting, post-change
-forward-paper gates, and a combined live-resume readiness report.
+forward-paper gates, a combined live-resume readiness report, and server-side
+readiness evidence from Phase 53.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
 Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
@@ -346,6 +351,12 @@ The latest server forward-paper evidence is still negative: 212 paper signals,
 204 settled outcomes, win rate about `0.299`, total net PnL about `-7.245`
 USDT, and worst drawdown about `7.531` USDT for `quant_setup_selective` on
 `5m`. The paper timer remains active; live timer/service remain inactive.
+Phase 53 redeployed the current code to the isolated server and ran
+`ops live-resume-readiness` read-only. The server result is
+`status=keep_live_paused`, `live_resume_allowed=false`,
+`paper.timer=active`, `live.timer=inactive`, `live.service=inactive`,
+manual/unattributed symbols `ETHUSDT`, agent-managed symbols none, and all
+read-only mutation flags false.
 
 ## Previous Milestone: v1.8 Position Mode And Entry Fail-Closed
 
@@ -643,7 +654,7 @@ state has been changed for this milestone.
 | Matrix before forward-paper promotion | Backtest evidence must cover multiple hot universes and intervals before any post-change forward-paper gate can be trusted. | Phase 50 complete |
 | Paper promotion needs profit factor | Post-change forward-paper evidence must pass PnL, win-rate, profit-factor, and drawdown gates before readiness reporting can consider it. | Phase 51 complete |
 | Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete; v1.23 archived |
-| Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | v1.24 active |
+| Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | Phase 53 complete |
 | Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | v1.24 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
@@ -668,4 +679,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after starting v1.24 Server Readiness And Paper Promotion.*
+*Last updated: 2026-06-21 after completing Phase 53 server readiness evidence.*

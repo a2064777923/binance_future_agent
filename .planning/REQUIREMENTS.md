@@ -9,16 +9,16 @@ projects or losing control of downside.
 
 ### Server Readiness
 
-- [ ] **SRV-01**: Operator can run `ops live-resume-readiness` on the isolated
+- [x] **SRV-01**: Operator can run `ops live-resume-readiness` on the isolated
   server deployment without restoring live timers, starting live services,
   applying risk profiles, editing env files, or placing/canceling Binance
   orders.
 
-- [ ] **SRV-02**: Server readiness output records current paper timer, live
+- [x] **SRV-02**: Server readiness output records current paper timer, live
   timer, live service, risk profile, exchange exposure, and confirmation
   blockers in a secret-safe evidence artifact.
 
-- [ ] **SRV-03**: Manual ETH/ETHUSDT or other operator-opened exposure can be
+- [x] **SRV-03**: Manual ETH/ETHUSDT or other operator-opened exposure can be
   marked as manual in the server readiness command and is never counted as
   agent-managed strategy evidence.
 
@@ -79,9 +79,9 @@ projects or losing control of downside.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SRV-01 | Phase 53 | Pending |
-| SRV-02 | Phase 53 | Pending |
-| SRV-03 | Phase 53 | Pending |
+| SRV-01 | Phase 53 | Complete |
+| SRV-02 | Phase 53 | Complete |
+| SRV-03 | Phase 53 | Complete |
 | PEV-01 | Phase 54 | Pending |
 | PEV-02 | Phase 54 | Pending |
 | PEV-03 | Phase 54 | Pending |
