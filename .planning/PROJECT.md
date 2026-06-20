@@ -98,6 +98,7 @@ control of downside.
   submitted-trade reconciliation.
 - Phase 24 adds a sweep command that scans submitted live intents, skips
   already closed outcomes, and persists only final closed results.
+- Phase 25 adds a read-only active-position hold-time check.
 
 ### Active
 
@@ -138,6 +139,8 @@ control of downside.
   reconciled submitted-trade outcomes.
 - [x] Sweep submitted live trade intents and persist only final closed outcomes
   from Binance fill history.
+- [x] Report whether active live positions have exceeded the AI decision's
+  suggested hold window without modifying exchange state.
 
 ### Out of Scope
 
@@ -203,7 +206,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 24 are complete and verified. The project is installable as an
+Phases 1 through 25 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -221,7 +224,9 @@ closed-trade outcome reconciliation and persisted fill/outcome accounting.
 Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
 that gate to require final closed outcomes. Phase 24 adds
 `ops reconcile-outcomes` so submitted live trades can be swept and closed
-outcomes persisted without symbol-by-symbol manual commands.
+outcomes persisted without symbol-by-symbol manual commands. Phase 25 adds
+`ops position-hold-check` so active positions past their AI hold window are
+visible before any future time-exit automation is considered.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -240,7 +245,9 @@ Current live-status shows that BNBUSDT position has exchange-visible stop-loss
 and take-profit algo orders; it has not yet been outcome-reconciled because it
 is still open. Phase 24 server verification swept submitted outcomes, skipped
 the already reconciled ZECUSDT trade, reported BNBUSDT as `open_or_partial`,
-and inserted no new fills or outcomes.
+and inserted no new fills or outcomes. Phase 25 server verification reported
+BNBUSDT as protected by two algo orders but past its 60-minute AI hold window,
+with `status=review_required`.
 
 Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under very small max-position-notional settings, while
@@ -360,7 +367,7 @@ risk-cap profile changes.
 intents require a final `closed` outcome before risk profile changes are
 allowed.
 
-## Current Milestone: v1.16 Outcome Reconciliation Sweep
+## Previous Milestone: v1.16 Outcome Reconciliation Sweep
 
 **Goal:** Make submitted-trade outcome cleanup a one-shot sweep instead of a
 manual symbol-by-symbol operation.
@@ -373,6 +380,21 @@ manual symbol-by-symbol operation.
 
 **Status:** Complete. Server sweep shows ZECUSDT already reconciled and
 BNBUSDT still open/partial, with no new local fills or outcomes inserted.
+
+## Current Milestone: v1.17 Position Hold-Time Check
+
+**Goal:** Make active-position hold-time overruns visible without adding
+automatic exits.
+
+**Target features:**
+- Add `ops position-hold-check`.
+- Match active positions to unclosed submitted intents.
+- Report elapsed minutes, AI hold-time minutes, overdue status, unrealized PnL,
+  and protective algo-order count.
+- Keep the command read-only.
+
+**Status:** Complete. Server check reports BNBUSDT as protected but past the
+AI-provided 60-minute hold window.
 
 ## Key Decisions
 
@@ -403,8 +425,9 @@ BNBUSDT still open/partial, with no new local fills or outcomes inserted.
 | Gate risk profile changes | Higher leverage should require clear exchange state and reconciled trade outcomes, not just operator intent. | Phase 22 complete |
 | Require closed outcomes before risk changes | Partial/open accounting should not unlock higher leverage. | Phase 23 complete |
 | Sweep submitted outcomes before risk changes | Operators should not need symbol-specific one-off commands to clear closed outcome evidence after positions exit. | Phase 24 complete |
+| Check active position hold time | Positions that exceed AI hold guidance should be visible before adding any automated time-exit behavior. | Phase 25 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.16 outcome reconciliation sweep.*
+*Last updated: 2026-06-20 after verifying v1.17 position hold-time check.*

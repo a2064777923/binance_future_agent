@@ -238,6 +238,19 @@ v1.0 requirements are archived at
   artifacts only for final `closed` results; `open_or_partial` results remain
   report-only by default.
 
+### Position Hold-Time Review
+
+- [x] **PHT-01**: Provide a read-only `ops position-hold-check` command that
+  reports active positions against the submitted intent's AI
+  `hold_time_minutes` guidance.
+
+- [x] **PHT-02**: The command reports elapsed minutes, overdue status,
+  unrealized PnL, matching submitted intent, and protective algo-order count.
+
+- [x] **PHT-03**: The command returns a review-required status when a protected
+  active position exceeds its hold window, without closing or modifying the
+  position.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -305,13 +318,16 @@ v1.0 requirements are archived at
 | ORS-01 | Phase 24 | Complete - `ops reconcile-outcomes` scans submitted intents and reads signed Binance `userTrades` |
 | ORS-02 | Phase 24 | Complete - ZECUSDT closed outcome is skipped by default in the server sweep |
 | ORS-03 | Phase 24 | Complete - BNBUSDT open/partial sweep reported status without inserting fills or outcomes |
+| PHT-01 | Phase 25 | Complete - `ops position-hold-check` reports active positions against AI hold-time metadata |
+| PHT-02 | Phase 25 | Complete - server report includes BNBUSDT elapsed time, unrealized PnL, intent event, and protection count |
+| PHT-03 | Phase 25 | Complete - server BNBUSDT returns `review_required` for hold-time expiry without exchange mutation |
 
 **Coverage:**
 
-- v1.1-v1.16 requirements: 54 total
-- Mapped to phases: 54
+- v1.1-v1.17 requirements: 57 total
+- Mapped to phases: 57
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.16 outcome reconciliation sweep*
+*Last updated: 2026-06-20 after verifying v1.17 position hold-time check*

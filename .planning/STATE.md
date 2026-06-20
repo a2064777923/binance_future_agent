@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.16
-milestone_name: Outcome Reconciliation Sweep
-current_phase: Phase 24 - Outcome Reconciliation Sweep
+milestone: v1.17
+milestone_name: Position Hold-Time Check
+current_phase: Phase 25 - Position Hold-Time Check
 status: completed
-stopped_at: Phase 24 verified; outcome sweep reports BNBUSDT open/partial without persisting it
-last_updated: "2026-06-20T12:42:00.000+08:00"
+stopped_at: Phase 25 verified; BNBUSDT is protected but past AI hold window
+last_updated: "2026-06-20T12:54:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Outcome reconciliation sweep deployed and verified against live server state
+last_activity_desc: Position hold-time check deployed and verified against live server state
 progress:
-  total_phases: 16
-  completed_phases: 16
-  total_plans: 16
-  completed_plans: 16
+  total_phases: 17
+  completed_phases: 17
+  total_plans: 17
+  completed_plans: 17
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 24 - Outcome Reconciliation Sweep
-**Status:** v1.16 complete; submitted-outcome sweep is available and verified
+**Current phase:** Phase 25 - Position Hold-Time Check
+**Status:** v1.17 complete; active-position hold-time review is available and verified
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -89,10 +89,15 @@ projects or losing control of downside.
   server. It skipped already reconciled ZECUSDT, checked BNBUSDT, reported
   `open_or_partial`, and inserted no new fills or outcomes while BNBUSDT
   remains open.
+- `ops position-hold-check` is deployed and verified on the server. It reports
+  BNBUSDT as protected by two algo orders but past the AI decision's 60-minute
+  hold window, returning `status=review_required`.
 
 ## Next Command
 
-After BNBUSDT closes, run `ops reconcile-outcomes --persist-closed`, then rerun
+BNBUSDT is protected but past its AI hold window. Continue observing or plan an
+operator-approved time-exit phase. After BNBUSDT closes, run
+`ops reconcile-outcomes --persist-closed`, then rerun
 `ops risk-change-check --target-leverage 8` before changing the live profile.
 
 ## Session
@@ -103,15 +108,17 @@ After BNBUSDT closes, run `ops reconcile-outcomes --persist-closed`, then rerun
 
 ## Current Position
 
-Phase: Phase 24 - Outcome Reconciliation Sweep
-Plan: 24-01 complete
-Status: outcome sweep command is deployed and verified; BNBUSDT remains
-open/partial and continues to block risk changes
-Last activity: 2026-06-20 - Phase 24 verified
+Phase: Phase 25 - Position Hold-Time Check
+Plan: 25-01 complete
+Status: hold-time check is deployed and verified; BNBUSDT remains protected but
+past its AI hold window and continues to block risk changes
+Last activity: 2026-06-20 - Phase 25 verified
 
 ## Operator Next Steps
 
 - Observe the current BNBUSDT live position and its protective orders.
+- Use `ops position-hold-check` to monitor whether the current active position
+  remains past its AI hold window.
 - Run `ops reconcile-outcomes --persist-closed` after BNBUSDT closes.
 - Rerun `ops risk-change-check --target-leverage 8` before any leverage change.
 - Do not raise leverage/risk caps while a live position is open unless

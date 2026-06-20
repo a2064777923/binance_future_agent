@@ -99,6 +99,7 @@ def build_live_status_report(
     db_path: str | None = None,
     now_epoch: float | None = None,
     check_binance: bool = False,
+    signed_client: BinanceFuturesSignedClient | None = None,
 ) -> LiveStatusReport:
     resolved_db_path = db_path or config.get("BFA_DB_PATH")
     runtime_dir = config.get("BFA_RUNTIME_DIR")
@@ -123,7 +124,7 @@ def build_live_status_report(
         connection.close()
 
     backoff = _openai_backoff_status(Path(runtime_dir), now_epoch=now_epoch)
-    exchange_evidence = _read_exchange_evidence(config) if check_binance else {}
+    exchange_evidence = _read_exchange_evidence(config, signed_client=signed_client) if check_binance else {}
     if exchange_evidence:
         protective = _merge_protective_evidence(protective, exchange_evidence)
     return LiveStatusReport(
@@ -192,8 +193,12 @@ def _protective_evidence(connection: sqlite3.Connection) -> ProtectiveEvidence:
     return ProtectiveEvidence(complete=False)
 
 
-def _read_exchange_evidence(config: AppConfig) -> dict[str, Any]:
-    client = BinanceFuturesSignedClient(
+def _read_exchange_evidence(
+    config: AppConfig,
+    *,
+    signed_client: BinanceFuturesSignedClient | None = None,
+) -> dict[str, Any]:
+    client = signed_client or BinanceFuturesSignedClient(
         base_url=config.get("BINANCE_FUTURES_BASE_URL"),
         api_key=config.get("BINANCE_API_KEY"),
         api_secret=config.get("BINANCE_API_SECRET"),

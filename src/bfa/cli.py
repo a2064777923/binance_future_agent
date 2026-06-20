@@ -34,6 +34,7 @@ from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.live_status import build_live_status_report
+from bfa.ops.position_hold_check import build_position_hold_check_report
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
@@ -322,6 +323,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="also fetch submitted intents that already have a closed outcome",
     )
     reconcile_outcomes.add_argument("--limit", type=int, default=500, help="maximum userTrades rows per intent")
+
+    position_hold_check = ops_subparsers.add_parser(
+        "position-hold-check",
+        help="read-only check for active positions that exceed AI hold-time guidance",
+    )
+    position_hold_check.add_argument("--env-file", help="optional env file to load before environment overrides")
+    position_hold_check.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    position_hold_check.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    position_hold_check.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
 
     risk_change_check = ops_subparsers.add_parser(
         "risk-change-check",
@@ -723,7 +737,12 @@ def _run_ops(
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1
     if args.ops_command == "live-status":
-        report = build_live_status_report(config, db_path=args.db, check_binance=args.check_binance)
+        report = build_live_status_report(
+            config,
+            db_path=args.db,
+            check_binance=args.check_binance,
+            signed_client=_build_signed_client(config, signed_client_factory) if args.check_binance else None,
+        )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0
     if args.ops_command == "resume-check":
@@ -784,6 +803,16 @@ def _run_ops(
         payload = {"found": bool(report.items), "report": report.to_dict()}
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return 0
+    if args.ops_command == "position-hold-check":
+        report = build_position_hold_check_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 1 if report.action_required else 0
     if args.ops_command == "risk-change-check":
         report = build_risk_change_check_report(
             config,

@@ -27,6 +27,7 @@
 - ✅ **v1.14 Risk Change Readiness Gate** — Phase 22, completed 2026-06-20.
 - ✅ **v1.15 Closed Outcome Risk Change Strictness** — Phase 23, completed 2026-06-20.
 - ✅ **v1.16 Outcome Reconciliation Sweep** — Phase 24, completed 2026-06-20.
+- ✅ **v1.17 Position Hold-Time Check** — Phase 25, completed 2026-06-20.
 
 ## Phases
 
@@ -418,6 +419,29 @@ and inserts no outcome until the trade is finally closed.
 5. Unit, CLI, local full-suite, server full-suite, and live read-only sweep
    verification pass.
 
+### Phase 25: Position Hold-Time Check
+
+**Goal:** Report whether active live positions have exceeded the AI decision's
+suggested hold window without modifying exchange state.
+
+**Requirements:** PHT-01, PHT-02, PHT-03
+
+**Status:** Complete. Server verification reports the current BNBUSDT LONG as
+protected but past its 60-minute AI hold window, returning `review_required`.
+
+**Success Criteria:**
+
+1. `ops position-hold-check` reuses live-status exchange evidence and local
+   submitted-intent records.
+2. Active positions are matched to unclosed submitted order intents by symbol
+   and position side.
+3. Reports include elapsed minutes, configured hold-time minutes, overdue
+   status, unrealized PnL, and protective algo-order count.
+4. Protected positions past the hold window return `review_required`; missing
+   exchange evidence or missing protection fail closed.
+5. The command remains read-only and does not close positions, cancel orders,
+   edit env risk caps, or change timers.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -446,16 +470,18 @@ and inserts no outcome until the trade is finally closed.
 | 22 | v1.14 | 1/1 | Complete | 2026-06-20 |
 | 23 | v1.15 | 1/1 | Complete | 2026-06-20 |
 | 24 | v1.16 | 1/1 | Complete | 2026-06-20 |
+| 25 | v1.17 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.16 requirements: 54
-- Mapped: 54
+- v1.1-v1.17 requirements: 57
+- Mapped: 57
 - Unmapped: 0
 
 ## Next Step
 
-Observe the current BNBUSDT live position. After it closes, run
-`ops reconcile-outcomes --persist-closed`, then rerun
+The current BNBUSDT position is protected but has exceeded its AI hold window.
+Continue observing or explicitly plan an operator-approved time-exit phase.
+After it closes, run `ops reconcile-outcomes --persist-closed`, then rerun
 `ops risk-change-check --target-leverage 8`; only if it returns
 `risk_change_allowed=true` should a later phase change the server profile.

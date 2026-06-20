@@ -714,6 +714,46 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["latest"]["candidate"]["symbol"], "SOLUSDT")
         self.assertFalse(payload["lva05_complete"])
 
+    def test_ops_live_status_uses_injected_signed_client_for_binance_evidence(self):
+        class FakeSignedClient:
+            def account(self):
+                return {"availableBalance": "30", "totalWalletBalance": "30"}
+
+            def position_risk(self):
+                return []
+
+            def open_orders(self):
+                return []
+
+            def open_algo_orders(self):
+                return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-status",
+                "--check-binance",
+                "--db",
+                str(db_path),
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["exchange_evidence"]["account"]["available_balance"], "30")
+
     def test_ops_resume_check_requires_exchange_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -979,6 +1019,84 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["report"]["summary"]["persisted_outcomes_inserted"], 1)
         self.assertEqual(fill_count, 2)
         self.assertEqual(outcome_count, 1)
+
+    def test_ops_position_hold_check_reports_expired_live_hold_window(self):
+        class FakeSignedClient:
+            def account(self):
+                return {"availableBalance": "30", "totalWalletBalance": "30"}
+
+            def position_risk(self):
+                return [
+                    {
+                        "symbol": "BNBUSDT",
+                        "positionAmt": "0.01",
+                        "positionSide": "LONG",
+                        "entryPrice": "581.47",
+                        "markPrice": "581.00",
+                        "unRealizedProfit": "-0.0047",
+                    }
+                ]
+
+            def open_orders(self):
+                return []
+
+            def open_algo_orders(self):
+                return [
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            runtime = root / "runtime"
+            runtime.mkdir()
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-20T03:43:09Z",
+                source="execution.live",
+                symbol="BNBUSDT",
+                ref_id="order_intent:BNBUSDT:2026-06-20T03:43:09Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "BNBUSDT",
+                        "side": "BUY",
+                        "quantity": 0.01,
+                        "entry_price": 581.47,
+                        "leverage": 5,
+                        "metadata": {"hold_time_minutes": 30},
+                    },
+                },
+                event_type="order_intent",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "position-hold-check",
+                "--db",
+                str(db_path),
+                "--now",
+                "2026-06-20T04:20:00Z",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["status"], "review_required")
+        self.assertTrue(payload["action_required"])
+        self.assertIn("hold_time_expired", payload["reasons"])
+        self.assertEqual(payload["positions"][0]["matching_intent"]["hold_time_minutes"], 30)
 
     def test_backtest_fetch_klines_uses_fake_client_and_writes_dataset(self):
         class FakeClient:

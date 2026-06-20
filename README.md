@@ -97,6 +97,13 @@ python -m bfa.cli ops reconcile-outcomes --env-file .env --db runtime/agent.sqli
 python -m bfa.cli ops risk-change-check --env-file .env --db runtime/agent.sqlite --target-leverage 8
 ```
 
+Active live positions can also be checked against the AI decision's suggested
+hold window without changing exchange state:
+
+```bash
+python -m bfa.cli ops position-hold-check --env-file .env --db runtime/agent.sqlite
+```
+
 ## Small-Capital Backtesting
 
 The project now includes a short-window backtest harness for the hot-momentum
