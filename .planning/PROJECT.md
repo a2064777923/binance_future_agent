@@ -110,6 +110,10 @@ control of downside.
 - Phase 30 adds portfolio-level caps, candidate-queue evaluation, and a
   confirmation-gated 30U/10x/two-position profile path that can carry a
   protected active position only when the target caps can absorb it.
+- Phase 48 adds a compact read-only strategy evidence baseline that combines
+  forward-paper performance, loss attribution, adaptive guard output, server
+  timer/service state, exchange/manual exposure state, confirmation blockers,
+  and explicit non-mutation guarantees.
 
 ### Active
 
@@ -583,8 +587,9 @@ any small live automation can be resumed.
 | Filter reduce orders before confirmation | Tiny-account partial exits must satisfy Binance quantity and notional filters before the system exposes an executable token. | Phase 33 complete and deployed |
 | Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
 | Evidence before live resume | The latest paper evidence is negative, so v1.23 prioritizes strategy evidence, recalibration, and explicit readiness gates over restoring unattended live automation. | v1.23 active |
+| Baseline before recalibration | Weak setup changes should be driven by one compact current evidence report before profiles or live-readiness gates are changed. | Phase 48 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-21 after starting v1.23 strategy evidence milestone.*
+*Last updated: 2026-06-21 after completing Phase 48 strategy evidence baseline.*

@@ -48,6 +48,7 @@ from bfa.ops.position_review import build_position_review_report
 from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
+from bfa.ops.strategy_evidence_baseline import build_strategy_evidence_baseline_report
 from bfa.ops.strategy_promotion import build_strategy_promotion_check_report
 from bfa.ops.time_exit_execute import build_time_exit_execute_report
 from bfa.ops.trade_trace import build_trade_trace_report
@@ -419,6 +420,51 @@ def _build_parser() -> argparse.ArgumentParser:
     forward_paper_loss_attribution.add_argument("--since", help="only include paper signals opened at or after this ISO time")
     forward_paper_loss_attribution.add_argument("--min-group-outcomes", type=int, default=1, help="minimum outcomes per attribution group")
     forward_paper_loss_attribution.add_argument("--worst-limit", type=int, default=8, help="number of worst rows per grouping")
+
+    strategy_evidence_baseline = ops_subparsers.add_parser(
+        "strategy-evidence-baseline",
+        help="compact read-only baseline of strategy evidence and live-resume blockers",
+    )
+    strategy_evidence_baseline.add_argument("--env-file", help="optional env file to load before environment overrides")
+    strategy_evidence_baseline.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    strategy_evidence_baseline.add_argument("--variant", default="quant_setup_selective", help="paper variant to evaluate")
+    strategy_evidence_baseline.add_argument("--interval", default="5m", help="paper interval to evaluate")
+    strategy_evidence_baseline.add_argument("--since", help="only include paper signals opened at or after this ISO time")
+    strategy_evidence_baseline.add_argument("--min-outcomes", type=int, default=20, help="minimum settled paper outcomes")
+    strategy_evidence_baseline.add_argument("--min-win-rate", type=float, default=0.5, help="minimum paper win rate")
+    strategy_evidence_baseline.add_argument("--min-net-pnl-usdt", type=float, default=0.0, help="minimum total net PnL")
+    strategy_evidence_baseline.add_argument(
+        "--max-worst-drawdown-usdt",
+        type=float,
+        default=1.5,
+        help="maximum paper equity drawdown; use a negative value to disable this cap",
+    )
+    strategy_evidence_baseline.add_argument("--latest-limit", type=int, default=10, help="number of recent outcomes to show")
+    strategy_evidence_baseline.add_argument("--min-group-outcomes", type=int, default=1, help="minimum outcomes per attribution group")
+    strategy_evidence_baseline.add_argument("--worst-limit", type=int, default=8, help="number of worst rows per grouping")
+    strategy_evidence_baseline.add_argument(
+        "--no-systemd-check",
+        action="store_true",
+        help="skip read-only systemctl state checks and use unknown/overridden service states",
+    )
+    strategy_evidence_baseline.add_argument("--paper-timer-state", help="override paper.timer state, e.g. active")
+    strategy_evidence_baseline.add_argument("--live-timer-state", help="override live.timer state, e.g. inactive")
+    strategy_evidence_baseline.add_argument("--live-service-state", help="override live.service state, e.g. inactive")
+    strategy_evidence_baseline.add_argument(
+        "--exchange-state",
+        choices=("unknown", "clear", "manual_exposure", "agent_exposure", "open_orders"),
+        default="unknown",
+        help="read-only exchange exposure summary when known",
+    )
+    strategy_evidence_baseline.add_argument(
+        "--manual-exposure-symbols",
+        help="comma-separated manual exposure symbols to report separately from agent evidence",
+    )
+    strategy_evidence_baseline.add_argument(
+        "--no-operator-confirmation-required",
+        action="store_true",
+        help="omit the default operator confirmation blocker from this report",
+    )
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -1137,6 +1183,36 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.status == "loss_attribution_ready" else 1
+    if args.ops_command == "strategy-evidence-baseline":
+        report = build_strategy_evidence_baseline_report(
+            config,
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            variant=args.variant,
+            interval=args.interval,
+            since=args.since,
+            min_outcomes=args.min_outcomes,
+            min_win_rate=args.min_win_rate,
+            min_net_pnl_usdt=args.min_net_pnl_usdt,
+            max_worst_drawdown_usdt=None
+            if args.max_worst_drawdown_usdt is not None and args.max_worst_drawdown_usdt < 0
+            else args.max_worst_drawdown_usdt,
+            latest_limit=args.latest_limit,
+            min_group_outcomes=args.min_group_outcomes,
+            worst_limit=args.worst_limit,
+            check_systemd=not args.no_systemd_check,
+            server_state_overrides={
+                "paper.timer": args.paper_timer_state,
+                "live.timer": args.live_timer_state,
+                "live.service": args.live_service_state,
+            },
+            exchange_state=args.exchange_state,
+            manual_exposure_symbols=_symbols_arg(args.manual_exposure_symbols)
+            if args.manual_exposure_symbols
+            else [],
+            require_operator_confirmation=not args.no_operator_confirmation_required,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.live_resume_allowed else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:

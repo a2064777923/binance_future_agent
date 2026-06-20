@@ -2,22 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.23
 milestone_name: Strategy Evidence And Live Resume Readiness
+current_phase: 49 — Loss-Driven Setup Recalibration
+current_phase_name: Loss-Driven Setup Recalibration
 status: planning
-last_updated: "2026-06-20T16:45:16.645Z"
-last_activity: 2026-06-20
+stopped_at: Phase 48 complete, ready to plan Phase 49.
+last_updated: "2026-06-21T01:00:52+08:00"
+last_activity: 2026-06-21
+last_activity_desc: Phase 48 complete, transitioned to Phase 49
 progress:
-  total_phases: 0
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  total_phases: 5
+  completed_phases: 1
+  total_plans: 1
+  completed_plans: 1
+  percent: 20
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 48 — Strategy Evidence Baseline
-**Status:** v1.23 planning
+**Current phase:** 49 — Loss-Driven Setup Recalibration
+**Status:** Ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 0
 
@@ -28,9 +32,9 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Build a compact evidence baseline, recalibrate weak setup
-conditions, and define exact read-only gates before any small live automation
-can resume.
+**Current focus:** Recalibrate weak setup conditions from the new evidence
+baseline, then rerun backtest and forward-paper gates before any small live
+automation can resume.
 
 ## Decisions
 
@@ -571,7 +575,7 @@ can resume.
 
 ## Next Command
 
-Start Phase 48. Keep live automation disabled. Do not enable unattended live
+Start Phase 49. Keep live automation disabled. Do not enable unattended live
 auto-hot, restore live automation, execute adjustment orders, or apply
 `30u_10x_multi_dynamic` while strategy matrix evidence and forward-paper
 performance are negative.
@@ -584,11 +588,11 @@ performance are negative.
 
 ## Current Position
 
-Phase: 48 — Strategy Evidence Baseline
-Plan: —
+Phase: 49 — Loss-Driven Setup Recalibration
+Plan: Not started
 Status: Ready to plan
-Last activity: 2026-06-21 — Milestone v1.23 requirements and roadmap defined
+Last activity: 2026-06-21 — Phase 48 complete, transitioned to Phase 49
 
 ## Operator Next Steps
 
-- Run /gsd-plan-phase 48
+- Run /gsd-plan-phase 49

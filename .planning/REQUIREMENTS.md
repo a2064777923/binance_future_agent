@@ -9,14 +9,17 @@ projects or losing control of downside.
 
 ### Evidence Baseline
 
-- [ ] **EVB-01**: Operator can generate a compact current evidence baseline that
+- [x] **EVB-01**: Operator can generate a compact current evidence baseline that
   reports forward-paper signals, settled outcomes, win rate, total net PnL,
   profit factor, worst drawdown, open signals, and latest outcomes.
-- [ ] **EVB-02**: Evidence baseline includes loss attribution by symbol, side,
+
+- [x] **EVB-02**: Evidence baseline includes loss attribution by symbol, side,
   exit reason, setup reason, factor reason, and factor name.
-- [ ] **EVB-03**: Evidence baseline records server automation state
+
+- [x] **EVB-03**: Evidence baseline records server automation state
   (`paper.timer`, `live.timer`, `live.service`) without mutating services.
-- [ ] **EVB-04**: Evidence baseline explicitly states whether live resume is
+
+- [x] **EVB-04**: Evidence baseline explicitly states whether live resume is
   blocked by strategy evidence, server state, exchange/manual exposure, or
   operator confirmation.
 
@@ -25,12 +28,15 @@ projects or losing control of downside.
 - [ ] **SRC-01**: Strategy profiles can tighten or disable weak symbol, side,
   setup-reason, factor-reason, and factor-name groups identified by paper loss
   attribution.
+
 - [ ] **SRC-02**: Stop-loss and take-profit geometry can be recalibrated using
   ATR, support/resistance, VWAP, recent swing structure, and observed
   stop-loss/time-exit attribution.
+
 - [ ] **SRC-03**: Setup scoring can penalize missing open-interest evidence,
   thin liquidity, weak RSI/trend/momentum regimes, and historically losing
   taker-flow or volume-impulse conditions.
+
 - [ ] **SRC-04**: Recalibrated setup variants remain paper/backtest-first and
   do not change live defaults until promotion gates pass.
 
@@ -38,11 +44,14 @@ projects or losing control of downside.
 
 - [ ] **BFP-01**: Operator can run a refreshed hot-symbol matrix across multiple
   recent hot universes, at least `5m` and `15m`, and multiple setup variants.
+
 - [ ] **BFP-02**: Matrix reports compare total net PnL, win rate,
   positive-window rate, trade count, and worst drawdown for each interval and
   variant.
+
 - [ ] **BFP-03**: Forward-paper performance checks can evaluate post-change
   evidence separately from older pre-change outcomes.
+
 - [ ] **BFP-04**: Strategy promotion remains blocked unless repeated backtest
   and forward-paper evidence pass configured minimum outcomes, positive PnL,
   win-rate, profit-factor, and drawdown gates.
@@ -52,11 +61,14 @@ projects or losing control of downside.
 - [ ] **LRR-01**: Operator can run one read-only live-resume readiness command
   that combines strategy promotion, forward-paper performance, server timer
   state, exchange state, risk-profile state, and confirmation requirements.
+
 - [ ] **LRR-02**: Readiness report distinguishes agent-managed exposure from
   manual exchange exposure so manual positions do not get silently treated as
   agent-approved strategy evidence.
+
 - [ ] **LRR-03**: Live auto-hot remains disabled by default and can be previewed
   only through dry-run/read-only checks before any live timer restore.
+
 - [ ] **LRR-04**: `30u_10x_multi_dynamic` or any higher-risk profile remains
   preview/confirmation-gated and cannot be applied by readiness reporting.
 
@@ -66,6 +78,7 @@ projects or losing control of downside.
 
 - **ADS-01**: Add a replaceable Binance Square browser/export collector when a
   stable allowed source is available.
+
 - **ADS-02**: Add additional social/news/on-chain feeds after strategy evidence
   shows which signals improve forward-paper outcomes.
 
@@ -73,6 +86,7 @@ projects or losing control of downside.
 
 - **AUT-01**: Consider automatic profile switching only after repeated live
   pilots prove positive risk-adjusted results.
+
 - **AUT-02**: Consider automatic position exits only after operator-approved
   exit plans have repeated successful evidence.
 
@@ -89,10 +103,10 @@ projects or losing control of downside.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVB-01 | Phase 48 | Pending |
-| EVB-02 | Phase 48 | Pending |
-| EVB-03 | Phase 48 | Pending |
-| EVB-04 | Phase 48 | Pending |
+| EVB-01 | Phase 48 | Complete |
+| EVB-02 | Phase 48 | Complete |
+| EVB-03 | Phase 48 | Complete |
+| EVB-04 | Phase 48 | Complete |
 | SRC-01 | Phase 49 | Pending |
 | SRC-02 | Phase 49 | Pending |
 | SRC-03 | Phase 49 | Pending |
@@ -107,6 +121,7 @@ projects or losing control of downside.
 | LRR-04 | Phase 52 | Pending |
 
 **Coverage:**
+
 - v1.23 requirements: 16 total
 - Mapped to phases: 16
 - Unmapped: 0

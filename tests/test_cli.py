@@ -2338,6 +2338,76 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["worst_groups"]["symbols"][0]["name"], "BICOUSDT")
         self.assertTrue(payload["recalibration_candidates"])
 
+    def test_ops_strategy_evidence_baseline_reports_live_resume_blockers(self):
+        from tests.test_ops_forward_paper_performance import outcome_payload, signal_payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            from bfa.event_store.migrations import connect
+
+            connection = connect(db)
+            store = EventStore(connection)
+            for index, pnl in enumerate([-0.3, 0.1]):
+                signal_id = store.insert_artifact(
+                    "paper_signals",
+                    occurred_at=f"2026-06-20T00:0{index}:00Z",
+                    source="test",
+                    symbol="BICOUSDT",
+                    ref_id=f"paper_signal:{index}",
+                    event_type="paper_signal",
+                    payload=signal_payload(
+                        "BICOUSDT",
+                        index,
+                        opened_at=f"2026-06-20T00:0{index}:00Z",
+                    ),
+                )
+                store.insert_artifact(
+                    "paper_outcomes",
+                    occurred_at=f"2026-06-20T01:0{index}:00Z",
+                    source="test",
+                    symbol="BICOUSDT",
+                    ref_id=f"paper_outcome:{signal_id}",
+                    event_type="paper_outcome",
+                    payload=outcome_payload(
+                        signal_id,
+                        "BICOUSDT",
+                        pnl,
+                        closed_at=f"2026-06-20T01:0{index}:00Z",
+                        exit_reason="stop_loss" if pnl < 0 else "take_profit",
+                    ),
+                )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "strategy-evidence-baseline",
+                "--db",
+                str(db),
+                "--min-outcomes",
+                "2",
+                "--no-systemd-check",
+                "--paper-timer-state",
+                "active",
+                "--live-timer-state",
+                "inactive",
+                "--live-service-state",
+                "inactive",
+                "--exchange-state",
+                "clear",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_strategy_evidence_baseline_v1")
+        self.assertEqual(payload["status"], "keep_live_paused")
+        self.assertFalse(payload["live_resume_allowed"])
+        self.assertEqual(payload["server_state"]["paper.timer"]["state"], "active")
+        self.assertIn("paper_total_net_pnl_not_above_min", payload["reasons"]["strategy_evidence"])
+        self.assertEqual(payload["reasons"]["server_state"], [])
+        self.assertEqual(payload["reasons"]["exchange_state"], [])
+        self.assertEqual(payload["reasons"]["confirmation"], ["operator_confirmation_required"])
+
 
 if __name__ == "__main__":
     unittest.main()
