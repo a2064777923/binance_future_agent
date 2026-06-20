@@ -50,6 +50,7 @@ class EventStoreRepositoryTests(unittest.TestCase):
             "risk_state",
             "outcomes",
             "paper_signals",
+            "paper_observations",
             "paper_outcomes",
         ]
 

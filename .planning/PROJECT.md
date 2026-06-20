@@ -118,6 +118,9 @@ control of downside.
   and setup profile gates for blocked setup reasons, blocked negative factor
   names, missing open interest, thin liquidity, weak momentum, and weak volume
   impulse while leaving live defaults unchanged.
+- Phase 57 adds paper-only `paper_observations` so forward-paper records
+  generated signals and rejected candidates with skip reasons, setup factor
+  snapshots, and source-health evidence across 40-symbol auto-hot runs.
 - Phase 50 adds `backtest matrix-suite`, which runs multiple hot-universe
   presets across `5m`/`15m` and baseline/recalibrated quant setup variants.
   The Phase 50 public-data report marks `quant_setup_selective_guarded` as a
@@ -732,6 +735,7 @@ remains paused.
 | Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | Phase 53 complete |
 | Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | Phase 54 complete; evidence not promoted |
 | Operator packet before live | Readiness JSON needs one operator-facing next action before any separate live resume confirmation flow is prepared. | Phase 55 complete; current packet says `resolve_exposure` |
+| Paper observation before resume | Low-signal or zero-signal paper runs must show generated candidates, rejected setup reasons, factor snapshots, and source health before any promotion review. | Phase 57 complete |
 | Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 active |
 | Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | v1.25 active |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
@@ -757,4 +761,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 56 completion.*
+*Last updated: 2026-06-21 after Phase 57 completion.*

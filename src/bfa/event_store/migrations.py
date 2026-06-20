@@ -20,6 +20,7 @@ CATEGORY_TABLES = (
     "risk_state",
     "outcomes",
     "paper_signals",
+    "paper_observations",
     "paper_outcomes",
 )
 

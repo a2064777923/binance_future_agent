@@ -2299,6 +2299,7 @@ class CliTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             try:
                 signal_count = connection.execute("SELECT COUNT(*) AS count FROM paper_signals").fetchone()["count"]
+                observation_count = connection.execute("SELECT COUNT(*) AS count FROM paper_observations").fetchone()["count"]
                 intent_count = connection.execute("SELECT COUNT(*) AS count FROM order_intents").fetchone()["count"]
             finally:
                 connection.close()
@@ -2308,7 +2309,11 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(payload["schema"], "bfa_forward_paper_run_v1")
         self.assertEqual(payload["persisted"]["paper_signals"], 1)
+        self.assertEqual(payload["persisted"]["paper_observations"], 1)
+        self.assertEqual(payload["observation_summary"], {"generated_signal": 1})
+        self.assertEqual(payload["source_health"]["symbol_selection"]["mode"], "cli_symbols")
         self.assertEqual(signal_count, 1)
+        self.assertEqual(observation_count, 1)
         self.assertEqual(intent_count, 0)
 
     def test_ops_forward_paper_run_auto_selects_hot_symbols(self):
@@ -2372,6 +2377,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(payload["symbols"], ["HOTUSDT"])
+        self.assertEqual(payload["source_health"]["symbol_selection"]["mode"], "binance_24h_ticker")
+        self.assertEqual(payload["source_health"]["binance_24h_ticker"]["payload_count"], 3)
         self.assertEqual(fake_client.kline_symbols, ["HOTUSDT"])
 
     def test_ops_forward_paper_performance_check_reports_insufficient_evidence(self):

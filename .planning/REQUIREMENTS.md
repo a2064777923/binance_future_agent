@@ -25,10 +25,10 @@ projects or losing control of downside.
 - [ ] **STRAT-01**: Operator can run a current-data matrix over a broad
   auto-hot Binance USD-M universe using completed candles, next-candle entries,
   fees, slippage, small-account sizing caps, and multiple quant setup variants.
-- [ ] **STRAT-02**: Forward-paper collection records generated signals, skipped
+- [x] **STRAT-02**: Forward-paper collection records generated signals, skipped
   candidates, guard blocks, skip reasons, setup factors, and later outcomes so
   zero-signal runs are diagnosable instead of opaque.
-- [ ] **STRAT-03**: Paper-only exploration can collect shadow evidence for
+- [x] **STRAT-03**: Paper-only exploration can collect shadow evidence for
   candidates rejected by strict live guards without creating order intents,
   changing live env, restoring live timers, or placing Binance orders.
 - [ ] **STRAT-04**: Promotion checks separate `collect_more_paper`,
@@ -38,10 +38,10 @@ projects or losing control of downside.
 
 ### Hot-Symbol Data Breadth
 
-- [ ] **DATA-01**: Forward-paper and matrix workflows can observe at least 40
+- [x] **DATA-01**: Forward-paper and matrix workflows can observe at least 40
   current hot USDT USD-M symbols while the live pilot allowlist remains
   separately capped and controlled.
-- [ ] **DATA-02**: Narrative/hotness collection records source health and
+- [x] **DATA-02**: Narrative/hotness collection records source health and
   fallback source usage so Square/manual/RSS/social-export gaps do not silently
   reduce the strategy to a ten-symbol list.
 
@@ -108,11 +108,11 @@ projects or losing control of downside.
 | EXP-02 | Phase 56 | Complete |
 | EXP-03 | Phase 56 | Complete |
 | STRAT-01 | Phase 58 | Pending |
-| STRAT-02 | Phase 57 | Pending |
-| STRAT-03 | Phase 57 | Pending |
+| STRAT-02 | Phase 57 | Complete |
+| STRAT-03 | Phase 57 | Complete |
 | STRAT-04 | Phase 58 | Pending |
-| DATA-01 | Phase 57 | Pending |
-| DATA-02 | Phase 57 | Pending |
+| DATA-01 | Phase 57 | Complete |
+| DATA-02 | Phase 57 | Complete |
 | LOSS-01 | Phase 56 | Complete |
 | LOSS-02 | Phase 58 | Pending |
 | LIVE-01 | Phase 59 | Pending |
@@ -129,4 +129,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after v1.25 milestone definition*
+*Last updated: 2026-06-21 after Phase 57 completion*

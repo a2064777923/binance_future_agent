@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
-current_phase: 57
-current_phase_name: Adaptive Forward-Paper Observation
+current_phase: 58
+current_phase_name: Promotion Matrix And Loss Review
 status: planning
-stopped_at: Phase 56 complete; ready to plan Phase 57.
-last_updated: "2026-06-21T03:12:25+08:00"
+stopped_at: Phase 57 complete; ready to plan Phase 58.
+last_updated: "2026-06-21T03:42:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 56 complete
+last_activity_desc: Phase 57 complete
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
-  completed_plans: 1
-  percent: 20
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 57 — Adaptive Forward-Paper Observation
-**Status:** Phase 56 complete; Phase 57 ready to plan
+**Current phase:** Phase 58 — Promotion Matrix And Loss Review
+**Status:** Phase 57 complete; Phase 58 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 0
 
@@ -32,9 +32,10 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan Phase 57 so paper observation records generated
-signals, skip reasons, guard blocks, and source health across a broader hot
-symbol universe while live automation remains disabled.
+**Current focus:** Plan Phase 58 so current matrix, loss attribution, manual
+loss incidents, and the new paper observations decide whether the strategy
+still needs paper collection or can move toward a later confirmation-gated live
+resume path.
 
 ## Decisions
 
@@ -68,6 +69,11 @@ symbol universe while live automation remains disabled.
   liquidation/failure lessons, restore productive paper evidence collection,
   and build a separate confirmation-gated live resume path only after the
   operator packet is eligible.
+
+- Phase 57 direction is complete: forward-paper now persists
+  `paper_observations` for generated signals and rejected candidates, reports
+  observation summaries and source health, and remains paper-only with no
+  `order_intents`.
 
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -586,23 +592,23 @@ symbol universe while live automation remains disabled.
 
 ## Next Command
 
-Run `$gsd-plan-phase 57` for adaptive forward-paper observation. Keep live
+Run `$gsd-plan-phase 58` for promotion matrix and loss review. Keep live
 automation disabled until strategy/paper gates, server state, and separate
 operator-confirmation gates pass.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 56 complete; Phase 57 ready to plan.
-**Resume file:** .planning/phases/56-exposure-clearance-and-manual-loss-intake/56-VERIFICATION.md
+**Stopped at:** Phase 57 complete; Phase 58 ready to plan.
+**Resume file:** .planning/phases/57-adaptive-forward-paper-observation/57-VERIFICATION.md
 
 ## Current Position
 
-Phase: 57 — Adaptive Forward-Paper Observation
+Phase: 58 — Promotion Matrix And Loss Review
 Plan: —
 Status: Ready to plan
-Last activity: 2026-06-21 — Phase 56 complete
+Last activity: 2026-06-21 — Phase 57 complete
 
 ## Operator Next Steps
 
-- Plan Phase 57 with `$gsd-plan-phase 57`.
+- Plan Phase 58 with `$gsd-plan-phase 58`.

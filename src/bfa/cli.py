@@ -1287,11 +1287,30 @@ def _build_signed_client(config: AppConfig, signed_client_factory):
 
 
 def _forward_paper_symbols_from_config(config: AppConfig, client, args: argparse.Namespace) -> list[str]:
+    symbols, _source_health = _forward_paper_symbol_selection(config, client, args)
+    return symbols
+
+
+def _forward_paper_symbol_selection(config: AppConfig, client, args: argparse.Namespace) -> tuple[list[str], dict[str, object]]:
+    if args.symbols:
+        symbols = _symbols_arg(args.symbols)
+        return symbols, _forward_paper_source_health(
+            config,
+            mode="cli_symbols",
+            status="used" if symbols else "empty",
+            selected_symbols=symbols,
+        )
     if _forward_paper_auto_hot_enabled(config, args):
-        hot_symbols = _select_forward_paper_hot_symbols(config, client, args)
+        hot_symbols, hot_health = _select_forward_paper_hot_symbols_with_health(config, client, args)
         if hot_symbols:
-            return hot_symbols
-    return forward_paper_symbols(config)
+            return hot_symbols, hot_health
+    symbols = forward_paper_symbols(config)
+    return symbols, _forward_paper_source_health(
+        config,
+        mode="config_fallback",
+        status="used" if symbols else "empty",
+        selected_symbols=symbols,
+    )
 
 
 def _forward_paper_auto_hot_enabled(config: AppConfig, args: argparse.Namespace) -> bool:
@@ -1301,25 +1320,87 @@ def _forward_paper_auto_hot_enabled(config: AppConfig, args: argparse.Namespace)
 
 
 def _select_forward_paper_hot_symbols(config: AppConfig, client, args: argparse.Namespace) -> list[str]:
+    symbols, _source_health = _select_forward_paper_hot_symbols_with_health(config, client, args)
+    return symbols
+
+
+def _select_forward_paper_hot_symbols_with_health(
+    config: AppConfig,
+    client,
+    args: argparse.Namespace,
+) -> tuple[list[str], dict[str, object]]:
     ticker_response = client.ticker_24hr()
     ticker_payload = ticker_response.payload if isinstance(ticker_response.payload, list) else []
+    top_n = args.top_n or int(config.get("BFA_FORWARD_PAPER_TOP_N"))
+    min_quote_volume = (
+        args.min_quote_volume_usdt
+        if args.min_quote_volume_usdt is not None
+        else float(config.get("BFA_FORWARD_PAPER_MIN_QUOTE_VOLUME_USDT"))
+    )
+    min_abs_change = (
+        args.min_abs_price_change_percent
+        if args.min_abs_price_change_percent is not None
+        else float(config.get("BFA_FORWARD_PAPER_MIN_ABS_PRICE_CHANGE_PERCENT"))
+    )
     hot_rows = select_hot_usdt_symbols(
         ticker_payload,
         HotUniverseConfig(
-            top_n=args.top_n or int(config.get("BFA_FORWARD_PAPER_TOP_N")),
-            min_quote_volume_usdt=(
-                args.min_quote_volume_usdt
-                if args.min_quote_volume_usdt is not None
-                else float(config.get("BFA_FORWARD_PAPER_MIN_QUOTE_VOLUME_USDT"))
-            ),
-            min_abs_price_change_percent=(
-                args.min_abs_price_change_percent
-                if args.min_abs_price_change_percent is not None
-                else float(config.get("BFA_FORWARD_PAPER_MIN_ABS_PRICE_CHANGE_PERCENT"))
-            ),
+            top_n=top_n,
+            min_quote_volume_usdt=min_quote_volume,
+            min_abs_price_change_percent=min_abs_change,
         ),
     )
-    return [str(item["symbol"]) for item in hot_rows]
+    symbols = [str(item["symbol"]) for item in hot_rows]
+    health = _forward_paper_source_health(
+        config,
+        mode="binance_24h_ticker",
+        status="used" if symbols else "empty",
+        selected_symbols=symbols,
+        ticker_payload_count=len(ticker_payload),
+        selected_rows=hot_rows,
+        filters={
+            "top_n": top_n,
+            "min_quote_volume_usdt": min_quote_volume,
+            "min_abs_price_change_percent": min_abs_change,
+        },
+    )
+    return symbols, health
+
+
+def _forward_paper_source_health(
+    config: AppConfig,
+    *,
+    mode: str,
+    status: str,
+    selected_symbols: list[str],
+    ticker_payload_count: int | None = None,
+    selected_rows: list[Mapping[str, object]] | None = None,
+    filters: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    rss_urls = rss_feed_urls(config)
+    payload: dict[str, object] = {
+        "symbol_selection": {
+            "mode": mode,
+            "status": status,
+            "selected_count": len(selected_symbols),
+            "selected_symbols": list(selected_symbols),
+        },
+        "configured_narrative_sources": {
+            "binance_square_manual_export_dir_configured": bool(config.get("SQUARE_EXPORT_DIR")),
+            "rss_feed_count": len(rss_urls),
+            "rss_feeds_configured": bool(rss_urls),
+            "status": "not_polled_by_forward_paper_run",
+        },
+    }
+    if ticker_payload_count is not None:
+        payload["binance_24h_ticker"] = {
+            "status": status,
+            "payload_count": ticker_payload_count,
+            "selected_count": len(selected_symbols),
+            "filters": dict(filters or {}),
+            "selected_rows": list(selected_rows or []),
+        }
+    return payload
 
 
 def _run_ops(
@@ -1411,11 +1492,7 @@ def _run_ops(
         return 0 if report.promotion_allowed else 1
     if args.ops_command == "forward-paper-run":
         client = _build_client(config, client_factory)
-        symbols = (
-            _symbols_arg(args.symbols)
-            if args.symbols
-            else _forward_paper_symbols_from_config(config, client, args)
-        )
+        symbols, source_health = _forward_paper_symbol_selection(config, client, args)
         report = run_forward_paper(
             client=client,
             db_path=args.db or config.get("BFA_DB_PATH"),
@@ -1425,6 +1502,7 @@ def _run_ops(
             limit=args.limit,
             now=args.now,
             paper_guard_config=guard_config_from_app(config),
+            source_health=source_health,
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1

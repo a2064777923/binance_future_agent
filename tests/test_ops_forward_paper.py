@@ -77,14 +77,20 @@ class ForwardPaperTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             try:
                 signal_count = connection.execute("SELECT COUNT(*) AS count FROM paper_signals").fetchone()["count"]
+                observation_count = connection.execute("SELECT COUNT(*) AS count FROM paper_observations").fetchone()["count"]
                 intent_count = connection.execute("SELECT COUNT(*) AS count FROM order_intents").fetchone()["count"]
             finally:
                 connection.close()
 
         self.assertEqual(report.status, "paper_run_complete")
         self.assertEqual(report.persisted["paper_signals"], 1)
+        self.assertEqual(report.persisted["paper_observations"], 1)
         self.assertEqual(signal_count, 1)
+        self.assertEqual(observation_count, 1)
         self.assertEqual(intent_count, 0)
+        self.assertEqual(report.observation_summary, {"generated_signal": 1})
+        self.assertEqual(report.paper_observations[0]["status"], "generated_signal")
+        self.assertGreater(len(report.paper_observations[0]["factor_scores"]), 0)
         self.assertEqual(report.paper_signals[0]["symbol"], "BTCUSDT")
         self.assertEqual(report.paper_signals[0]["recorded_at"], "2026-06-20T00:00:00Z")
 
@@ -221,8 +227,88 @@ class ForwardPaperTests(unittest.TestCase):
 
         self.assertEqual(report.generated_signals, 0)
         self.assertEqual(report.skipped_signals, 1)
+        self.assertEqual(report.persisted["paper_observations"], 1)
+        self.assertEqual(report.observation_summary, {"blocked_by_guard": 1})
+        self.assertEqual(report.paper_observations[0]["status"], "blocked_by_guard")
+        self.assertEqual(report.paper_observations[0]["reason_codes"], ["forward_paper_symbol_block:BTCUSDT"])
         self.assertEqual(report.guarded_symbols, ["BTCUSDT"])
         self.assertEqual(report.paper_guard["status"], "active")
+
+    def test_forward_paper_run_records_setup_pass_observation(self):
+        flat_rows = [
+            kline(
+                index,
+                open_price=100.0,
+                high=100.2,
+                low=99.8,
+                close=100.0,
+                taker_ratio=1.0,
+            )
+            for index in range(18)
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            report = run_forward_paper(
+                client=FakeClient(flat_rows),
+                db_path=str(db),
+                symbols=["BTCUSDT"],
+                interval="5m",
+                variant="quant_setup_selective",
+                limit=18,
+                now="2026-06-20T00:00:00Z",
+            )
+            connection = sqlite3.connect(db)
+            connection.row_factory = sqlite3.Row
+            try:
+                observation_count = connection.execute("SELECT COUNT(*) AS count FROM paper_observations").fetchone()["count"]
+            finally:
+                connection.close()
+
+        self.assertEqual(report.generated_signals, 0)
+        self.assertEqual(report.skipped_signals, 1)
+        self.assertEqual(observation_count, 1)
+        self.assertEqual(report.observation_summary, {"setup_pass": 1})
+        observation = report.paper_observations[0]
+        self.assertEqual(observation["status"], "setup_pass")
+        self.assertIn("quant_setup_pass", observation["reason_codes"])
+        self.assertGreater(len(observation["factor_scores"]), 0)
+
+    def test_forward_paper_run_reports_event_store_narrative_source_health(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            connection = sqlite3.connect(db)
+            connection.row_factory = sqlite3.Row
+            store = EventStore(connection)
+            store.insert_artifact(
+                "narratives",
+                occurred_at="2026-06-20T00:00:00Z",
+                source="binance_square",
+                symbol="BTCUSDT",
+                ref_id="square:btc",
+                event_type="narrative",
+                payload={
+                    "schema": "bfa_normalized_narrative_v1",
+                    "source": "binance_square",
+                    "symbol_mentions": ["BTCUSDT"],
+                },
+            )
+            connection.close()
+
+            report = run_forward_paper(
+                client=FakeClient(trend_rows(24)),
+                db_path=str(db),
+                symbols=["BTCUSDT"],
+                interval="5m",
+                variant="quant_setup",
+                limit=18,
+                now="2026-06-20T00:05:00Z",
+            )
+
+        narrative_health = report.source_health["event_store_narratives"]
+        self.assertEqual(narrative_health["status"], "available")
+        self.assertEqual(narrative_health["matched_records"], 1)
+        self.assertEqual(narrative_health["sources"], {"binance_square": 1})
+        self.assertEqual(narrative_health["covered_symbols"], ["BTCUSDT"])
 
 
 if __name__ == "__main__":

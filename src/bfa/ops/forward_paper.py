@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import sqlite3
+from collections import Counter
 from typing import Any, Mapping
 
 from bfa.ai.schema import RiskLimits
@@ -96,6 +97,36 @@ class PaperOutcome:
 
 
 @dataclass(frozen=True)
+class PaperObservation:
+    symbol: str
+    interval: str
+    variant: str
+    observed_at: str
+    status: str
+    reason_codes: list[str]
+    bars_seen: int
+    setup: dict[str, Any] | None = None
+    recorded_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        setup = dict(self.setup or {})
+        return {
+            "schema": "bfa_paper_observation_v1",
+            "symbol": self.symbol,
+            "interval": self.interval,
+            "variant": self.variant,
+            "observed_at": self.observed_at,
+            "recorded_at": self.recorded_at,
+            "status": self.status,
+            "reason_codes": list(self.reason_codes),
+            "bars_seen": self.bars_seen,
+            "setup_summary": _setup_summary(setup),
+            "factor_scores": list(setup.get("factor_scores") or []),
+            "setup": setup,
+        }
+
+
+@dataclass(frozen=True)
 class ForwardPaperRunReport:
     status: str
     variant: str
@@ -107,8 +138,11 @@ class ForwardPaperRunReport:
     reasons: list[str] = field(default_factory=list)
     paper_signals: list[dict[str, Any]] = field(default_factory=list)
     paper_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    paper_observations: list[dict[str, Any]] = field(default_factory=list)
+    observation_summary: dict[str, int] = field(default_factory=dict)
     paper_guard: dict[str, Any] | None = None
     guarded_symbols: list[str] = field(default_factory=list)
+    source_health: dict[str, Any] = field(default_factory=dict)
     persisted: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -128,8 +162,11 @@ class ForwardPaperRunReport:
             "reasons": list(self.reasons),
             "paper_signals": list(self.paper_signals),
             "paper_outcomes": list(self.paper_outcomes),
+            "paper_observations": list(self.paper_observations),
+            "observation_summary": dict(self.observation_summary),
             "paper_guard": self.paper_guard,
             "guarded_symbols": list(self.guarded_symbols),
+            "source_health": dict(self.source_health),
             "persisted": dict(self.persisted),
         }
 
@@ -144,6 +181,7 @@ def run_forward_paper(
     limit: int = 36,
     now: str | None = None,
     paper_guard_config=None,
+    source_health: Mapping[str, Any] | None = None,
 ) -> ForwardPaperRunReport:
     selected_symbols = _symbols(symbols)
     if not selected_symbols:
@@ -173,7 +211,7 @@ def run_forward_paper(
             config=config,
             now=now,
         )
-        signals, signal_event_ids, skipped = _generate_new_signals(
+        signals, signal_event_ids, observations, observation_event_ids = _generate_new_signals(
             connection,
             store,
             bars_by_symbol=bars_by_symbol,
@@ -183,9 +221,15 @@ def run_forward_paper(
             now=now,
             paper_guard=paper_guard,
         )
+        combined_source_health = _source_health(
+            source_health,
+            selected_symbols=selected_symbols,
+            narrative_health=_narrative_source_health(connection, selected_symbols),
+        )
     finally:
         connection.close()
 
+    skipped = sum(1 for observation in observations if observation.status != "generated_signal")
     return ForwardPaperRunReport(
         status="paper_run_complete",
         variant=variant,
@@ -196,11 +240,15 @@ def run_forward_paper(
         settled_outcomes=len(outcomes),
         paper_signals=[signal.to_dict() for signal in signals],
         paper_outcomes=[outcome.to_dict() for outcome in outcomes],
+        paper_observations=[observation.to_dict() for observation in observations],
+        observation_summary=_observation_summary(observations),
         paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
         guarded_symbols=sorted(paper_guard.symbol_blocks) if paper_guard is not None and paper_guard.active else [],
+        source_health=combined_source_health,
         persisted={
             "paper_signals": len(signal_event_ids),
             "paper_outcomes": len(outcome_event_ids),
+            "paper_observations": len(observation_event_ids),
         },
     )
 
@@ -264,18 +312,39 @@ def _generate_new_signals(
     config: BacktestConfig,
     now: str | None,
     paper_guard: ForwardPaperGuard | None,
-) -> tuple[list[PaperSignal], list[int], int]:
+) -> tuple[list[PaperSignal], list[int], list[PaperObservation], list[int]]:
     signals: list[PaperSignal] = []
     event_ids: list[int] = []
-    skipped = 0
+    observations: list[PaperObservation] = []
+    observation_event_ids: list[int] = []
     for symbol, bars in sorted(bars_by_symbol.items()):
         if paper_guard is not None and paper_guard.blocks_symbol(symbol):
-            skipped += 1
+            observation = _paper_observation(
+                symbol,
+                bars,
+                interval=interval,
+                variant=variant,
+                status="blocked_by_guard",
+                reason_codes=paper_guard.symbol_reasons(symbol),
+                now=now,
+            )
+            observations.append(observation)
+            observation_event_ids.append(_persist_observation(store, observation))
             continue
         if _has_open_signal(connection, symbol=symbol, interval=interval, variant=variant):
-            skipped += 1
+            observation = _paper_observation(
+                symbol,
+                bars,
+                interval=interval,
+                variant=variant,
+                status="open_signal_exists",
+                reason_codes=["open_paper_signal_exists"],
+                now=now,
+            )
+            observations.append(observation)
+            observation_event_ids.append(_persist_observation(store, observation))
             continue
-        signal = _build_paper_signal(
+        signal, observation = _build_paper_signal_and_observation(
             symbol,
             bars,
             interval=interval,
@@ -284,8 +353,9 @@ def _generate_new_signals(
             now=now,
             paper_guard=paper_guard,
         )
+        observations.append(observation)
+        observation_event_ids.append(_persist_observation(store, observation))
         if signal is None:
-            skipped += 1
             continue
         event_id = store.insert_artifact(
             "paper_signals",
@@ -298,10 +368,10 @@ def _generate_new_signals(
         )
         signals.append(signal)
         event_ids.append(event_id)
-    return signals, event_ids, skipped
+    return signals, event_ids, observations, observation_event_ids
 
 
-def _build_paper_signal(
+def _build_paper_signal_and_observation(
     symbol: str,
     bars: list[BacktestBar],
     *,
@@ -310,9 +380,17 @@ def _build_paper_signal(
     config: BacktestConfig,
     now: str | None,
     paper_guard: ForwardPaperGuard | None,
-) -> PaperSignal | None:
+) -> tuple[PaperSignal | None, PaperObservation]:
     if len(bars) <= config.lookback_bars:
-        return None
+        return None, _paper_observation(
+            symbol,
+            bars,
+            interval=interval,
+            variant=variant,
+            status="insufficient_bars",
+            reason_codes=["insufficient_bars_for_lookback"],
+            now=now,
+        )
     sorted_bars = sorted(bars, key=lambda item: item.open_time)
     lookback = sorted_bars[-(config.lookback_bars + 1) : -1]
     entry_bar = sorted_bars[-1]
@@ -321,12 +399,31 @@ def _build_paper_signal(
         risk_limits=_risk_limits_from_backtest_config(config),
         profile=merge_guard_profile(config.setup_profile, paper_guard),
     )
+    setup_payload = setup.to_dict()
     if setup.decision != "trade":
-        return None
+        return None, _paper_observation(
+            symbol,
+            bars,
+            interval=interval,
+            variant=variant,
+            status="setup_pass",
+            reason_codes=setup.reasons or ["quant_setup_pass"],
+            now=now,
+            setup=setup_payload,
+        )
     if setup.entry_price is None or setup.stop_price is None or setup.target_price is None or setup.notional_usdt is None:
-        return None
+        return None, _paper_observation(
+            symbol,
+            bars,
+            interval=interval,
+            variant=variant,
+            status="setup_incomplete",
+            reason_codes=["setup_missing_trade_prices_or_notional"],
+            now=now,
+            setup=setup_payload,
+        )
     hold_bars = _hold_bars_from_setup(setup, config)
-    return PaperSignal(
+    signal = PaperSignal(
         symbol=symbol.upper(),
         interval=interval,
         variant=variant,
@@ -338,8 +435,54 @@ def _build_paper_signal(
         target_price=setup.target_price,
         notional_usdt=setup.notional_usdt,
         hold_bars=hold_bars,
-        setup=setup.to_dict(),
+        setup=setup_payload,
         recorded_at=now,
+    )
+    return signal, _paper_observation(
+        symbol,
+        bars,
+        interval=interval,
+        variant=variant,
+        status="generated_signal",
+        reason_codes=setup.reasons or ["quant_setup_trade"],
+        now=now,
+        setup=setup_payload,
+    )
+
+
+def _paper_observation(
+    symbol: str,
+    bars: list[BacktestBar],
+    *,
+    interval: str,
+    variant: str,
+    status: str,
+    reason_codes: list[str],
+    now: str | None,
+    setup: dict[str, Any] | None = None,
+) -> PaperObservation:
+    return PaperObservation(
+        symbol=symbol.upper(),
+        interval=interval,
+        variant=variant,
+        observed_at=_observation_time(bars, now),
+        status=status,
+        reason_codes=_dedupe([reason for reason in reason_codes if reason]),
+        bars_seen=len(bars),
+        setup=setup,
+        recorded_at=now,
+    )
+
+
+def _persist_observation(store: EventStore, observation: PaperObservation) -> int:
+    return store.insert_artifact(
+        "paper_observations",
+        occurred_at=observation.observed_at,
+        source="ops.forward_paper",
+        symbol=observation.symbol,
+        ref_id=f"paper_observation:{observation.symbol}:{observation.interval}:{observation.variant}:{observation.observed_at}",
+        payload=observation.to_dict(),
+        event_type="paper_observation",
     )
 
 
@@ -584,6 +727,99 @@ def _expiry_time(entry_bar: BacktestBar, *, interval: str, hold_bars: int) -> st
     ).close_time_iso
 
 
+def _observation_time(bars: list[BacktestBar], now: str | None) -> str:
+    if now:
+        return now
+    if bars:
+        return sorted(bars, key=lambda item: item.open_time)[-1].close_time_iso
+    return "1970-01-01T00:00:00Z"
+
+
+def _observation_summary(observations: list[PaperObservation]) -> dict[str, int]:
+    return dict(Counter(observation.status for observation in observations))
+
+
+def _setup_summary(setup: Mapping[str, Any]) -> dict[str, Any]:
+    if not setup:
+        return {}
+    return {
+        "decision": setup.get("decision"),
+        "side": setup.get("side"),
+        "confidence": setup.get("confidence"),
+        "long_score": setup.get("long_score"),
+        "short_score": setup.get("short_score"),
+        "edge_score": setup.get("edge_score"),
+        "risk_reward_ratio": setup.get("risk_reward_ratio"),
+        "stop_distance_percent": setup.get("stop_distance_percent"),
+        "target_distance_percent": setup.get("target_distance_percent"),
+        "reasons": list(setup.get("reasons") or []),
+        "warnings": list(setup.get("warnings") or []),
+    }
+
+
+def _source_health(
+    provided: Mapping[str, Any] | None,
+    *,
+    selected_symbols: list[str],
+    narrative_health: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(provided or {})
+    payload.setdefault(
+        "symbol_selection",
+        {
+            "mode": "provided_symbols",
+            "status": "used" if selected_symbols else "empty",
+            "selected_count": len(selected_symbols),
+            "selected_symbols": list(selected_symbols),
+        },
+    )
+    payload["event_store_narratives"] = dict(narrative_health)
+    return payload
+
+
+def _narrative_source_health(connection: sqlite3.Connection, selected_symbols: list[str]) -> dict[str, Any]:
+    selected = {symbol.upper() for symbol in selected_symbols}
+    rows = connection.execute(
+        """
+        SELECT occurred_at, source, symbol, payload_json
+        FROM narratives
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 1000
+        """
+    ).fetchall()
+    source_counts: Counter[str] = Counter()
+    covered_symbols: set[str] = set()
+    latest_at: str | None = None
+    matched_records = 0
+    for row in rows:
+        payload = json.loads(row["payload_json"])
+        mentions = {
+            str(symbol).upper()
+            for symbol in _list(payload.get("symbol_mentions"))
+            if str(symbol).strip()
+        }
+        row_symbol = str(row["symbol"] or "").upper()
+        if row_symbol:
+            mentions.add(row_symbol)
+        overlap = selected.intersection(mentions)
+        if not overlap:
+            continue
+        matched_records += 1
+        covered_symbols.update(overlap)
+        source = str(row["source"] or payload.get("source") or "unknown")
+        source_counts[source] += 1
+        if latest_at is None:
+            latest_at = str(row["occurred_at"])
+    return {
+        "status": "available" if matched_records else "no_selected_symbol_narratives",
+        "lookback_rows": len(rows),
+        "matched_records": matched_records,
+        "latest_at": latest_at,
+        "sources": dict(sorted(source_counts.items())),
+        "covered_symbols": sorted(covered_symbols),
+    }
+
+
 def _momentum_percent(start: float, end: float) -> float:
     if start <= 0:
         return 0.0
@@ -606,6 +842,10 @@ def _dedupe(values: list[str]) -> list[str]:
         if value not in deduped:
             deduped.append(value)
     return deduped
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def _float_or_zero(value: Any) -> float:
