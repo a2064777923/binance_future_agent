@@ -2510,6 +2510,51 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["reasons"]["exchange_state"], [])
         self.assertEqual(payload["reasons"]["confirmation"], ["operator_confirmation_required"])
 
+    def test_ops_operator_resume_decision_reads_readiness_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            readiness = Path(tmp) / "readiness.json"
+            readiness.write_text(
+                json.dumps(
+                    {
+                        "schema": "bfa_live_resume_readiness_v1",
+                        "status": "keep_live_paused",
+                        "live_resume_allowed": False,
+                        "reasons": {
+                            "matrix": ["suite_variant_not_promoted"],
+                            "strategy_evidence": ["paper_signals_missing"],
+                            "server_state": [],
+                            "exchange_state": ["manual_or_unattributed_exchange_exposure_present"],
+                            "risk_profile": ["active_position_present"],
+                            "confirmation": ["operator_confirmation_required"],
+                        },
+                        "exchange_review": {
+                            "manual_or_unattributed_symbols": ["ETHUSDT"],
+                            "agent_managed_symbols": [],
+                            "manual_exposure_is_agent_evidence": False,
+                            "position_count": 1,
+                            "open_order_count": 0,
+                            "open_algo_order_count": 0,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "operator-resume-decision",
+                "--readiness-report",
+                str(readiness),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_operator_resume_decision_v1")
+        self.assertEqual(payload["status"], "resolve_exposure")
+        self.assertEqual(payload["exposure"]["manual_or_unattributed_symbols"], ["ETHUSDT"])
+        self.assertFalse(payload["read_only"]["places_orders"])
+
 
 if __name__ == "__main__":
     unittest.main()

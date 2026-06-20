@@ -175,6 +175,22 @@ This procedure does not restore `binance-futures-agent-live.timer`, start
 `binance-futures-agent-live.service`, apply risk profiles, edit env files,
 create order intents, or place/cancel Binance orders.
 
+To turn a readiness artifact into the operator-facing next action, run the
+read-only decision packet:
+
+```bash
+cd /opt/binance-futures-agent/app
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops operator-resume-decision \
+  --env-file /etc/binance-futures-agent/env \
+  --readiness-report /opt/binance-futures-agent/app/runtime/server-live-resume-readiness-phase54-20260620T181837Z.json
+```
+
+The packet returns one of `keep_live_paused`, `collect_more_paper`,
+`resolve_exposure`, or `eligible_for_operator_resume`. It still does not
+restore timers, apply profiles, edit env files, create order intents, or touch
+Binance orders; `eligible_for_operator_resume` only means a separate explicit
+confirmation flow can be prepared.
+
 ## Live Automated Runner
 
 After env values, account balance, risk limits, AI provider, Binance credentials, and

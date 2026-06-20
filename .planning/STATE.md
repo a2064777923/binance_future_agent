@@ -2,28 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.24
 milestone_name: Server Readiness And Paper Promotion
-current_phase: 55 — Operator Resume Decision Packet
-current_phase_name: Operator Resume Decision Packet
-status: ready_to_plan
-stopped_at: Phase 54 completed with guarded evidence collected but not promoted.
-last_updated: "2026-06-21T02:23:45+08:00"
+current_phase: v1.24 — Server Readiness And Paper Promotion
+current_phase_name: Milestone Audit And Archive
+status: milestone_complete_pending_audit
+stopped_at: Phase 55 complete; v1.24 ready for milestone audit/archive.
+last_updated: "2026-06-21T02:31:51+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 54 complete, transitioned to Phase 55
+last_activity_desc: Phase 55 complete, v1.24 ready for milestone audit/archive
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 3
-  completed_plans: 2
-  percent: 67
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 55 — Operator Resume Decision Packet
-**Status:** Ready to plan
+**Current phase:** v1.24 — Server Readiness And Paper Promotion
+**Status:** Milestone complete pending audit/archive
 **Last planned:** 2026-06-21
-**Plan count:** 0
+**Plan count:** 3
 
 ## Project Reference
 
@@ -32,10 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Plan and execute Phase 55: produce one read-only operator
-resume decision packet that separates paper-evidence, manual exposure,
-risk-profile, provider-health, and confirmation blockers before any separate
-live resume flow.
+**Current focus:** Audit and archive v1.24 after Phase 55 produced the read-only
+operator decision packet. Live automation remains paused because the current
+packet returns `resolve_exposure`, not live eligibility.
 
 ## Decisions
 
@@ -582,10 +581,10 @@ live resume flow.
 
 ## Next Command
 
-Plan Phase 55 with `$gsd-plan-phase 55`, then execute it. Keep live automation
-disabled. Do not enable unattended live auto-hot, restore live automation,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while the operator
-decision packet is incomplete and blockers remain unresolved.
+Run `$gsd-audit-milestone v1.24`, then archive v1.24 if the audit passes. Keep
+live automation disabled. Do not enable unattended live auto-hot, restore live
+automation, execute adjustment orders, or apply `30u_10x_multi_dynamic` while
+the operator packet remains `resolve_exposure`.
 
 ## Session
 
@@ -595,11 +594,11 @@ decision packet is incomplete and blockers remain unresolved.
 
 ## Current Position
 
-Phase: 55 — Operator Resume Decision Packet
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-06-21 — Phase 54 complete, transitioned to Phase 55
+Phase: v1.24 — Server Readiness And Paper Promotion
+Plan: 3/3 complete
+Status: Milestone complete pending audit/archive
+Last activity: 2026-06-21 — Phase 55 complete, v1.24 ready for audit/archive
 
 ## Operator Next Steps
 
-- Run `$gsd-plan-phase 55`.
+- Run `$gsd-audit-milestone v1.24`.

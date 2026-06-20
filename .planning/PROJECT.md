@@ -138,6 +138,10 @@ control of downside.
   the system fail-closed: the current matrix is weaker than Phase 50, server
   guarded paper generated no post-change signals, and readiness remained
   `keep_live_paused` with manual/unattributed exposure blockers.
+- Phase 55 adds a read-only operator resume decision packet that returns one of
+  `keep_live_paused`, `collect_more_paper`, `resolve_exposure`, or
+  `eligible_for_operator_resume` and requires a separate confirmation flow
+  before any live resume.
 
 ### Active
 
@@ -202,7 +206,7 @@ control of downside.
   without creating live order intents or restoring live automation; Phase 54
   collected the evidence and did not promote it because samples were missing
   and readiness stayed fail-closed.
-- [ ] Produce a single operator-facing resume decision packet that separates
+- [x] Produce a single operator-facing resume decision packet that separates
   "collect more paper evidence" from "eligible for separately confirmed live
   resume".
 
@@ -371,6 +375,11 @@ and worst drawdown `0.92783188` USDT. The server guarded paper run generated
 `0` signals, the post-change performance check returned `no_paper_evidence`,
 and readiness remained `keep_live_paused` with manual/unattributed `ETHUSDT`
 and `BTWUSDT` exposure blockers.
+Phase 55 added `ops operator-resume-decision`. Running it against the Phase 54
+readiness artifact returns `status=resolve_exposure`, not live eligibility,
+with grouped strategy, paper, exchange/manual exposure, risk-profile, and
+confirmation blockers. It is read-only and cannot restore timers, apply
+profiles, create order intents, or place/cancel Binance orders.
 
 ## Previous Milestone: v1.8 Position Mode And Entry Fail-Closed
 
@@ -619,10 +628,10 @@ live resume.
   investigate exchange/manual exposure, or prepare a separate operator-confirmed
   live resume.
 
-**Status:** In progress. Phases 53 and 54 are complete. No server live
-automation, risk profile, or Binance order state has been changed for this
-milestone; Phase 55 now needs to turn the collected blockers into one operator
-decision packet.
+**Status:** Complete pending milestone audit/archive. Phases 53-55 are
+complete. No server live automation, risk profile, or Binance order state has
+been changed for this milestone. The current operator decision is
+`resolve_exposure`, so live remains paused.
 
 ## Key Decisions
 
@@ -672,6 +681,7 @@ decision packet.
 | Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete; v1.23 archived |
 | Server evidence before resume | Local readiness is not enough; the isolated server must run the same read-only command against current timers, env, exchange, and manual exposure. | Phase 53 complete |
 | Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | Phase 54 complete; evidence not promoted |
+| Operator packet before live | Readiness JSON needs one operator-facing next action before any separate live resume confirmation flow is prepared. | Phase 55 complete; current packet says `resolve_exposure` |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -695,4 +705,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after completing Phase 54 guarded paper evidence.*
+*Last updated: 2026-06-21 after completing Phase 55 operator decision packet.*

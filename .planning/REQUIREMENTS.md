@@ -38,15 +38,15 @@ projects or losing control of downside.
 
 ### Resume Decision
 
-- [ ] **RDM-01**: Operator receives one resume decision packet with status
+- [x] **RDM-01**: Operator receives one resume decision packet with status
   `keep_live_paused`, `collect_more_paper`, `resolve_exposure`, or
   `eligible_for_operator_resume`.
 
-- [ ] **RDM-02**: Resume decision explains whether blockers are strategy
+- [x] **RDM-02**: Resume decision explains whether blockers are strategy
   evidence, paper evidence, server state, exchange/manual exposure, risk
   profile, AI/provider health, or missing operator confirmation.
 
-- [ ] **RDM-03**: Any live timer restore or higher-risk profile apply remains
+- [x] **RDM-03**: Any live timer restore or higher-risk profile apply remains
   outside this milestone unless a separate explicit operator confirmation flow
   is planned and approved.
 
@@ -85,9 +85,9 @@ projects or losing control of downside.
 | PEV-01 | Phase 54 | Complete |
 | PEV-02 | Phase 54 | Complete |
 | PEV-03 | Phase 54 | Complete |
-| RDM-01 | Phase 55 | Pending |
-| RDM-02 | Phase 55 | Pending |
-| RDM-03 | Phase 55 | Pending |
+| RDM-01 | Phase 55 | Complete |
+| RDM-02 | Phase 55 | Complete |
+| RDM-03 | Phase 55 | Complete |
 
 **Coverage:**
 
@@ -97,4 +97,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 54 guarded paper evidence.*
+*Last updated: 2026-06-21 after Phase 55 operator decision packet.*
