@@ -143,6 +143,14 @@ class FakeAiClient:
         )
 
 
+class FakeSignedClient:
+    def __init__(self, positions=None):
+        self.positions = [] if positions is None else positions
+
+    def position_risk(self):
+        return list(self.positions)
+
+
 class AgentRunnerTests(unittest.TestCase):
     def test_run_once_collects_decides_and_executes_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -331,6 +339,62 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(recovered_ai.calls, 0)
         self.assertEqual(order_intents, 0)
         self.assertIn("openai_error:none:timed out", result.validation_errors)
+
+    def test_live_run_once_short_circuits_when_entry_capacity_is_full(self):
+        class CountingCollector(FakeCollector):
+            def __init__(self):
+                self.calls = 0
+
+            def collect_rest_snapshots(self):
+                self.calls += 1
+                return super().collect_rest_snapshots()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            collector = CountingCollector()
+            ai_client = FakeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "1",
+                    "BFA_MULTI_POSITION_ENABLED": "false",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=collector,
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+                signed_client=FakeSignedClient(
+                    positions=[
+                        {
+                            "symbol": "HYPEUSDT",
+                            "positionAmt": "0.16",
+                            "positionSide": "LONG",
+                        }
+                    ]
+                ),
+            )
+
+        self.assertEqual(result.status, "entry_capacity_blocked")
+        self.assertTrue(result.ok)
+        self.assertFalse(result.submitted)
+        self.assertEqual(result.risk_reasons, ["multi_position_disabled", "max_open_positions_reached"])
+        self.assertEqual(result.market_snapshot_count, 0)
+        self.assertEqual(result.candidate_count, 0)
+        self.assertEqual(collector.calls, 0)
+        self.assertEqual(ai_client.calls, 0)
 
 
 if __name__ == "__main__":

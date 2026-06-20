@@ -60,6 +60,7 @@ class AgentRunResult:
             "ai_rejected",
             "ai_error",
             "openai_backoff",
+            "entry_capacity_blocked",
             "rejected",
         }
 
@@ -121,6 +122,24 @@ def run_agent_once(
             validation_errors=[f"openai_retry_after:{backoff.retry_after_iso}"],
         )
 
+    signed_client = signed_client or _build_signed_client(config, mode)
+    preflight_risk_state = _risk_state_from_exchange(signed_client) if mode is RuntimeMode.LIVE else None
+    if mode is RuntimeMode.LIVE and preflight_risk_state is None:
+        return AgentRunResult(
+            status="position_risk_failed",
+            mode=mode.value,
+            started_at=started_at,
+            validation_errors=["unable to read live position risk"],
+        )
+    preflight_reasons = _live_entry_capacity_blockers(config, preflight_risk_state)
+    if preflight_reasons:
+        return AgentRunResult(
+            status="entry_capacity_blocked",
+            mode=mode.value,
+            started_at=started_at,
+            risk_reasons=preflight_reasons,
+        )
+
     market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
     collector = collector or MarketDataCollector(
         client=market,
@@ -129,7 +148,6 @@ def run_agent_once(
     )
     narrative_runner = narrative_runner or _build_narrative_runner(config, collected_at=started_at)
     ai_client = ai_client or build_ai_client(config)
-    signed_client = signed_client or _build_signed_client(config, mode)
 
     connection = connect(db_path or config.get("BFA_DB_PATH"))
     try:
@@ -228,7 +246,7 @@ def run_agent_once(
 
         exchange_info = market.exchange_info().payload
         filters = SymbolExecutionFilters.from_exchange_info(exchange_info, candidate.symbol)
-        risk_state = _risk_state_from_exchange(signed_client) if mode is RuntimeMode.LIVE else RiskState()
+        risk_state = preflight_risk_state if mode is RuntimeMode.LIVE else RiskState()
         if risk_state is None:
             return AgentRunResult(
                 status="position_risk_failed",
@@ -347,6 +365,21 @@ def _risk_state_from_exchange(signed_client) -> RiskState | None:
     return RiskState(active_positions=active_positions, active_exposures=active_exposures)
 
 
+def _live_entry_capacity_blockers(config: AppConfig, risk_state: RiskState | None) -> list[str]:
+    if risk_state is None or risk_state.active_positions <= 0:
+        return []
+    reasons: list[str] = []
+    if not _truthy(config.get("BFA_MULTI_POSITION_ENABLED")):
+        reasons.append("multi_position_disabled")
+    try:
+        max_open_positions = int(config.get("BFA_MAX_OPEN_POSITIONS"))
+    except (TypeError, ValueError):
+        max_open_positions = 0
+    if risk_state.active_positions >= max_open_positions:
+        reasons.append("max_open_positions_reached")
+    return _dedupe(reasons)
+
+
 def _position_direction(position: dict[str, Any]) -> str:
     side = str(position.get("positionSide") or "").upper()
     if side in {"LONG", "SHORT"}:
@@ -390,6 +423,14 @@ def _narrative_records(event_ids, records) -> list[dict[str, Any]]:
 
 def _truthy(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
 
 
 def _safe_ai_error(exc: Exception) -> str:

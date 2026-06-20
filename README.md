@@ -114,6 +114,10 @@ confirmation-gated `30u_8x_dynamic` preview.
 python -m bfa.cli ops exposure-status --env-file .env --db runtime/agent.sqlite --hypothetical-symbol HYPEUSDT --hypothetical-side long
 ```
 
+The automated live runner also performs a read-only entry-capacity preflight, so
+when the current profile is already full it exits before market collection,
+candidate generation, or AI calls.
+
 ## Small-Capital Backtesting
 
 The project now includes a short-window backtest harness for the hot-momentum
