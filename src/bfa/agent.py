@@ -143,7 +143,14 @@ def run_agent_once(
         )
 
     signed_client = signed_client or _build_signed_client(config, mode)
-    preflight_risk_state = _risk_state_from_exchange(signed_client) if mode is RuntimeMode.LIVE else None
+    preflight_risk_state = (
+        _risk_state_from_exchange(
+            signed_client,
+            manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
+        )
+        if mode is RuntimeMode.LIVE
+        else None
+    )
     position_adjustment_plan = (
         _live_position_adjustment_plan(config, db_path=db_path, signed_client=signed_client)
         if mode is RuntimeMode.LIVE and preflight_risk_state is not None
@@ -799,26 +806,28 @@ def _build_signed_client(config: AppConfig, mode: RuntimeMode):
     )
 
 
-def _risk_state_from_exchange(signed_client) -> RiskState | None:
+def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None = None) -> RiskState | None:
     if signed_client is None:
         return None
     try:
         positions = signed_client.position_risk()
     except Exception:
         return None
+    excluded = {symbol.upper() for symbol in (manual_symbols or set())}
     active_positions = 0
-    active_exposures: list[dict[str, str]] = []
+    active_exposures: list[dict[str, Any]] = []
     for position in positions:
+        symbol = str(position.get("symbol", "")).upper()
         try:
             amount = abs(float(position.get("positionAmt", 0)))
         except (TypeError, ValueError):
             amount = 0.0
-        if amount > 0:
+        if amount > 0 and symbol not in excluded:
             active_positions += 1
             direction = _position_direction(position)
             active_exposures.append(
                 {
-                    "symbol": str(position.get("symbol", "")).upper(),
+                    "symbol": symbol,
                     "direction": direction,
                     "notional_usdt": _position_notional(position),
                     "initial_margin_usdt": _position_initial_margin(position),

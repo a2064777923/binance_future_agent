@@ -417,7 +417,9 @@ def _exchange_review(
     payload = exposure.to_dict()
     exchange_summary = _mapping(payload.get("exchange_summary"))
     entry_capacity = _mapping(payload.get("entry_capacity"))
-    active_exposures = [_mapping(item) for item in _list(entry_capacity.get("active_exposures"))]
+    capacity_active_exposures = [_mapping(item) for item in _list(entry_capacity.get("active_exposures"))]
+    manual_exposures = [_mapping(item) for item in _list(entry_capacity.get("manual_exposures"))]
+    active_exposures = [*capacity_active_exposures, *manual_exposures]
     risk_change = _mapping(payload.get("risk_change"))
     unreconciled = [_mapping(item) for item in _list(risk_change.get("unreconciled_submitted_intents"))]
     agent_symbols = {str(item.get("symbol") or "").upper() for item in unreconciled if item.get("symbol")}
@@ -445,6 +447,8 @@ def _exchange_review(
         "manual_or_unattributed_symbols": manual_or_unattributed,
         "agent_managed_symbols": _dedupe(agent_managed),
         "active_exposures": active_exposures,
+        "capacity_active_exposures": capacity_active_exposures,
+        "manual_exposures": manual_exposures,
         "unreconciled_submitted_intents": unreconciled,
         "position_count": _int_or_zero(exchange_summary.get("position_count")),
         "open_order_count": _int_or_zero(exchange_summary.get("open_order_count")),

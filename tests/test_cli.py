@@ -1169,7 +1169,7 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["resume_allowed"])
         self.assertFalse(payload["applies_changes"])
         self.assertFalse(payload["read_only"]["writes_env_files"])
-        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 80.0)
+        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 100.0)
 
     def test_ops_live_resume_apply_blocks_non_eligible_packet_without_writing_env(self):
         with tempfile.TemporaryDirectory() as tmp:

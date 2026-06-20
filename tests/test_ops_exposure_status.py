@@ -95,7 +95,7 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertIn("duplicate_symbol_direction_exposure", payload["entry_capacity"]["reasons"])
         self.assertEqual(payload["target_profile"]["target_leverage"], 10)
         self.assertTrue(payload["target_sizing"]["enabled"])
-        self.assertAlmostEqual(payload["target_sizing"]["max_position_notional_usdt"], 75.33)
+        self.assertAlmostEqual(payload["target_sizing"]["max_position_notional_usdt"], 92.07)
         self.assertTrue(payload["risk_change"]["risk_change_allowed"])
         self.assertIn("active_position_within_target_profile_caps", payload["risk_change"]["reasons"])
         self.assertIn("active_position_present", payload["risk_change"]["reasons"])
@@ -138,8 +138,8 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertEqual(payload["entry_capacity"]["hypothetical"]["order_side"], "SELL")
         self.assertEqual(payload["entry_capacity"]["hypothetical"]["direction"], "SHORT")
         self.assertTrue(payload["risk_change"]["risk_change_allowed"])
-        self.assertEqual(payload["target_profile"]["target_values"]["BFA_MAX_OPEN_POSITIONS"], "8")
-        self.assertEqual(payload["target_profile"]["target_values"]["BFA_MAX_POSITION_NOTIONAL_USDT"], "80")
+        self.assertEqual(payload["target_profile"]["target_values"]["BFA_MAX_OPEN_POSITIONS"], "10")
+        self.assertEqual(payload["target_profile"]["target_values"]["BFA_MAX_POSITION_NOTIONAL_USDT"], "100")
         self.assertEqual(payload["target_profile"]["target_values"]["BFA_MULTI_POSITION_ENABLED"], "true")
         self.assertEqual(
             payload["target_profile"]["confirmation_token"],
@@ -149,6 +149,46 @@ class ExposureStatusTests(unittest.TestCase):
                 allow_two_positions=True,
             ).confirmation_token,
         )
+
+    def test_manual_position_is_visible_but_does_not_consume_entry_capacity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            db_path = root / "agent.sqlite"
+            client = FakeSignedClient(
+                positions=[
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "entryPrice": "0.18819",
+                        "markPrice": "0.13165",
+                        "notional": "-73.2",
+                        "initialMargin": "7.32",
+                        "leverage": "10",
+                    }
+                ]
+            )
+
+            report = build_exposure_status_report(
+                self.config(
+                    root,
+                    BFA_MANUAL_POSITION_SYMBOLS="BTWUSDT",
+                    BFA_MULTI_POSITION_ENABLED="false",
+                    BFA_MAX_OPEN_POSITIONS="1",
+                ),
+                db_path=str(db_path),
+                signed_client=client,
+                target_profile="",
+            )
+
+        payload = report.to_dict()
+        self.assertEqual(payload["status"], "current_profile_entry_capacity_available")
+        self.assertTrue(payload["entry_capacity"]["can_open_new_position"])
+        self.assertEqual(payload["entry_capacity"]["active_position_count"], 0)
+        self.assertEqual(payload["entry_capacity"]["manual_position_count"], 1)
+        self.assertEqual(payload["entry_capacity"]["active_exposures"], [])
+        self.assertEqual(payload["entry_capacity"]["manual_exposures"][0]["symbol"], "BTWUSDT")
 
 
 def _persist_submitted_hype_intent(db_path: Path) -> int:

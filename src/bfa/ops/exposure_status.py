@@ -49,11 +49,13 @@ class EntryCapacity:
     active_position_count: int
     max_open_positions: int
     multi_position_enabled: bool
+    manual_position_count: int = 0
     active_notional_usdt: float = 0.0
     active_initial_margin_usdt: float = 0.0
     max_portfolio_notional_usdt: float | None = None
     max_portfolio_margin_usdt: float | None = None
     active_exposures: list[dict[str, Any]] = field(default_factory=list)
+    manual_exposures: list[dict[str, Any]] = field(default_factory=list)
     hypothetical: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -64,11 +66,13 @@ class EntryCapacity:
             "active_position_count": self.active_position_count,
             "max_open_positions": self.max_open_positions,
             "multi_position_enabled": self.multi_position_enabled,
+            "manual_position_count": self.manual_position_count,
             "active_notional_usdt": self.active_notional_usdt,
             "active_initial_margin_usdt": self.active_initial_margin_usdt,
             "max_portfolio_notional_usdt": self.max_portfolio_notional_usdt,
             "max_portfolio_margin_usdt": self.max_portfolio_margin_usdt,
             "active_exposures": [dict(item) for item in self.active_exposures],
+            "manual_exposures": [dict(item) for item in self.manual_exposures],
             "hypothetical": dict(self.hypothetical) if self.hypothetical else None,
         }
 
@@ -223,8 +227,15 @@ def _entry_capacity(
 ) -> EntryCapacity:
     exchange = _mapping(live_status.exchange_evidence)
     positions = _list(exchange.get("positions"))
-    active_exposures = [_exposure_from_position(position) for position in positions]
-    active_exposures = [item for item in active_exposures if item]
+    manual_symbols = set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"))
+    all_exposures = [_exposure_from_position(position) for position in positions]
+    all_exposures = [item for item in all_exposures if item]
+    active_exposures = [
+        item for item in all_exposures if str(item.get("symbol") or "").upper() not in manual_symbols
+    ]
+    manual_exposures = [
+        item for item in all_exposures if str(item.get("symbol") or "").upper() in manual_symbols
+    ]
     max_open = _int_or_default(config.get("BFA_MAX_OPEN_POSITIONS"), 0)
     multi_enabled = multi_position_enabled(config)
     active_notional = sum(_float_or_none(item.get("notional_usdt")) or 0.0 for item in active_exposures)
@@ -240,9 +251,9 @@ def _entry_capacity(
 
     if not has_exchange_evidence:
         reasons.append("exchange_evidence_missing")
-    if positions and not multi_enabled:
+    if active_exposures and not multi_enabled:
         reasons.append("multi_position_disabled")
-    if len(positions) >= max_open:
+    if len(active_exposures) >= max_open:
         reasons.append("max_open_positions_reached")
     if max_portfolio_notional is not None and active_notional >= max_portfolio_notional:
         reasons.append("portfolio_notional_cap_reached")
@@ -273,14 +284,16 @@ def _entry_capacity(
         status=status,
         can_open_new_position=can_open,
         reasons=reasons,
-        active_position_count=len(positions),
+        active_position_count=len(active_exposures),
         max_open_positions=max_open,
         multi_position_enabled=multi_enabled,
+        manual_position_count=len(manual_exposures),
         active_notional_usdt=round(active_notional, 8),
         active_initial_margin_usdt=round(active_margin, 8),
         max_portfolio_notional_usdt=max_portfolio_notional,
         max_portfolio_margin_usdt=round(max_portfolio_margin, 8) if max_portfolio_margin > 0 else None,
         active_exposures=active_exposures,
+        manual_exposures=manual_exposures,
         hypothetical=hypothetical,
     )
 
