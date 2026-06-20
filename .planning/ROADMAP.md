@@ -25,7 +25,7 @@
   shipped 2026-06-21 ([archive](milestones/v1.25-ROADMAP.md)).
 
 - ◆ **v1.26 Live Position Management And Pilot Learning** — Phases 61-65,
-  active.
+  complete; pending milestone archive.
 
 ## Phases
 
@@ -126,13 +126,13 @@
 </details>
 
 <details open>
-<summary>◆ v1.26 Live Position Management And Pilot Learning (Phases 61-65) — ACTIVE</summary>
+<summary>◆ v1.26 Live Position Management And Pilot Learning (Phases 61-65) — COMPLETE, PENDING ARCHIVE</summary>
 
 - [x] Phase 61: Close-Review Exit Plan Repair (1/1 plan) (completed 2026-06-21)
 - [x] Phase 62: Guarded Position Exit Execution (1/1 plan) (completed 2026-06-21)
 - [x] Phase 63: Live Cycle Position Stewardship (1/1 plan) (completed 2026-06-21)
 - [x] Phase 64: Live Outcome Ledger And Guard Feedback (1/1 plan) (completed 2026-06-21)
-- [ ] Phase 65: Server Canary And Pilot Learning Packet (0/1 plan)
+- [x] Phase 65: Server Canary And Pilot Learning Packet (1/1 plan) (completed 2026-06-21)
 
 </details>
 
@@ -235,8 +235,8 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 
 **Requirements:** OPS-01, OPS-02
 
-**Plans:** 0/1 plans complete
-**Status:** Not started
+**Plans:** 1/1 plan complete
+**Status:** Complete
 
 **Success criteria:**
 
@@ -258,7 +258,7 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
 | v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
-| v1.26 Live Position Management And Pilot Learning | 61-65 | 4/5 | Active | - |
+| v1.26 Live Position Management And Pilot Learning | 61-65 | 5/5 | Complete | - |
 
 ## Requirement Coverage
 
@@ -272,6 +272,6 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 
 ## Next Step
 
-Plan Phase 65 with `$gsd-plan-phase 65`. The immediate focus is to produce a
-server canary and pilot learning packet from live-cycle, exit, outcome, and
-guard evidence.
+Complete milestone v1.26 with `$gsd-complete-milestone`. Phase 65 has deployed
+the server canary and pilot learning packet; the immediate focus is archiving
+v1.26 and choosing the next milestone scope.

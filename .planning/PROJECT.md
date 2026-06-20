@@ -180,6 +180,12 @@ control of downside.
   `outcome_count=5`, `open_or_unreconciled_submitted_intents=0`,
   `total_net_pnl_usdt=0.21357602`, and mutation proof with no orders, cancels,
   env writes, systemd changes, risk raises, or applied guard changes.
+- Phase 65 adds read-only `ops pilot-learning-packet` and deploys it to the
+  isolated server. The server packet artifact reports `BTWUSDT` as
+  `manual_hold`, bot-managed exposure count `0`, entry capacity available,
+  `exit_plan_blocked`, `ledger_ready`, `outcome_count=5`, `trace_count=11`,
+  and mutation proof with no orders, cancels, env writes, systemd changes,
+  risk raises, guard applications, or closed-outcome persistence.
 
 ### Active
 
@@ -270,11 +276,11 @@ control of downside.
   eligible for a filter-aware close/reduce plan.
 - [x] Add guarded close/reduce execution for agent-managed positions while
   preserving manual-symbol exclusions.
-- [ ] Make each live cycle record active-position lifecycle decisions before
+- [x] Make each live cycle record active-position lifecycle decisions before
   scanning new hot entries.
-- [ ] Reconcile closed live outcomes promptly and feed live result attribution
+- [x] Reconcile closed live outcomes promptly and feed live result attribution
   back into guard recommendations.
-- [ ] Deploy v1.26 server evidence without touching unrelated server projects
+- [x] Deploy v1.26 server evidence without touching unrelated server projects
   or managing manual `BTWUSDT`.
 
 ### Out of Scope
@@ -303,7 +309,8 @@ The user's chosen direction:
 - Deployment target: server `64.83.34.222`, root user, isolated path
   `/opt/binance-futures-agent`.
 - Trading venue: Binance USD-M futures.
-- Current trial capital: 30 USDT, after starting from an initial 100 USDT planning profile.
+- Current configured pilot capital: 45 USDT, after starting from an initial
+  100 USDT planning profile and later 30 USDT trial profile.
 - Execution intent: live small-capital pilot, not only paper trading.
 - First strategy focus: hot coins, especially Binance Square narratives.
 - AI provider: DeepSeek for live use, with OpenAI Responses provider still
@@ -317,14 +324,17 @@ The user's chosen direction:
 - **Isolation**: The project must not modify `F:\stock` or server-side existing
   services. Use its own repo, virtualenv, systemd unit, data directory, logs,
   and runtime files.
-- **Capital**: Current trial capital is 30 USDT, so the live risk model
-  must assume very small orders and high sensitivity to fees/slippage.
+- **Capital**: Current configured pilot capital is 45 USDT, so the live risk
+  model must still assume very small orders and high sensitivity to
+  fees/slippage.
 - **Execution**: Live mode is allowed, but default code paths must start in
   dry-run/test mode and require explicit environment configuration for live.
-- **Risk**: Current trial defaults are max 5x leverage, max 12 USDT
-  contract notional per position, max 0.3 USDT risk per trade, max 1 USDT
-  daily loss, and max one concurrent position. Contract notional is not the
-  same as initial margin; approximate margin is `notional / leverage`.
+- **Risk**: Current live pilot caps are max 10x leverage, max 150 USDT
+  contract notional per bot-managed position, max 0.7 USDT risk per trade,
+  max 2 USDT daily loss, and max 16 bot-managed concurrent positions, with
+  portfolio margin/notional and same-direction caps still enforced. Contract
+  notional is not the same as initial margin; approximate margin is
+  `notional / leverage`.
 - **Exchange API**: Use official Binance USD-M futures APIs for market data,
   account state, and order placement.
 - **Narrative APIs**: Binance Square reading may require browser automation,
@@ -395,11 +405,11 @@ secret-safe health check passed after deployment.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
-out of band. The active trial profile is 30 USDT account capital, 10x max
-leverage, 100 USDT max bot-managed position notional, 0.4 USDT max per-trade
-risk, 1 USDT max daily loss, and 10 bot-managed open positions under dynamic
-sizing and portfolio caps. Manual symbols such as `BTWUSDT` remain visible in
-diagnostics but do not consume bot entry capacity.
+out of band. The active trial profile is 45 USDT configured account capital,
+10x max leverage, 150 USDT max bot-managed position notional, 0.7 USDT max
+per-trade risk, 2 USDT max daily loss, and 16 bot-managed open positions under
+dynamic sizing and portfolio caps. Manual symbols such as `BTWUSDT` remain
+visible in diagnostics but do not consume bot entry capacity.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`
@@ -457,7 +467,7 @@ be considered cleared. Phase 56 also fixes a readiness false blocker so
 manual-symbol overrides only block when the symbol is actually active on the
 exchange.
 
-## Current Milestone: v1.26 Live Position Management And Pilot Learning
+## Current Milestone: v1.26 Live Position Management And Pilot Learning (Complete, Pending Archive)
 
 **Goal:** Turn the running live pilot into an auditable position lifecycle
 system that can explain, plan, and safely execute agent-managed exits while
@@ -799,9 +809,9 @@ remains paused.
 | Paper observation before resume | Low-signal or zero-signal paper runs must show generated candidates, rejected setup reasons, factor snapshots, and source health before any promotion review. | Phase 57 complete |
 | Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 complete |
 | Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete; Phase 60 deployed |
-| Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | Phase 63 lifecycle persistence complete; outcome feedback remains v1.26 active |
+| Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | v1.26 complete through lifecycle, guarded exits, live outcome ledger, and pilot learning packet |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
-| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
+| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current configured pilot capital is 45 USDT with tight absolute loss caps. | Phase 65 complete |
 
 ## Evolution
 
@@ -823,4 +833,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 63 verification.*
+*Last updated: 2026-06-21 after Phase 65 verification.*

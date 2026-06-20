@@ -49,10 +49,10 @@ projects or losing control of downside.
 
 ### Server Evidence And Isolation
 
-- [ ] **OPS-01**: Server live-cycle artifacts include position lifecycle
+- [x] **OPS-01**: Server live-cycle artifacts include position lifecycle
   decisions, manual-position exclusions, cap usage, exit-plan status, and trace
   IDs for submitted entry or exit actions.
-- [ ] **OPS-02**: v1.26 deployment remains isolated to
+- [x] **OPS-02**: v1.26 deployment remains isolated to
   `/opt/binance-futures-agent` and `/etc/binance-futures-agent`, keeps the live
   timer running unless a deployment pause is necessary, and restores timers
   after verification.
@@ -97,8 +97,8 @@ projects or losing control of downside.
 | LEARN-01 | Phase 64 | Satisfied |
 | LEARN-02 | Phase 64 | Satisfied |
 | LEARN-03 | Phase 64 | Satisfied |
-| OPS-01 | Phase 65 | Pending |
-| OPS-02 | Phase 65 | Pending |
+| OPS-01 | Phase 65 | Satisfied |
+| OPS-02 | Phase 65 | Satisfied |
 | RISK-04 | Phase 62 | Satisfied |
 
 **Coverage:**
@@ -108,4 +108,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 64 verification*
+*Last updated: 2026-06-21 after Phase 65 verification*

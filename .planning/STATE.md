@@ -4,26 +4,26 @@ milestone: v1.26
 milestone_name: Live Position Management And Pilot Learning
 current_phase: Phase 65 — Server Canary And Pilot Learning Packet
 current_phase_name: Server Canary And Pilot Learning Packet
-status: ready_to_plan
-stopped_at: Phase 64 complete; live outcome ledger deployed and reconciled server outcomes; live/paper timers active;
-last_updated: "2026-06-21T06:55:17+08:00"
+status: ready_to_complete_milestone
+stopped_at: Phase 65 complete; pilot learning packet deployed and server timers restored;
+last_updated: "2026-06-21T07:25:25+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 64 complete; live outcome ledger deployed and verified
+last_activity_desc: Phase 65 complete; pilot learning packet deployed and verified
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 65 — Server Canary And Pilot Learning Packet
-**Status:** Phase 64 complete; Phase 65 ready to plan
+**Status:** Phase 65 complete; v1.26 ready for milestone closeout
 **Last planned:** 2026-06-21
-**Plan count:** 0
+**Plan count:** 1
 
 ## Project Reference
 
@@ -761,26 +761,44 @@ lifecycle/exit evidence into recommendation-only guard feedback.
   `outcome_count=5`, `total_net_pnl_usdt=0.21357602`, and no order/env/systemd
   mutation flags.
 
+- Phase 65 is complete. `ops pilot-learning-packet` now composes current
+  server exposure capacity, manual-symbol exclusions, position lifecycle
+  decisions, time-exit status, live outcome ledger data, recommendation-only
+  guard feedback, and bounded trade traces into one read-only canary artifact.
+  Server deployment used isolated `/opt/binance-futures-agent` and
+  `/etc/binance-futures-agent` paths; server focused tests passed with 58 tests
+  and the full server suite passed with 405 tests. The packet artifact
+  `/opt/binance-futures-agent/app/runtime/phase65-pilot-learning-packet.json`
+  reported `schema=bfa_pilot_learning_packet_v1`, `status=packet_ready`,
+  `BTWUSDT` as `manual_hold` with `manual_position_ignored`,
+  `bot_position_count=0`, `manual_position_count=1`,
+  `entry_capacity_available`, `exit_plan_blocked`, `ledger_ready`,
+  `outcome_count=5`, and `trace_count=11`. Mutation proof showed no orders,
+  cancels, env writes, systemd changes, risk raises, guard applications, or
+  closed-outcome persistence; a sensitive-field scan was clean. Final server
+  state after verification: live timer active, paper timer active, live service
+  inactive, paper service inactive.
+
 ## Next Command
 
-Plan Phase 65 with `$gsd-plan-phase 65`: produce a server canary and pilot
-learning packet from live-cycle, exit, outcome, and guard evidence.
+Complete milestone v1.26 with `$gsd-complete-milestone`: archive the completed
+Live Position Management And Pilot Learning milestone and prepare the next
+milestone scope.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 64 complete; live/paper timers active; live outcome
-ledger deployed and server outcomes reconciled without order/env/systemd
-mutation.
-**Resume file:** .planning/phases/64-live-outcome-ledger-and-guard-feedback/64-VERIFICATION.md
+**Stopped at:** Phase 65 complete; pilot learning packet deployed and verified
+on the isolated server without order/env/systemd/risk mutation.
+**Resume file:** .planning/phases/65-server-canary-and-pilot-learning-packet/65-VERIFICATION.md
 
 ## Current Position
 
 Phase: 65 — Server Canary And Pilot Learning Packet
-Plan: —
-Status: Ready to plan
-Last activity: 2026-06-21 — Phase 64 complete
+Plan: 1/1 complete
+Status: Ready to complete milestone
+Last activity: 2026-06-21 — Phase 65 complete
 
 ## Operator Next Steps
 
-- Plan Phase 65 with `$gsd-plan-phase 65`.
+- Complete milestone v1.26 with `$gsd-complete-milestone`.
