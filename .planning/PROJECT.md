@@ -126,6 +126,10 @@ control of downside.
 - Phase 51 adds an explicit `min_profit_factor` gate to forward-paper
   performance checks while preserving post-change `since` filtering and keeping
   `live_resume_allowed=false`.
+- Phase 52 adds a single read-only `ops live-resume-readiness` command that
+  combines matrix, paper, server, exchange/manual exposure, risk-profile, and
+  confirmation gates without restoring timers, applying profiles, or placing
+  orders.
 
 ### Active
 
@@ -249,7 +253,7 @@ The user's chosen direction:
 
 ## Current State
 
-Milestones v1.0, v1.21, and v1.22 are archived. Phases 1 through 47 are
+Milestones v1.0, v1.21, v1.22, and v1.23 are archived. Phases 1 through 52 are
 complete, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
@@ -265,7 +269,9 @@ cap-compatible pilot universe, fail-closed margin setup handling, explicit
 configurable margin mode, explicit position mode, account-balance preflight,
 DeepSeek support, 30U/5x trial runtime caps, portfolio-level risk caps,
 candidate-queue evaluation, and a confirmation-gated 30U/10x/two-position
-profile preview.
+profile preview. It also has read-only strategy evidence, loss-driven
+recalibration variants, multi-universe matrix reporting, post-change
+forward-paper gates, and a combined live-resume readiness report.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
 Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
@@ -539,7 +545,7 @@ confirmation-gated.
 **Status:** Complete and deployed. Server plan and blocked-apply verification
 passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 
-## Current Milestone: v1.23 Strategy Evidence And Live Resume Readiness
+## Shipped Milestone: v1.23 Strategy Evidence And Live Resume Readiness
 
 **Goal:** Turn the negative forward-paper evidence into a tighter,
 evidence-backed strategy workflow and define the exact gates required before
@@ -557,6 +563,10 @@ any small live automation can be resumed.
   and readiness gates pass.
 - Add a single live-resume readiness report that separates strategy evidence,
   server state, exchange/manual exposure, and operator confirmation.
+
+**Status:** Complete and archived. This milestone created the decision surface
+for future live resume, but it did not authorize live timer restore, higher-risk
+profile apply, or order submission.
 
 ## Key Decisions
 
@@ -598,14 +608,14 @@ any small live automation can be resumed.
 | Manage active positions before new entries | Each live cycle should inspect active positions and expose deterministic adjustment plans before scanning for new trades. | Phase 32 complete locally |
 | Filter reduce orders before confirmation | Tiny-account partial exits must satisfy Binance quantity and notional filters before the system exposes an executable token. | Phase 33 complete and deployed |
 | Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
-| Evidence before live resume | The latest paper evidence is negative, so v1.23 prioritizes strategy evidence, recalibration, and explicit readiness gates over restoring unattended live automation. | v1.23 active |
+| Evidence before live resume | The latest paper evidence is negative, so v1.23 prioritizes strategy evidence, recalibration, and explicit readiness gates over restoring unattended live automation. | v1.23 complete |
 | Baseline before recalibration | Weak setup changes should be driven by one compact current evidence report before profiles or live-readiness gates are changed. | Phase 48 complete |
 | Recalibration stays paper-first | Loss-driven filters should be explicit backtest/paper variants until repeated matrix and forward-paper evidence pass. | Phase 49 complete |
 | Matrix before forward-paper promotion | Backtest evidence must cover multiple hot universes and intervals before any post-change forward-paper gate can be trusted. | Phase 50 complete |
 | Paper promotion needs profit factor | Post-change forward-paper evidence must pass PnL, win-rate, profit-factor, and drawdown gates before readiness reporting can consider it. | Phase 51 complete |
-| Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete |
+| Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete; v1.23 archived |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-21 after completing Phase 52 live-resume readiness report.*
+*Last updated: 2026-06-21 after archiving v1.23 Strategy Evidence And Live Resume Readiness.*

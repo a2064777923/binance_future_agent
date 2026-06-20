@@ -15,8 +15,8 @@
 - ✅ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-47, shipped 2026-06-20
   ([archive](milestones/v1.22-ROADMAP.md)).
 
-- ◆ **v1.23 Strategy Evidence And Live Resume Readiness** — Phases 48-52,
-  complete pending milestone audit.
+- ✅ **v1.23 Strategy Evidence And Live Resume Readiness** — Phases 48-52,
+  shipped 2026-06-21 ([archive](milestones/v1.23-ROADMAP.md)).
 
 ## Phases
 
@@ -85,139 +85,16 @@
 
 </details>
 
-### Phase 48: Strategy Evidence Baseline
+<details>
+<summary>✅ v1.23 Strategy Evidence And Live Resume Readiness (Phases 48-52) — SHIPPED 2026-06-21</summary>
 
-**Goal:** Produce one compact read-only baseline that shows why live resume is
-currently blocked and what evidence must improve.
+- [x] Phase 48: Strategy Evidence Baseline (1/1 plan)
+- [x] Phase 49: Loss-Driven Setup Recalibration (1/1 plan)
+- [x] Phase 50: Multi-Window Hot-Symbol Backtest Matrix (1/1 plan)
+- [x] Phase 51: Post-Change Forward-Paper Gate (1/1 plan)
+- [x] Phase 52: Live Resume Readiness Report (1/1 plan)
 
-**Requirements:** EVB-01, EVB-02, EVB-03, EVB-04
-
-**Status:** Complete — 2026-06-21.
-
-**Plans:** 1/1 plans complete
-
-**Success Criteria:**
-
-1. Operator can generate a compact evidence report covering forward-paper
-   performance, latest outcomes, loss attribution, adaptive guard output, and
-   server timer state.
-
-2. Report includes clear `live_resume_allowed=false` reasons grouped by
-   strategy evidence, server state, exchange/manual exposure, and missing
-   confirmation.
-
-3. Report is read-only and does not mutate services, env, exchange state, or
-   event-store trading artifacts.
-
-4. Focused and full local tests pass.
-
-### Phase 49: Loss-Driven Setup Recalibration
-
-**Goal:** Convert current paper loss attribution into stricter deterministic
-setup profiles and point geometry without changing live defaults.
-
-**Requirements:** SRC-01, SRC-02, SRC-03, SRC-04
-
-**Depends on:** Phase 48
-
-**Status:** Complete — 2026-06-21.
-
-**Plans:** 1/1 plans complete
-
-**Success Criteria:**
-
-1. New paper/backtest setup variant can penalize or block worst symbols, sides,
-   setup reasons, factor reasons, and factor names from attribution.
-
-2. Stop/target geometry can tighten using ATR, market structure, VWAP, and
-   observed stop-loss/time-exit loss patterns.
-
-3. Missing open-interest, thin liquidity, weak RSI/trend/momentum, and losing
-   taker-flow/volume-impulse regimes are represented in setup scoring.
-
-4. Live default profile remains unchanged until promotion gates pass.
-
-### Phase 50: Multi-Window Hot-Symbol Backtest Matrix
-
-**Goal:** Re-run hot-symbol strategy evidence across multiple recent windows,
-intervals, and setup variants to avoid overfitting to one selected interval.
-
-**Requirements:** BFP-01, BFP-02
-
-**Depends on:** Phase 49
-
-**Status:** Complete — 2026-06-21.
-
-**Plans:** 1/1 plans complete
-
-**Success Criteria:**
-
-1. Matrix command/report covers at least `5m` and `15m`, multiple recent
-   hot-symbol universes, and baseline plus recalibrated setup variants.
-
-2. Each variant/interval cell reports trade count, total net PnL, win rate,
-   positive-window rate, profit factor, and worst drawdown.
-
-3. Promotion verdicts remain fail-closed when evidence is missing, thin, or
-   negative.
-
-4. Full local tests and a reproducible matrix smoke pass.
-
-### Phase 51: Post-Change Forward-Paper Gate
-
-**Goal:** Evaluate new forward-paper evidence separately from older losing
-samples so live readiness is based on the current calibrated strategy.
-
-**Requirements:** BFP-03, BFP-04
-
-**Depends on:** Phase 50
-
-**Status:** Complete — 2026-06-21.
-
-**Plans:** 1/1 plans complete
-
-**Success Criteria:**
-
-1. Forward-paper performance check can evaluate only outcomes opened after a
-   selected calibration timestamp or variant switch.
-
-2. Gate requires minimum outcomes, positive net PnL, minimum win rate, minimum
-   profit factor, and max drawdown before any paper promotion.
-
-3. Gate keeps `live_resume_allowed=false` until both matrix and post-change
-   forward-paper evidence pass.
-
-4. Server paper timer can keep collecting evidence without creating order
-   intents or restoring live automation.
-
-### Phase 52: Live Resume Readiness Report
-
-**Goal:** Build a single read-only live-resume report that combines strategy
-evidence, paper evidence, server state, exchange state, profile state, and
-operator confirmation requirements.
-
-**Requirements:** LRR-01, LRR-02, LRR-03, LRR-04
-
-**Depends on:** Phase 51
-
-**Status:** Complete — 2026-06-21.
-
-**Plans:** 1/1 plans complete
-
-**Success Criteria:**
-
-1. Operator can run one command to see whether live resume is blocked by
-   strategy, paper evidence, server timers, exchange state, manual exposure,
-   risk profile, or missing confirmation.
-
-2. Manual exchange positions are reported separately from agent-managed
-   submitted intents and never counted as strategy success.
-
-3. Live auto-hot can be previewed through dry-run/read-only evidence while
-   remaining disabled by default in server env.
-
-4. Report cannot apply risk profiles, restore timers, submit orders, or modify
-   exchange state.
+</details>
 
 ## Progress
 
@@ -226,19 +103,19 @@ operator confirmation requirements.
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
-| v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete pending audit | - |
+| v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 
 ## Requirement Coverage
 
 - v1.0 requirements: archived at `.planning/milestones/v1.0-REQUIREMENTS.md`
 - v1.1-v1.21 requirements: archived at `.planning/milestones/v1.21-REQUIREMENTS.md`
 - v1.22 requirements: archived at `.planning/milestones/v1.22-REQUIREMENTS.md`
-- v1.23 requirements: active at `.planning/REQUIREMENTS.md`
+- v1.23 requirements: archived at `.planning/milestones/v1.23-REQUIREMENTS.md`
 
 ## Next Step
 
-Run milestone audit/summary for v1.23 before archive. Keep live automation
-paused while strategy matrix evidence and forward-paper evidence remain
-negative. The paper timer stays active for paper-only evidence collection; live
-auto-hot and live service/timer remain disabled until explicit readiness gates
-pass and the operator approves resume separately.
+Start the next milestone with `$gsd-new-milestone`. Keep live automation paused
+while strategy matrix evidence and forward-paper evidence remain insufficient.
+The paper timer can continue collecting paper-only evidence; live auto-hot and
+live service/timer remain disabled until explicit readiness gates pass, manual
+exposure is classified separately, and the operator approves resume separately.

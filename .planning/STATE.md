@@ -3,37 +3,38 @@ gsd_state_version: 1.0
 milestone: v1.23
 milestone_name: Strategy Evidence And Live Resume Readiness
 current_phase: 52 — Live Resume Readiness Report
-current_phase_name: Live Resume Readiness Report
-status: complete_pending_milestone_audit
-stopped_at: Phase 52 complete, v1.23 ready for milestone audit.
-last_updated: "2026-06-21T02:05:00+08:00"
+status: milestone_archived
+stopped_at: v1.23 archived; next milestone not started.
+last_updated: "2026-06-21T01:50:49+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 52 live-resume readiness report complete
+last_activity_desc: Milestone v1.23 completed, audited, and archived
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 5
   completed_plans: 5
   percent: 100
+current_phase_name: Live Resume Readiness Report
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** 52 — Live Resume Readiness Report
-**Status:** Complete pending milestone audit
+**Status:** v1.23 milestone archived; next milestone not started
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
 ## Project Reference
 
-See: `.planning/PROJECT.md`
+See: `.planning/PROJECT.md` (updated 2026-06-21)
 
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Build a single live-resume readiness report that combines
-strategy, paper, server, exchange, profile, and confirmation gates.
+**Current focus:** Plan the next milestone. Live automation remains paused until
+read-only server readiness, post-change paper evidence, manual exposure
+classification, and operator confirmation all pass.
 
 ## Decisions
 
@@ -55,11 +56,9 @@ strategy, paper, server, exchange, profile, and confirmation gates.
   instead of one all-or-nothing candidate, and reject new entries against
   portfolio-level margin, margin-fraction, notional, and same-direction caps.
 
-- v1.23 direction: keep live automation paused while current forward-paper
-  evidence is negative. First produce a compact evidence baseline, then
-  recalibrate setup profiles from loss attribution, re-run multi-window
-  backtests and post-change forward-paper checks, and only then report whether
-  live resume is ready.
+- v1.23 direction: completed and archived. The system now has read-only
+  strategy evidence, recalibration, matrix, post-change paper, and live-resume
+  readiness gates. These gates do not authorize live resume by themselves.
 
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -83,6 +82,10 @@ strategy, paper, server, exchange, profile, and confirmation gates.
 
 - Secrets were provided out-of-band and must be rotated or handled carefully
   before production deployment.
+
+- Operator-opened ETH/ETHUSDT exposure is manual exposure. Readiness checks
+  should mark it with `--manual-exposure-symbols ETHUSDT` and must not treat it
+  as agent-managed strategy evidence.
 
 - Historical Square/social narrative data is not yet complete, so the first
   backtest layer validates a market-heat proxy rather than claiming to reproduce
@@ -574,24 +577,24 @@ strategy, paper, server, exchange, profile, and confirmation gates.
 
 ## Next Command
 
-Run milestone audit/summary for v1.23. Keep live automation disabled. Do not
-enable unattended live auto-hot, restore live automation, execute adjustment
-orders, or apply `30u_10x_multi_dynamic` while strategy matrix evidence and
-forward-paper performance are negative.
+Start the next milestone with `$gsd-new-milestone`. Keep live automation
+disabled. Do not enable unattended live auto-hot, restore live automation,
+execute adjustment orders, or apply `30u_10x_multi_dynamic` while strategy
+matrix evidence and forward-paper performance are negative.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** v1.23 milestone initialized.
-**Resume file:** .planning/REQUIREMENTS.md
+**Stopped at:** v1.23 milestone archived; next milestone not started.
+**Resume file:** .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 52 — Live Resume Readiness Report
-Plan: 52-01 complete
-Status: Complete pending milestone audit
-Last activity: 2026-06-21 — Phase 52 live-resume readiness report complete
+Phase: Milestone v1.23 complete
+Plan: none
+Status: Awaiting next milestone
+Last activity: 2026-06-21 - Milestone v1.23 completed and archived
 
 ## Operator Next Steps
 
-- Run milestone audit/summary for v1.23.
+- Start the next milestone with `$gsd-new-milestone`.

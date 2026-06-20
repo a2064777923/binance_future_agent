@@ -1,5 +1,52 @@
 # Milestones
 
+## v1.23 Strategy Evidence And Live Resume Readiness (Shipped: 2026-06-21)
+
+**Phases completed:** 5 phases, 5 plans, 0 tasks
+
+**Archived artifacts:**
+
+- `.planning/milestones/v1.23-ROADMAP.md`
+- `.planning/milestones/v1.23-REQUIREMENTS.md`
+- `.planning/milestones/v1.23-MILESTONE-AUDIT.md`
+
+**Key accomplishments:**
+
+- Added a compact read-only strategy evidence baseline that combines
+  forward-paper performance, loss attribution, adaptive guards, server timer
+  state, exchange/manual exposure, and explicit live-resume blockers.
+
+- Added `quant_setup_loss_recalibrated` and stricter paper/backtest setup
+  gates without changing live defaults.
+
+- Added a multi-universe `backtest matrix-suite` across hot-symbol presets,
+  intervals, and setup variants; the best candidate remains evidence-only and
+  not live-ready.
+
+- Added a forward-paper profit-factor gate and preserved post-change `since`
+  filtering so new evidence can be evaluated separately from older losing
+  samples.
+
+- Added read-only `ops live-resume-readiness`, separating manual exposure from
+  agent-managed exposure and proving that the command cannot restore timers,
+  apply risk profiles, or place orders.
+
+**Known deferred items at close:**
+
+- Live automation remains paused because matrix and post-change forward-paper
+  evidence are not yet strong enough for live resume.
+
+- Phase 52 readiness command still needs server deployment/read-only execution
+  before any separate operator-approved live-resume decision.
+
+- Manual ETH/ETHUSDT exposure must be passed as manual exposure and must not be
+  counted as agent strategy evidence.
+
+- Runtime matrix evidence under `runtime/` is intentionally uncommitted and must
+  be rerun before future live-resume decisions.
+
+---
+
 ## v1.22 Portfolio Risk And Multi-Position (Shipped: 2026-06-20)
 
 **Phases completed:** 18 phases, 18 plans, 0 tasks

@@ -172,11 +172,67 @@
 - Social proof from public traders is useful for architecture ideas, not for
   promotion decisions.
 
+## Milestone: v1.23 — Strategy Evidence And Live Resume Readiness
+
+**Shipped:** 2026-06-21
+**Phases:** 5
+**Plans:** 5
+
+### What Was Built
+
+- Compact read-only strategy evidence baseline with forward-paper performance,
+  loss attribution, adaptive guards, server timer state, exposure state, and
+  grouped live-resume blockers.
+- Loss-driven setup recalibration profiles and a stricter
+  `quant_setup_loss_recalibrated` paper/backtest variant.
+- Multi-universe `backtest matrix-suite` across hot-symbol presets, intervals,
+  and setup variants.
+- Profit-factor aware post-change forward-paper gates.
+- Single read-only `ops live-resume-readiness` command that separates manual
+  exposure from agent-managed exposure and refuses to mutate live state.
+
+### What Worked
+
+- The readiness command made the live-resume decision auditable in one place
+  instead of spreading it across paper reports, server state, and exchange
+  checks.
+- Treating manual ETH/ETHUSDT exposure as manual exposure prevents operator
+  trades from contaminating strategy evidence.
+- Keeping all v1.23 commands read-only let the project advance without
+  accidentally restoring live automation.
+
+### What Was Inefficient
+
+- The earlier strategy surface was too thin, so v1.23 had to add several
+  evidence layers before it could honestly answer whether live resume is ready.
+- Runtime matrix evidence is intentionally uncommitted, which means future
+  live-resume reviews must rerun it rather than relying on the archived report
+  alone.
+
+### Patterns Established
+
+- Live resume is a gate, not a side effect of passing one metric.
+- Matrix, post-change paper evidence, server timers, exchange/manual exposure,
+  and profile confirmation all need to agree before unattended live trading is
+  considered.
+- AI and public social-trader inspiration can inform the workflow, but local
+  evidence decides promotion.
+
+### Key Lessons
+
+- A mature futures bot needs to track active and manual exposure continuously;
+  otherwise it will mistake account state for strategy state.
+- Profit factor matters because win rate and net PnL alone can hide unstable
+  payoff geometry.
+- Faster live progress still needs a hard distinction between paper evidence,
+  preview commands, and execution authority.
+
 ## Cross-Milestone Trends
 
 | Trend | Evidence | Next Action |
 |-------|----------|-------------|
 | Safety gates are moving from docs into code | Protective orders, kill switch, AI timeout, resume/risk-change/time-exit gates | Keep new live actions behind read-only preview plus confirmation |
 | External credentials are configured out of band | Binance and AI credentials are present on the server without being committed | Continue treating env files and keys as non-repo secrets |
-| Risk increases require evidence, not enthusiasm | HYPEUSDT blocks the 8x/dynamic profile until closed and reconciled | Reconcile HYPEUSDT after close, then rerun `risk-change-check --target-leverage 8` |
+| Risk increases require evidence, not enthusiasm | HYPEUSDT/manual exposure and negative paper evidence block profile increases or live resume | Reconcile agent-managed positions after close, mark manual ETH/ETHUSDT separately, then rerun readiness gates |
 | Tiny-account futures constraints shape the product | Binance filters, notional-vs-margin, spread, and fees drive sizing | Keep tradability filters and staged backtests before further scaling |
+| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates | Deploy/run `ops live-resume-readiness` read-only on the server before any resume discussion |
