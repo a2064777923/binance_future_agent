@@ -50,7 +50,10 @@ class RiskChangeCheckTests(unittest.TestCase):
         result = risk_change_check_from_live_status(
             report(
                 positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01"}],
-                open_algo_orders=[{"symbol": "BNBUSDT", "clientAlgoId": "bfa-bnbusdt-sl"}],
+                open_algo_orders=[
+                    {"symbol": "BNBUSDT", "clientAlgoId": "bfa-bnbusdt-sl"},
+                    {"symbol": "BNBUSDT", "clientAlgoId": "bfa-bnbusdt-tp"},
+                ],
                 protective_complete=True,
             )
         )
@@ -59,6 +62,119 @@ class RiskChangeCheckTests(unittest.TestCase):
         self.assertEqual(result.status, "keep_current_profile")
         self.assertIn("active_position_present", result.reasons)
         self.assertIn("position_has_algo_protection", result.reasons)
+
+    def test_allows_multi_profile_change_when_protected_position_fits_target_caps(self):
+        missing = SubmittedIntentWithoutOutcome(
+            event_id=7,
+            occurred_at="2026-06-20T03:43:09Z",
+            symbol="HYPEUSDT",
+            side="BUY",
+            quantity=0.16,
+            leverage=5,
+        )
+
+        result = risk_change_check_from_live_status(
+            report(
+                positions=[
+                    {
+                        "symbol": "HYPEUSDT",
+                        "positionAmt": "0.16",
+                        "positionSide": "LONG",
+                        "notional": "11.25",
+                        "initialMargin": "2.25",
+                        "leverage": "5",
+                    }
+                ],
+                open_algo_orders=[
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG", "clientAlgoId": "bfa-hype-sl"},
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG", "clientAlgoId": "bfa-hype-tp"},
+                ],
+                protective_complete=True,
+            ),
+            unreconciled_submitted_intents=[missing],
+            target_profile={
+                "BFA_ACCOUNT_CAPITAL_USDT": "30",
+                "BFA_MAX_OPEN_POSITIONS": "2",
+                "BFA_MULTI_POSITION_ENABLED": "true",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.16",
+                "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "45",
+                "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "30",
+            },
+        )
+
+        self.assertTrue(result.risk_change_allowed)
+        self.assertEqual(result.status, "risk_change_allowed_with_active_position")
+        self.assertIn("active_position_within_target_profile_caps", result.reasons)
+        self.assertIn("active_submitted_intent_carried_forward", result.reasons)
+        self.assertEqual(result.position_count, 1)
+        self.assertAlmostEqual(result.active_exposures[0]["initial_margin_usdt"], 2.25)
+
+    def test_blocks_multi_profile_change_when_active_position_exceeds_target_caps(self):
+        result = risk_change_check_from_live_status(
+            report(
+                positions=[
+                    {
+                        "symbol": "HYPEUSDT",
+                        "positionAmt": "0.16",
+                        "positionSide": "LONG",
+                        "notional": "11.25",
+                        "initialMargin": "2.25",
+                        "leverage": "5",
+                    }
+                ],
+                open_algo_orders=[
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                ],
+                protective_complete=True,
+            ),
+            target_profile={
+                "BFA_ACCOUNT_CAPITAL_USDT": "30",
+                "BFA_MAX_OPEN_POSITIONS": "2",
+                "BFA_MULTI_POSITION_ENABLED": "true",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "2",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.16",
+                "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "45",
+                "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "30",
+            },
+        )
+
+        self.assertFalse(result.risk_change_allowed)
+        self.assertEqual(result.status, "keep_current_profile")
+        self.assertIn("target_profile_portfolio_margin_cap_reached", result.reasons)
+
+    def test_blocks_multi_profile_change_when_unreconciled_intent_is_not_active_position(self):
+        missing = SubmittedIntentWithoutOutcome(
+            event_id=9,
+            occurred_at="2026-06-20T03:43:09Z",
+            symbol="BNBUSDT",
+        )
+
+        result = risk_change_check_from_live_status(
+            report(
+                positions=[{"symbol": "HYPEUSDT", "positionAmt": "0.16", "positionSide": "LONG"}],
+                open_algo_orders=[
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                    {"symbol": "HYPEUSDT", "positionSide": "LONG"},
+                ],
+                protective_complete=True,
+            ),
+            unreconciled_submitted_intents=[missing],
+            target_profile={
+                "BFA_ACCOUNT_CAPITAL_USDT": "30",
+                "BFA_MAX_OPEN_POSITIONS": "2",
+                "BFA_MULTI_POSITION_ENABLED": "true",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.16",
+                "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "45",
+                "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "30",
+            },
+        )
+
+        self.assertFalse(result.risk_change_allowed)
+        self.assertIn("submitted_intents_missing_outcomes", result.reasons)
+        self.assertNotIn("active_submitted_intent_carried_forward", result.reasons)
 
     def test_requires_attention_for_orphan_orders(self):
         result = risk_change_check_from_live_status(report(open_orders=[{"symbol": "BNBUSDT"}]))

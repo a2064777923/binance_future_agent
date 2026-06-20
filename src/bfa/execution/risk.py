@@ -115,6 +115,21 @@ def evaluate_risk(
         reasons.append("max_open_positions_reached")
     if _duplicate_exposure(intent, risk_state):
         reasons.append("duplicate_symbol_direction_exposure")
+    if _portfolio_margin_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_MARGIN_USDT"):
+        reasons.append("portfolio_margin_cap_reached")
+    portfolio_margin_fraction_cap = _float_config(config, "BFA_ACCOUNT_CAPITAL_USDT") * _float_config(
+        config,
+        "BFA_MAX_PORTFOLIO_MARGIN_FRACTION",
+    )
+    if _portfolio_margin_after_entry(intent, risk_state) > portfolio_margin_fraction_cap:
+        reasons.append("portfolio_margin_fraction_reached")
+    if _portfolio_notional_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_NOTIONAL_USDT"):
+        reasons.append("portfolio_notional_cap_reached")
+    if _same_direction_notional_after_entry(intent, risk_state) > _float_config(
+        config,
+        "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT",
+    ):
+        reasons.append("same_direction_notional_cap_reached")
     if risk_state.cooldown_until and now < risk_state.cooldown_until:
         reasons.append("cooldown_active")
 
@@ -155,6 +170,34 @@ def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
         if symbol == intent.symbol.upper() and direction == intended_direction:
             return True
     return False
+
+
+def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
+    return risk_state.active_initial_margin_usdt + intent.estimated_initial_margin_usdt
+
+
+def _portfolio_notional_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
+    return risk_state.active_notional_usdt + intent.notional_usdt
+
+
+def _same_direction_notional_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
+    intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+    total = intent.notional_usdt
+    for exposure in risk_state.active_exposures:
+        if str(exposure.get("direction", "")).upper() == intended_direction:
+            total += _float_or_zero(exposure.get("notional_usdt"))
+    return total
+
+
+def _float_config(config: AppConfig, key: str) -> float:
+    return _float_or_zero(config.get(key))
+
+
+def _float_or_zero(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _dedupe(values: list[str]) -> list[str]:

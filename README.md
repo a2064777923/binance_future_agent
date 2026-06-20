@@ -108,7 +108,7 @@ python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 Use the exposure status command when reviewing why the bot can or cannot open a
 new position under the current live caps. It is read-only and reports current
 sizing, long/short direction support, active-position capacity, and the
-confirmation-gated `30u_8x_dynamic` preview.
+confirmation-gated `30u_10x_multi_dynamic` preview.
 
 ```bash
 python -m bfa.cli ops exposure-status --env-file .env --db runtime/agent.sqlite --hypothetical-symbol HYPEUSDT --hypothetical-side long
@@ -117,6 +117,27 @@ python -m bfa.cli ops exposure-status --env-file .env --db runtime/agent.sqlite 
 The automated live runner also performs a read-only entry-capacity preflight, so
 when the current profile is already full it exits before market collection,
 candidate generation, or AI calls.
+
+When multi-position mode has capacity, the live runner evaluates the top-N hot
+candidate queue. If the first hot symbol is skipped by AI pass or retryable
+symbol-level risk such as duplicate same-direction exposure, the runner can
+evaluate the next candidate while still submitting at most one order per cycle.
+
+Higher-leverage or concurrent-position profiles must also stay inside portfolio
+caps. The risk layer checks total initial margin, total notional, and same-side
+notional after the proposed new entry using:
+
+- `BFA_MAX_PORTFOLIO_MARGIN_USDT`
+- `BFA_MAX_PORTFOLIO_MARGIN_FRACTION`
+- `BFA_MAX_PORTFOLIO_NOTIONAL_USDT`
+- `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT`
+
+`30u_10x_multi_dynamic` is available as a preview/apply profile for a 30 USDT
+account with at most two concurrent positions, but it remains confirmation-gated
+and should be treated as experimental until backtests and live evidence justify
+it. Profile readiness may carry a protected active position into this target
+profile only when exchange-side algo protection is present and the active
+exposure fits the target portfolio caps.
 
 ## Small-Capital Backtesting
 

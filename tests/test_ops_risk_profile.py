@@ -43,6 +43,18 @@ class RiskProfileTests(unittest.TestCase):
         self.assertEqual(plan.target_values["BFA_MAX_OPEN_POSITIONS"], "2")
         self.assertEqual(plan.target_values["BFA_MULTI_POSITION_ENABLED"], "true")
 
+    def test_10x_multi_dynamic_profile_sets_portfolio_caps(self):
+        plan = build_risk_profile_plan(
+            self.config(),
+            profile="30u_10x_multi_dynamic",
+        )
+
+        self.assertEqual(plan.target_leverage, 10)
+        self.assertEqual(plan.target_values["BFA_MULTI_POSITION_ENABLED"], "true")
+        self.assertEqual(plan.target_values["BFA_MAX_OPEN_POSITIONS"], "2")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_USDT"], "5")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_NOTIONAL_USDT"], "45")
+
     def test_apply_requires_matching_confirmation_token(self):
         report = apply_risk_profile(
             self.config(),

@@ -64,10 +64,43 @@ class RiskState:
         return {
             "active_positions": self.active_positions,
             "active_exposures": [dict(item) for item in self.active_exposures],
+            "active_notional_usdt": self.active_notional_usdt,
+            "active_initial_margin_usdt": self.active_initial_margin_usdt,
             "daily_realized_pnl_usdt": self.daily_realized_pnl_usdt,
             "daily_loss_usdt": self.daily_loss_usdt,
             "cooldown_until": self.cooldown_until,
         }
+
+    @property
+    def active_notional_usdt(self) -> float:
+        return sum(_float_or_zero(item.get("notional_usdt")) for item in self.active_exposures)
+
+    @property
+    def active_initial_margin_usdt(self) -> float:
+        return sum(_exposure_margin(item) for item in self.active_exposures)
+
+
+def _exposure_margin(item: dict[str, Any]) -> float:
+    margin = _float_or_none(item.get("initial_margin_usdt"))
+    if margin is not None:
+        return margin
+    notional = _float_or_zero(item.get("notional_usdt"))
+    leverage = _float_or_zero(item.get("leverage"))
+    if leverage <= 0:
+        return 0.0
+    return notional / leverage
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_zero(value: Any) -> float:
+    parsed = _float_or_none(value)
+    return parsed if parsed is not None else 0.0
 
 
 @dataclass(frozen=True)

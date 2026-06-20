@@ -1,27 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.21
-milestone_name: Live Pilot Risk Controls
-current_phase: Milestone v1.21 archived
-status: completed
-stopped_at: HYPEUSDT still open/protected and past hold window; time-exit plan ready but not approved
-last_updated: "2026-06-20T15:39:51+08:00"
+milestone: v1.22
+milestone_name: Portfolio Risk And Multi-Position
+current_phase: 30
+status: active
+stopped_at: Phase 30 local implementation complete; server deployment pending
+last_updated: "2026-06-20T17:35:50+08:00"
 last_activity: 2026-06-20
-last_activity_desc: HYPEUSDT still open/protected; time-exit ready; 8x dynamic profile still blocked
+last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 29
-  completed_phases: 29
-  total_plans: 49
-  completed_plans: 49
+  total_phases: 30
+  completed_phases: 30
+  total_plans: 50
+  completed_plans: 50
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Milestone v1.21 archived
-**Status:** v1.21 milestone complete; awaiting next milestone while HYPEUSDT
-continues to block any 8x/dynamic profile apply
+**Current phase:** Phase 30 — Portfolio Risk And Multi-Position Profile
+**Status:** v1.22 local implementation complete; server deployment pending
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -32,9 +31,9 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Observe HYPEUSDT under the unchanged 5x/12U/one-position
-profile, reconcile after it closes, then re-check risk-change readiness before
-any profile switch.
+**Current focus:** Deploy and verify portfolio-level risk caps and the
+confirmation-gated `30u_10x_multi_dynamic` profile without silently changing the
+live server env.
 
 ## Decisions
 
@@ -49,6 +48,12 @@ any profile switch.
 - Active trial profile: 30 USDT account capital, 5x max leverage, 12 USDT max
   position notional, 0.3 USDT max per-trade risk, 1 USDT max daily loss, and
   1 open position.
+
+- v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
+  after an operator-approved multi-position profile is enabled. Continue hot
+  coin scanning when capacity remains, evaluate the top-N hot-symbol queue
+  instead of one all-or-nothing candidate, and reject new entries against
+  portfolio-level margin, margin-fraction, notional, and same-direction caps.
 
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
@@ -228,44 +233,39 @@ any profile switch.
   submitted intent remain. The live service was inactive and the live timer was
   active; no close, env switch, or exchange mutation was performed.
 
+- Phase 30 local implementation adds portfolio-level risk caps, active exposure
+  notional/margin accounting, top-N candidate queue evaluation, a
+  `30u_10x_multi_dynamic` preview profile, target-profile active-exposure
+  readiness, and exposure-status portfolio context. It preserves
+  confirmation-gated profile application and does not change the live server
+  env. Full local test suite passed with `278` tests after the candidate queue
+  and target-readiness additions.
+
 ## Next Command
 
-HYPEUSDT has reached a reviewed time-exit condition. Do not execute a live
-close unless the operator explicitly approves the fresh confirmation token from
-`ops time-exit-execute`. If the operator does not approve, keep observing for
-exchange-side TP/SL closure. After HYPEUSDT closes, run `ops reconcile-outcomes
---persist-closed`, then rerun `ops risk-change-check --target-leverage 8`
-before applying any profile switch.
+Deploy Phase 30 to `/opt/binance-futures-agent/app`, run focused/full server
+tests, and preview `30u_10x_multi_dynamic`. Do not apply the profile until the
+operator explicitly confirms the token and accepts the live portfolio caps.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** HYPEUSDT still open/protected and past hold window; time-exit plan ready but not approved
-**Resume file:** .planning/milestones/v1.21-MILESTONE-AUDIT.md
+**Stopped at:** Phase 30 local implementation complete; server deployment pending
+**Resume file:** .planning/phases/30-portfolio-risk-and-multi-position-profile/30-01-SUMMARY.md
 
 ## Current Position
 
-Phase: Milestone v1.21 complete
-Plan: —
-Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — HYPEUSDT still open/protected; time-exit ready; 8x dynamic profile still blocked
+Phase: 30 — Portfolio Risk And Multi-Position Profile
+Plan: 30-01 complete locally
+Status: Server deployment pending; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — portfolio caps and 30u_10x_multi_dynamic profile added locally
 
 ## Operator Next Steps
 
-- Observe the current HYPEUSDT live position and its protective orders.
-- Use `ops position-hold-check` to monitor whether the active position remains
-  inside or past its AI hold window.
-- Use `ops time-exit-plan` to inspect the read-only close-order plan if review
-  is needed.
-- Use `ops time-exit-execute` without `--confirm-token` only to fetch the
-  current confirmation token; do not provide the token unless explicitly
-  approving a live close.
-- Use `ops exposure-status --hypothetical-symbol HYPEUSDT --hypothetical-side
-  long` to explain current sizing, direction support, and why new entries are
-  blocked or allowed.
-- Run `ops reconcile-outcomes --persist-closed` after HYPEUSDT closes.
-- Rerun `ops risk-change-check --target-leverage 8` before any leverage or
-  dynamic-sizing profile change.
-- Apply `30u_8x_dynamic` only if risk-change readiness allows it and the
-  operator supplies the exact confirmation token.
-- Start the next milestone with `$gsd-new-milestone`.
+- Deploy Phase 30 code to the isolated server path.
+- Run focused server tests for execution risk, agent runner, risk profile, config,
+  and exposure status.
+- Run the full server test suite and secret-safe health check.
+- Preview `ops risk-profile-plan --profile 30u_10x_multi_dynamic` on the server.
+- Do not apply `30u_10x_multi_dynamic` unless the operator explicitly confirms
+  the profile token after reviewing active HYPEUSDT exposure and portfolio caps.

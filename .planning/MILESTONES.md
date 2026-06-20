@@ -1,5 +1,29 @@
 # Milestones
 
+## v1.22 Portfolio Risk And Multi-Position (Local complete: 2026-06-20)
+
+**Phases completed:** 1 phase, 1 plan
+
+**Key accomplishments:**
+
+- Added portfolio-level margin, margin fraction, notional, and same-direction
+  notional caps.
+- Let multi-position mode continue scanning when an existing position is open
+  and capacity remains.
+- Added top-N candidate queue evaluation so retryable first-candidate skips do
+  not end the whole cycle.
+- Added a confirmation-gated `30u_10x_multi_dynamic` profile for higher
+  leverage and two concurrent positions.
+- Allowed risk-profile readiness to carry protected active exposure into the
+  target profile only when portfolio caps can absorb it.
+- Extended exposure status with portfolio budget context.
+
+**Known deferred items at close:**
+
+- Server deployment and any live env switch remain pending operator review.
+
+---
+
 ## v1.21 Live Pilot Risk Controls (Shipped: 2026-06-20)
 
 **Phases completed:** 21 phases, 21 plans, 0 tasks

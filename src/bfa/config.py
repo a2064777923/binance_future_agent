@@ -31,6 +31,10 @@ DEFAULTS = {
     "BFA_MAX_MARGIN_PER_POSITION_USDT": "2.4",
     "BFA_MAX_MARGIN_FRACTION": "0.08",
     "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "20",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "20",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.2",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "60",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "40",
     "BFA_MULTI_POSITION_ENABLED": "false",
     "BFA_REQUIRE_PROTECTIVE_ORDERS": "true",
     "BFA_MARGIN_MODE": "isolated",
@@ -79,6 +83,10 @@ NUMERIC_FIELDS = (
     "BFA_MAX_MARGIN_PER_POSITION_USDT",
     "BFA_MAX_MARGIN_FRACTION",
     "BFA_MAX_EFFECTIVE_NOTIONAL_USDT",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT",
     "BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT",
     "BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT",
     "BFA_MARKET_HEAT_MIN_TAKER_BUY_SELL_RATIO",
@@ -152,6 +160,10 @@ def validate_config(config: AppConfig) -> ValidationResult:
             errors.append("BFA_KILL_SWITCH_FILE is required for live mode")
         if not _truthy(config.get("BFA_REQUIRE_PROTECTIVE_ORDERS")):
             errors.append("BFA_REQUIRE_PROTECTIVE_ORDERS must be true for live mode")
+        if _truthy(config.get("BFA_MULTI_POSITION_ENABLED")):
+            warnings.append("BFA_MULTI_POSITION_ENABLED=true allows concurrent live positions")
+        if _float_or_zero(config.get("BFA_MAX_LEVERAGE")) > 10:
+            warnings.append("BFA_MAX_LEVERAGE above 10x requires extra operator review")
         if config.get("BFA_MARGIN_MODE").strip().lower() == "cross":
             warnings.append("BFA_MARGIN_MODE=cross uses account-level cross margin under pilot caps")
         if config.get("BFA_POSITION_MODE").strip().lower() == "hedge":
@@ -219,6 +231,13 @@ def _positive_integer(value: str, key: str, errors: list[str]) -> None:
         return
     if parsed <= 0:
         errors.append(f"{key} must be a positive integer")
+
+
+def _float_or_zero(value: str) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _truthy(value: str) -> bool:

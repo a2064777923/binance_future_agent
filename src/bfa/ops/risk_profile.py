@@ -24,6 +24,10 @@ APPROVED_PROFILE_KEYS = (
     "BFA_MAX_MARGIN_PER_POSITION_USDT",
     "BFA_MAX_MARGIN_FRACTION",
     "BFA_MAX_EFFECTIVE_NOTIONAL_USDT",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT",
     "BFA_MULTI_POSITION_ENABLED",
 )
 
@@ -39,7 +43,29 @@ PROFILE_30U_8X_DYNAMIC = {
     "BFA_MAX_MARGIN_PER_POSITION_USDT": "3",
     "BFA_MAX_MARGIN_FRACTION": "0.08",
     "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "30",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "6",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.18",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "45",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "30",
     "BFA_MULTI_POSITION_ENABLED": "false",
+}
+
+PROFILE_30U_10X_MULTI_DYNAMIC = {
+    "BFA_ACCOUNT_CAPITAL_USDT": "30",
+    "BFA_MAX_LEVERAGE": "10",
+    "BFA_MAX_POSITION_NOTIONAL_USDT": "25",
+    "BFA_MAX_RISK_PER_TRADE_USDT": "0.25",
+    "BFA_MAX_DAILY_LOSS_USDT": "1",
+    "BFA_MAX_OPEN_POSITIONS": "2",
+    "BFA_DYNAMIC_POSITION_SIZING_ENABLED": "true",
+    "BFA_MAX_MARGIN_PER_POSITION_USDT": "2.5",
+    "BFA_MAX_MARGIN_FRACTION": "0.07",
+    "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "25",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "5",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.16",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "45",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "30",
+    "BFA_MULTI_POSITION_ENABLED": "true",
 }
 
 
@@ -163,6 +189,7 @@ def apply_risk_profile(
         db_path=db_path,
         check_binance=True,
         target_leverage=plan.target_leverage,
+        target_profile=plan.target_values,
         signed_client=signed_client,
     )
     if not risk_change.risk_change_allowed:
@@ -187,9 +214,12 @@ def apply_risk_profile(
 
 
 def target_profile_values(profile: str, *, allow_two_positions: bool = False) -> dict[str, str]:
-    if profile != "30u_8x_dynamic":
-        raise ValueError("profile must be 30u_8x_dynamic")
-    target = dict(PROFILE_30U_8X_DYNAMIC)
+    if profile == "30u_8x_dynamic":
+        target = dict(PROFILE_30U_8X_DYNAMIC)
+    elif profile == "30u_10x_multi_dynamic":
+        target = dict(PROFILE_30U_10X_MULTI_DYNAMIC)
+    else:
+        raise ValueError("profile must be 30u_8x_dynamic or 30u_10x_multi_dynamic")
     if allow_two_positions:
         target["BFA_MAX_OPEN_POSITIONS"] = "2"
         target["BFA_MULTI_POSITION_ENABLED"] = "true"

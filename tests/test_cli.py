@@ -928,13 +928,13 @@ class CliTests(unittest.TestCase):
         payload = json.loads(stdout)
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
-        self.assertEqual(payload["status"], "keep_current_profile")
+        self.assertEqual(payload["status"], "ready_for_profile_switch")
         self.assertTrue(payload["direction_support"]["long_entries_supported"])
         self.assertTrue(payload["direction_support"]["short_entries_supported"])
         self.assertFalse(payload["entry_capacity"]["can_open_new_position"])
         self.assertIn("max_open_positions_reached", payload["entry_capacity"]["reasons"])
-        self.assertEqual(payload["target_profile"]["target_leverage"], 8)
-        self.assertFalse(payload["risk_change"]["risk_change_allowed"])
+        self.assertEqual(payload["target_profile"]["target_leverage"], 10)
+        self.assertTrue(payload["risk_change"]["risk_change_allowed"])
 
     def test_ops_risk_profile_apply_blocks_active_position_without_writing_env(self):
         class FakeSignedClient:

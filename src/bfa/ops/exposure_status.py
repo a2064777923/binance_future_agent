@@ -49,6 +49,10 @@ class EntryCapacity:
     active_position_count: int
     max_open_positions: int
     multi_position_enabled: bool
+    active_notional_usdt: float = 0.0
+    active_initial_margin_usdt: float = 0.0
+    max_portfolio_notional_usdt: float | None = None
+    max_portfolio_margin_usdt: float | None = None
     active_exposures: list[dict[str, Any]] = field(default_factory=list)
     hypothetical: dict[str, Any] | None = None
 
@@ -60,6 +64,10 @@ class EntryCapacity:
             "active_position_count": self.active_position_count,
             "max_open_positions": self.max_open_positions,
             "multi_position_enabled": self.multi_position_enabled,
+            "active_notional_usdt": self.active_notional_usdt,
+            "active_initial_margin_usdt": self.active_initial_margin_usdt,
+            "max_portfolio_notional_usdt": self.max_portfolio_notional_usdt,
+            "max_portfolio_margin_usdt": self.max_portfolio_margin_usdt,
             "active_exposures": [dict(item) for item in self.active_exposures],
             "hypothetical": dict(self.hypothetical) if self.hypothetical else None,
         }
@@ -97,7 +105,7 @@ def build_exposure_status_report(
     db_path: str | None = None,
     check_binance: bool = True,
     signed_client: BinanceFuturesSignedClient | None = None,
-    target_profile: str | None = "30u_8x_dynamic",
+    target_profile: str | None = "30u_10x_multi_dynamic",
     allow_two_positions: bool = False,
     hypothetical_symbol: str | None = None,
     hypothetical_side: str | None = None,
@@ -140,6 +148,7 @@ def build_exposure_status_report(
             db_path=db_path,
             check_binance=check_binance,
             target_leverage=target_plan.target_leverage,
+            target_profile=target_plan.target_values,
             live_status_report=live_status,
             signed_client=signed_client if check_binance else None,
         )
@@ -173,6 +182,10 @@ def _profile_dict(config: AppConfig, sizing: PositionSizingResult) -> dict[str, 
         "max_leverage": _float_or_none(config.get("BFA_MAX_LEVERAGE")),
         "max_position_notional_usdt": sizing.max_position_notional_usdt,
         "max_position_margin_usdt": sizing.max_position_margin_usdt,
+        "max_portfolio_margin_usdt": _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_USDT")),
+        "max_portfolio_margin_fraction": _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_FRACTION")),
+        "max_portfolio_notional_usdt": _float_or_none(config.get("BFA_MAX_PORTFOLIO_NOTIONAL_USDT")),
+        "max_same_direction_notional_usdt": _float_or_none(config.get("BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT")),
         "max_risk_per_trade_usdt": _float_or_none(config.get("BFA_MAX_RISK_PER_TRADE_USDT")),
         "max_daily_loss_usdt": _float_or_none(config.get("BFA_MAX_DAILY_LOSS_USDT")),
         "max_open_positions": _int_or_default(config.get("BFA_MAX_OPEN_POSITIONS"), 0),
@@ -214,6 +227,14 @@ def _entry_capacity(
     active_exposures = [item for item in active_exposures if item]
     max_open = _int_or_default(config.get("BFA_MAX_OPEN_POSITIONS"), 0)
     multi_enabled = multi_position_enabled(config)
+    active_notional = sum(_float_or_none(item.get("notional_usdt")) or 0.0 for item in active_exposures)
+    active_margin = sum(_exposure_margin(item) for item in active_exposures)
+    max_portfolio_notional = _float_or_none(config.get("BFA_MAX_PORTFOLIO_NOTIONAL_USDT"))
+    max_portfolio_margin = min(
+        _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_USDT")) or 0.0,
+        (_float_or_none(config.get("BFA_ACCOUNT_CAPITAL_USDT")) or 0.0)
+        * (_float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_FRACTION")) or 0.0),
+    )
     reasons: list[str] = []
     has_exchange_evidence = bool(exchange)
 
@@ -223,6 +244,10 @@ def _entry_capacity(
         reasons.append("multi_position_disabled")
     if len(positions) >= max_open:
         reasons.append("max_open_positions_reached")
+    if max_portfolio_notional is not None and active_notional >= max_portfolio_notional:
+        reasons.append("portfolio_notional_cap_reached")
+    if max_portfolio_margin > 0 and active_margin >= max_portfolio_margin:
+        reasons.append("portfolio_margin_cap_reached")
 
     hypothetical = _hypothetical_capacity(
         active_exposures,
@@ -251,6 +276,10 @@ def _entry_capacity(
         active_position_count=len(positions),
         max_open_positions=max_open,
         multi_position_enabled=multi_enabled,
+        active_notional_usdt=round(active_notional, 8),
+        active_initial_margin_usdt=round(active_margin, 8),
+        max_portfolio_notional_usdt=max_portfolio_notional,
+        max_portfolio_margin_usdt=round(max_portfolio_margin, 8) if max_portfolio_margin > 0 else None,
         active_exposures=active_exposures,
         hypothetical=hypothetical,
     )
@@ -300,6 +329,9 @@ def _exposure_from_position(position: Any) -> dict[str, Any]:
         "position_amt": amount,
         "entry_price": _float_or_none(data.get("entryPrice")),
         "mark_price": _float_or_none(data.get("markPrice")),
+        "notional_usdt": _position_notional(data),
+        "initial_margin_usdt": _position_initial_margin(data),
+        "leverage": _float_or_none(data.get("leverage")),
         "unrealized_pnl_usdt": _float_or_none(data.get("unRealizedProfit")),
     }
 
@@ -346,6 +378,35 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _position_notional(data: Mapping[str, Any]) -> float:
+    notional = _float_or_none(data.get("notional"))
+    if notional is not None:
+        return abs(notional)
+    amount = abs(_float_or_none(data.get("positionAmt")) or 0.0)
+    mark = _float_or_none(data.get("markPrice")) or _float_or_none(data.get("entryPrice")) or 0.0
+    return round(abs(amount * mark), 8)
+
+
+def _position_initial_margin(data: Mapping[str, Any]) -> float:
+    margin = _float_or_none(data.get("initialMargin"))
+    if margin is not None:
+        return abs(margin)
+    leverage = _float_or_none(data.get("leverage")) or 0.0
+    if leverage <= 0:
+        return 0.0
+    return round(_position_notional(data) / leverage, 8)
+
+
+def _exposure_margin(item: Mapping[str, Any]) -> float:
+    margin = _float_or_none(item.get("initial_margin_usdt"))
+    if margin is not None:
+        return margin
+    leverage = _float_or_none(item.get("leverage")) or 0.0
+    if leverage <= 0:
+        return 0.0
+    return (_float_or_none(item.get("notional_usdt")) or 0.0) / leverage
 
 
 def _int_or_default(value: Any, default: int) -> int:

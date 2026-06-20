@@ -10,6 +10,8 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phase 30, local
+  implementation complete; server deployment pending.
 
 ## Phases
 
@@ -54,23 +56,53 @@
 
 </details>
 
+### Phase 30: Portfolio Risk And Multi-Position Profile
+
+**Goal:** Allow the agent to keep scanning and accept controlled additional
+positions while another position is open, with higher-leverage profiles bounded
+by portfolio-level risk budgets.
+
+**Requirements:** PRM-01, PRM-02, PRM-03, PRM-04, PRM-05, HLP-01, HLP-02,
+HLP-03, HLP-04, QSR-01
+
+**Status:** Complete locally. Server deployment and live env switching remain
+separate operator-gated actions.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Existing active positions do not force the live runner to early-stop when
+   multi-position mode is enabled and capacity remains.
+2. The live runner can continue from a retryable first-candidate skip to the
+   next top-N hot symbol while still submitting at most one order per cycle.
+3. New order intents are rejected when portfolio margin, portfolio margin
+   fraction, portfolio notional, same-direction notional, max-position count,
+   or duplicate symbol-direction caps would be exceeded.
+4. A `30u_10x_multi_dynamic` profile can be previewed with confirmation token
+   and portfolio caps.
+5. Risk-profile readiness can carry protected active exposure into the target
+   profile only when active exposure fits target caps.
+6. `ops exposure-status` reports portfolio budget context.
+7. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
+| v1.22 Portfolio Risk And Multi-Position | 30 | 1/1 | Complete locally | Pending |
 
 ## Requirement Coverage
 
 - v1.0 requirements: archived at `.planning/milestones/v1.0-REQUIREMENTS.md`
 - v1.1-v1.21 requirements: archived at `.planning/milestones/v1.21-REQUIREMENTS.md`
+- v1.22 requirements: active at `.planning/REQUIREMENTS.md`
 
 ## Next Step
 
-Start the next milestone with `$gsd-new-milestone`, or continue live operations
-by observing HYPEUSDT. Do not change the active server risk profile while
-HYPEUSDT remains open. After it closes, run `ops reconcile-outcomes
---persist-closed`, then `ops risk-change-check --target-leverage 8`; apply the
-`30u_8x_dynamic` profile only if that gate returns allowed and the operator
-supplies the exact confirmation token.
+Deploy Phase 30 code to the isolated server, run focused/full tests there, then
+preview `30u_10x_multi_dynamic` with `ops risk-profile-plan`. Do not apply any
+live env switch until the operator explicitly confirms the profile token and
+accepts the portfolio caps.

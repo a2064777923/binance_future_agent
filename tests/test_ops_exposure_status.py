@@ -50,7 +50,7 @@ class ExposureStatusTests(unittest.TestCase):
         env.update(overrides)
         return load_config(env)
 
-    def test_reports_current_long_capacity_block_and_8x_dynamic_preview(self):
+    def test_reports_current_long_capacity_block_and_10x_multi_profile_readiness(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "runtime").mkdir()
@@ -82,7 +82,7 @@ class ExposureStatusTests(unittest.TestCase):
             )
 
         payload = report.to_dict()
-        self.assertEqual(payload["status"], "keep_current_profile")
+        self.assertEqual(payload["status"], "ready_for_profile_switch")
         self.assertEqual(payload["current_profile"]["max_leverage"], 5)
         self.assertFalse(payload["current_profile"]["dynamic_position_sizing_enabled"])
         self.assertAlmostEqual(payload["current_sizing"]["max_position_notional_usdt"], 12)
@@ -93,10 +93,11 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertIn("multi_position_disabled", payload["entry_capacity"]["reasons"])
         self.assertIn("max_open_positions_reached", payload["entry_capacity"]["reasons"])
         self.assertIn("duplicate_symbol_direction_exposure", payload["entry_capacity"]["reasons"])
-        self.assertEqual(payload["target_profile"]["target_leverage"], 8)
+        self.assertEqual(payload["target_profile"]["target_leverage"], 10)
         self.assertTrue(payload["target_sizing"]["enabled"])
-        self.assertAlmostEqual(payload["target_sizing"]["max_position_notional_usdt"], 17.856)
-        self.assertFalse(payload["risk_change"]["risk_change_allowed"])
+        self.assertAlmostEqual(payload["target_sizing"]["max_position_notional_usdt"], 19.53)
+        self.assertTrue(payload["risk_change"]["risk_change_allowed"])
+        self.assertIn("active_position_within_target_profile_caps", payload["risk_change"]["reasons"])
         self.assertIn("active_position_present", payload["risk_change"]["reasons"])
         self.assertIn("submitted_intents_missing_outcomes", payload["risk_change"]["reasons"])
 
@@ -143,7 +144,7 @@ class ExposureStatusTests(unittest.TestCase):
             payload["target_profile"]["confirmation_token"],
             build_risk_profile_plan(
                 self.config(root),
-                profile="30u_8x_dynamic",
+                profile="30u_10x_multi_dynamic",
                 allow_two_positions=True,
             ).confirmation_token,
         )

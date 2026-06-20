@@ -428,7 +428,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     exposure_status.add_argument(
         "--target-profile",
-        default="30u_8x_dynamic",
+        default="30u_10x_multi_dynamic",
         help="optional risk profile to preview; use empty string to disable",
     )
     exposure_status.add_argument(

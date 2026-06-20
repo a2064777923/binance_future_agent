@@ -42,6 +42,7 @@ class AgentRunResult:
     candidate_count: int = 0
     rejected_count: int = 0
     selected_symbol: str | None = None
+    evaluated_symbols: list[str] = field(default_factory=list)
     ai_accepted: bool = False
     execution_status: str | None = None
     submitted: bool = False
@@ -74,6 +75,7 @@ class AgentRunResult:
             "candidate_count": self.candidate_count,
             "rejected_count": self.rejected_count,
             "selected_symbol": self.selected_symbol,
+            "evaluated_symbols": list(self.evaluated_symbols),
             "ai_accepted": self.ai_accepted,
             "execution_status": self.execution_status,
             "submitted": self.submitted,
@@ -196,56 +198,7 @@ def run_agent_once(
                 persisted={"candidates": persisted_candidate_count},
             )
 
-        candidate = candidates.candidates[0]
-        candidate_sizing = compute_position_sizing(
-            sizing_input_from_config(config, candidate=candidate.to_dict()),
-            enabled=dynamic_sizing_enabled(config),
-        )
-        try:
-            ai_run = run_ai_decision(
-                client=ai_client,
-                context=context_from_candidate(
-                    candidate,
-                    risk_limits=RiskLimits.from_config(config, sizing_result=candidate_sizing),
-                    decided_at=started_at,
-                ),
-                journal=AiDecisionJournal(journal_path) if journal_path else None,
-                store=store,
-                source=ai_source(config),
-            )
-        except Exception as exc:
-            _record_openai_backoff(config, exc)
-            return AgentRunResult(
-                status="ai_error",
-                mode=mode.value,
-                started_at=started_at,
-                market_snapshot_count=len(market_snapshots),
-                narrative_record_count=len(narrative_records),
-                candidate_count=len(candidates.candidates),
-                rejected_count=len(candidates.rejected),
-                selected_symbol=candidate.symbol,
-                validation_errors=[_safe_ai_error(exc)],
-                persisted={"candidates": persisted_candidate_count},
-            )
-        _clear_openai_backoff(config)
-        if not ai_run.validation.accepted:
-            status = "ai_pass" if ai_run.validation.decision and ai_run.validation.decision.decision == "pass" else "ai_rejected"
-            return AgentRunResult(
-                status=status,
-                mode=mode.value,
-                started_at=started_at,
-                market_snapshot_count=len(market_snapshots),
-                narrative_record_count=len(narrative_records),
-                candidate_count=len(candidates.candidates),
-                rejected_count=len(candidates.rejected),
-                selected_symbol=candidate.symbol,
-                ai_accepted=False,
-                validation_errors=list(ai_run.validation.validation_errors),
-                persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_run.persisted},
-            )
-
         exchange_info = market.exchange_info().payload
-        filters = SymbolExecutionFilters.from_exchange_info(exchange_info, candidate.symbol)
         risk_state = preflight_risk_state if mode is RuntimeMode.LIVE else RiskState()
         if risk_state is None:
             return AgentRunResult(
@@ -256,43 +209,27 @@ def run_agent_once(
                 narrative_record_count=len(narrative_records),
                 candidate_count=len(candidates.candidates),
                 rejected_count=len(candidates.rejected),
-                selected_symbol=candidate.symbol,
                 ai_accepted=True,
                 validation_errors=["unable to read live position risk"],
-                persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_run.persisted},
+                persisted={"candidates": persisted_candidate_count},
             )
 
-        execution = ExecutionEngine(
+        return _evaluate_candidate_queue(
             config=config,
-            signed_client=signed_client,
+            mode=mode,
+            candidates=candidates.candidates,
+            exchange_info=exchange_info,
+            ai_client=ai_client,
+            journal_path=journal_path,
             store=store,
-            risk_limits=RiskLimits.from_config(config, sizing_result=candidate_sizing),
-        ).run(
-            symbol=candidate.symbol,
-            validation=ai_run.validation,
-            decided_at=started_at,
+            signed_client=signed_client,
             risk_state=risk_state,
-            filters=filters,
-            now=started_at,
-        )
-        return AgentRunResult(
-            status=execution.status,
-            mode=mode.value,
             started_at=started_at,
             market_snapshot_count=len(market_snapshots),
             narrative_record_count=len(narrative_records),
             candidate_count=len(candidates.candidates),
             rejected_count=len(candidates.rejected),
-            selected_symbol=candidate.symbol,
-            ai_accepted=True,
-            execution_status=execution.status,
-            submitted=execution.submitted,
-            risk_reasons=list(execution.risk.reason_codes),
-            persisted={
-                "candidates": persisted_candidate_count,
-                "ai_decisions": ai_run.persisted,
-                **execution.persisted,
-            },
+            persisted_candidate_count=persisted_candidate_count,
         )
     finally:
         connection.close()
@@ -329,6 +266,164 @@ def _collect_market_heat_narratives(config: AppConfig, market_snapshots, collect
     ).collect()
 
 
+def _evaluate_candidate_queue(
+    *,
+    config: AppConfig,
+    mode: RuntimeMode,
+    candidates,
+    exchange_info,
+    ai_client,
+    journal_path: str | None,
+    store: EventStore,
+    signed_client,
+    risk_state: RiskState,
+    started_at: str,
+    market_snapshot_count: int,
+    narrative_record_count: int,
+    candidate_count: int,
+    rejected_count: int,
+    persisted_candidate_count: int,
+) -> AgentRunResult:
+    evaluated_symbols: list[str] = []
+    ai_decisions_persisted = 0
+    skipped_risk_reasons: list[str] = []
+    last_status = "no_candidate"
+    last_validation_errors: list[str] = []
+    last_risk_reasons: list[str] = []
+
+    for candidate in candidates:
+        evaluated_symbols.append(candidate.symbol)
+        candidate_sizing = compute_position_sizing(
+            sizing_input_from_config(config, candidate=candidate.to_dict()),
+            enabled=dynamic_sizing_enabled(config),
+        )
+        risk_limits = RiskLimits.from_config(config, sizing_result=candidate_sizing)
+        try:
+            ai_run = run_ai_decision(
+                client=ai_client,
+                context=context_from_candidate(
+                    candidate,
+                    risk_limits=risk_limits,
+                    decided_at=started_at,
+                ),
+                journal=AiDecisionJournal(journal_path) if journal_path else None,
+                store=store,
+                source=ai_source(config),
+            )
+        except Exception as exc:
+            _record_openai_backoff(config, exc)
+            return AgentRunResult(
+                status="ai_error",
+                mode=mode.value,
+                started_at=started_at,
+                market_snapshot_count=market_snapshot_count,
+                narrative_record_count=narrative_record_count,
+                candidate_count=candidate_count,
+                rejected_count=rejected_count,
+                selected_symbol=candidate.symbol,
+                evaluated_symbols=evaluated_symbols,
+                validation_errors=[_safe_ai_error(exc)],
+                risk_reasons=_dedupe(skipped_risk_reasons),
+                persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_decisions_persisted},
+            )
+        _clear_openai_backoff(config)
+        ai_decisions_persisted += ai_run.persisted
+        if not ai_run.validation.accepted:
+            last_status = (
+                "ai_pass"
+                if ai_run.validation.decision and ai_run.validation.decision.decision == "pass"
+                else "ai_rejected"
+            )
+            last_validation_errors = list(ai_run.validation.validation_errors)
+            skipped_risk_reasons.append(f"{candidate.symbol}:{last_status}")
+            continue
+
+        filters = _filters_for_candidate(exchange_info, candidate.symbol)
+        if filters is None:
+            last_status = "rejected"
+            last_risk_reasons = ["symbol_filters_missing"]
+            skipped_risk_reasons.append(f"{candidate.symbol}:symbol_filters_missing")
+            continue
+
+        execution = ExecutionEngine(
+            config=config,
+            signed_client=signed_client,
+            store=store,
+            risk_limits=risk_limits,
+        ).run(
+            symbol=candidate.symbol,
+            validation=ai_run.validation,
+            decided_at=started_at,
+            risk_state=risk_state,
+            filters=filters,
+            now=started_at,
+        )
+        if execution.status == "rejected" and _should_try_next_candidate(execution.risk.reason_codes):
+            last_status = execution.status
+            last_risk_reasons = list(execution.risk.reason_codes)
+            skipped_risk_reasons.extend(f"{candidate.symbol}:{reason}" for reason in execution.risk.reason_codes)
+            continue
+
+        return AgentRunResult(
+            status=execution.status,
+            mode=mode.value,
+            started_at=started_at,
+            market_snapshot_count=market_snapshot_count,
+            narrative_record_count=narrative_record_count,
+            candidate_count=candidate_count,
+            rejected_count=rejected_count,
+            selected_symbol=candidate.symbol,
+            evaluated_symbols=evaluated_symbols,
+            ai_accepted=True,
+            execution_status=execution.status,
+            submitted=execution.submitted,
+            risk_reasons=_dedupe([*skipped_risk_reasons, *execution.risk.reason_codes]),
+            persisted={
+                "candidates": persisted_candidate_count,
+                "ai_decisions": ai_decisions_persisted,
+                **execution.persisted,
+            },
+        )
+
+    return AgentRunResult(
+        status=last_status,
+        mode=mode.value,
+        started_at=started_at,
+        market_snapshot_count=market_snapshot_count,
+        narrative_record_count=narrative_record_count,
+        candidate_count=candidate_count,
+        rejected_count=rejected_count,
+        selected_symbol=evaluated_symbols[-1] if evaluated_symbols else None,
+        evaluated_symbols=evaluated_symbols,
+        ai_accepted=False,
+        execution_status=last_status if last_status == "rejected" else None,
+        submitted=False,
+        validation_errors=last_validation_errors,
+        risk_reasons=_dedupe([*skipped_risk_reasons, *last_risk_reasons]),
+        persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_decisions_persisted},
+    )
+
+
+def _filters_for_candidate(exchange_info, symbol: str) -> SymbolExecutionFilters | None:
+    try:
+        return SymbolExecutionFilters.from_exchange_info(exchange_info, symbol)
+    except ValueError:
+        return None
+
+
+def _should_try_next_candidate(reason_codes: list[str]) -> bool:
+    retryable = {
+        "ai_decision_pass",
+        "duplicate_symbol_direction_exposure",
+        "notional_below_min",
+        "notional_below_min_executable",
+        "quantity_below_min",
+        "quantity_not_positive",
+        "symbol_filters_missing",
+    }
+    return bool(reason_codes) and all(reason in retryable for reason in reason_codes)
+
+
 def _build_signed_client(config: AppConfig, mode: RuntimeMode):
     if mode not in {RuntimeMode.TESTNET, RuntimeMode.LIVE}:
         return None
@@ -360,6 +455,9 @@ def _risk_state_from_exchange(signed_client) -> RiskState | None:
                 {
                     "symbol": str(position.get("symbol", "")).upper(),
                     "direction": direction,
+                    "notional_usdt": _position_notional(position),
+                    "initial_margin_usdt": _position_initial_margin(position),
+                    "leverage": _position_leverage(position),
                 }
             )
     return RiskState(active_positions=active_positions, active_exposures=active_exposures)
@@ -389,6 +487,36 @@ def _position_direction(position: dict[str, Any]) -> str:
     except (TypeError, ValueError):
         amount = 0.0
     return "LONG" if amount > 0 else "SHORT"
+
+
+def _position_notional(position: dict[str, Any]) -> float:
+    notional = _float_or_none(position.get("notional"))
+    if notional is not None:
+        return abs(notional)
+    amount = abs(_float_or_none(position.get("positionAmt")) or 0.0)
+    mark = _float_or_none(position.get("markPrice")) or _float_or_none(position.get("entryPrice")) or 0.0
+    return abs(amount * mark)
+
+
+def _position_initial_margin(position: dict[str, Any]) -> float:
+    margin = _float_or_none(position.get("initialMargin"))
+    if margin is not None:
+        return abs(margin)
+    leverage = _position_leverage(position)
+    if leverage <= 0:
+        return 0.0
+    return _position_notional(position) / leverage
+
+
+def _position_leverage(position: dict[str, Any]) -> float:
+    return _float_or_none(position.get("leverage")) or 0.0
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _market_records(event_ids, snapshots) -> list[dict[str, Any]]:

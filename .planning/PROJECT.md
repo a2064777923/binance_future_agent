@@ -107,6 +107,9 @@ control of downside.
   keeping both disabled by default for live.
 - Phase 29 adds a confirmation-gated risk-profile switch mechanism for future
   8x/dynamic profile changes.
+- Phase 30 adds portfolio-level caps, candidate-queue evaluation, and a
+  confirmation-gated 30U/10x/two-position profile path that can carry a
+  protected active position only when the target caps can absorb it.
 
 ### Active
 
@@ -157,6 +160,14 @@ control of downside.
   later approved risk-profile increase.
 - [x] Add a confirmation-gated risk-profile preview/apply tool so future live
   profile changes do not require manual env editing.
+- [x] Add portfolio-level risk caps and a 30U/10x/two-position profile preview
+  so higher leverage is bounded by total margin, total notional, and
+  same-direction concentration.
+- [x] Continue evaluating top-N hot symbols when the first candidate is skipped
+  by AI pass or retryable symbol-level risk.
+- [x] Allow protected active positions to be carried into a target
+  multi-position profile only when exchange protection and target portfolio caps
+  are both verified.
 
 ### Out of Scope
 
@@ -222,8 +233,9 @@ The user's chosen direction:
 
 ## Current State
 
-Milestones v1.0 and v1.21 are archived. Phases 1 through 29 are complete and
-verified locally and on the server. The project is installable as an isolated
+Milestones v1.0 and v1.21 are archived. Phases 1 through 30 are complete
+locally; Phase 30 server deployment and live profile preview are pending. The
+project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
 output, a local SQLite event store, deterministic replay/report foundations,
@@ -235,7 +247,9 @@ protective order submission, AI provider selection, AI timeout/backoff
 behavior, market-heat fallback narratives, pilot tradability filtering, a
 cap-compatible pilot universe, fail-closed margin setup handling, explicit
 configurable margin mode, explicit position mode, account-balance preflight,
-DeepSeek support, and 30U/5x trial runtime caps.
+DeepSeek support, 30U/5x trial runtime caps, portfolio-level risk caps,
+candidate-queue evaluation, and a confirmation-gated 30U/10x/two-position
+profile preview.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
 Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
@@ -258,6 +272,11 @@ Phase 29 adds a `30u_8x_dynamic` profile preview/apply tool that writes only
 approved non-secret risk keys, requires risk-change readiness and confirmation,
 and backs up the env file before any write. The profile switch has been tested
 and intentionally blocked on the server while HYPEUSDT remains open.
+Phase 30 adds `30u_10x_multi_dynamic`, portfolio margin/notional/concentration
+caps, live runner candidate-queue evaluation, exposure-status portfolio context,
+and target-profile readiness checks that can carry a protected active position
+only when active exposure fits the target profile caps. The live server env has
+not been changed by Phase 30.
 Post-archive hotfix `8fa704e` is also deployed on the server: AI confidence
 values returned in percent form are normalized into the expected `0..1` range
 with an audit warning, and server focused tests, the full 266-test suite, and a
@@ -502,13 +521,16 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 
 ## Next Milestone Goals
 
-- Keep observing HYPEUSDT under the unchanged 5x/12U/one-position live profile.
-- After HYPEUSDT closes, persist closed outcome evidence with
-  `ops reconcile-outcomes --persist-closed`.
-- Rerun `ops risk-change-check --target-leverage 8` before any higher-leverage
-  or dynamic-sizing profile change.
-- Start the next GSD milestone with `$gsd-new-milestone` once the next product
-  objective is selected.
+- Deploy Phase 30 to `/opt/binance-futures-agent/app` and run focused/full
+  server tests plus a secret-safe health check.
+- Preview `ops exposure-status` and `ops risk-profile-plan --profile
+  30u_10x_multi_dynamic` against current live exchange state.
+- Do not silently switch the live env; apply `30u_10x_multi_dynamic` only after
+  the operator confirms the fresh token and accepts the 30U/10x/two-position
+  portfolio caps.
+- Next strategy milestone should add periodic active-position review and staged
+  exit/trailing-stop logic inspired by public Lana-style workflows, backed by
+  tests and backtests rather than public profit claims.
 
 ## Key Decisions
 
@@ -544,8 +566,12 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 | Confirm before time-exit execution | Manual time exits should be possible, but only through a fresh confirmation token and post-close cleanup checks. | Phase 27 complete locally |
 | Size dynamically before increasing risk | Higher leverage should scale through explicit margin/risk formulas, not ad hoc env edits. | Phase 28 complete locally |
 | Profile switches need confirmation | Moving to 8x/dynamic sizing should be a token-confirmed env diff, not a manual edit. | Phase 29 complete and deployed |
+| Open positions should not freeze scanning | A mature hot-coin system must keep evaluating new candidates while active exposure is protected and capacity remains. | Phase 30 complete locally |
+| High leverage needs portfolio caps | 10x on 30 USDT is possible only when total margin, total notional, and same-direction concentration are bounded. | Phase 30 complete locally |
+| Protected active positions may be carried forward | Profile changes can accept existing exposure only if exchange protection is present, unreconciled intents match active positions, and target caps absorb the exposure. | Phase 30 complete locally |
+| Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after deploying the AI confidence normalization hotfix.*
+*Last updated: 2026-06-20 after Phase 30 portfolio risk and multi-position implementation.*
