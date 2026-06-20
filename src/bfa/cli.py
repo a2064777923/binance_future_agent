@@ -46,6 +46,7 @@ from bfa.ops.forward_paper import run_forward_paper
 from bfa.ops.forward_paper_loss_attribution import build_forward_paper_loss_attribution_report
 from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
 from bfa.ops.live_status import build_live_status_report
+from bfa.ops.live_resume_readiness import build_live_resume_readiness_report
 from bfa.ops.position_adjustment import (
     build_position_adjustment_execute_report,
     build_position_adjustment_plan_report,
@@ -470,6 +471,93 @@ def _build_parser() -> argparse.ArgumentParser:
         help="comma-separated manual exposure symbols to report separately from agent evidence",
     )
     strategy_evidence_baseline.add_argument(
+        "--no-operator-confirmation-required",
+        action="store_true",
+        help="omit the default operator confirmation blocker from this report",
+    )
+
+    live_resume_readiness = ops_subparsers.add_parser(
+        "live-resume-readiness",
+        help="single read-only report for live-resume readiness across strategy, exchange, and profile gates",
+    )
+    live_resume_readiness.add_argument("--env-file", help="optional env file to load before environment overrides")
+    live_resume_readiness.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    live_resume_readiness.add_argument("--matrix-report", help="JSON report from backtest matrix or matrix-suite")
+    live_resume_readiness.add_argument("--variant", default="quant_setup_selective", help="paper/backtest variant to evaluate")
+    live_resume_readiness.add_argument("--interval", default="5m", help="paper interval to evaluate")
+    live_resume_readiness.add_argument("--since", help="only include paper signals opened at or after this ISO time")
+    live_resume_readiness.add_argument("--min-outcomes", type=int, default=20, help="minimum settled paper outcomes")
+    live_resume_readiness.add_argument("--min-win-rate", type=float, default=0.5, help="minimum paper win rate")
+    live_resume_readiness.add_argument("--min-net-pnl-usdt", type=float, default=0.0, help="minimum total net PnL")
+    live_resume_readiness.add_argument("--min-profit-factor", type=float, default=1.1, help="minimum paper profit factor")
+    live_resume_readiness.add_argument(
+        "--max-worst-drawdown-usdt",
+        type=float,
+        default=1.5,
+        help="maximum paper equity drawdown; use a negative value to disable this cap",
+    )
+    live_resume_readiness.add_argument("--latest-limit", type=int, default=10, help="number of recent outcomes to show")
+    live_resume_readiness.add_argument("--min-group-outcomes", type=int, default=1, help="minimum outcomes per attribution group")
+    live_resume_readiness.add_argument("--worst-limit", type=int, default=8, help="number of worst rows per grouping")
+    live_resume_readiness.add_argument(
+        "--matrix-scope",
+        choices=("all-intervals", "selected-intervals"),
+        default="all-intervals",
+        help="check the whole matrix variant or only selected intervals for single-matrix reports",
+    )
+    live_resume_readiness.add_argument("--matrix-intervals", help="comma-separated intervals for selected matrix scope")
+    live_resume_readiness.add_argument("--matrix-min-trade-count", type=int, default=5, help="minimum trades per matrix cell")
+    live_resume_readiness.add_argument(
+        "--matrix-min-positive-window-rate",
+        type=float,
+        default=0.5,
+        help="minimum positive window rate per matrix cell",
+    )
+    live_resume_readiness.add_argument(
+        "--matrix-max-worst-drawdown-usdt",
+        type=float,
+        help="optional matrix drawdown cap; defaults to matrix cell max_daily_loss_usdt",
+    )
+    live_resume_readiness.add_argument(
+        "--target-profile",
+        default="30u_10x_multi_dynamic",
+        help="risk profile to preview; use empty string to disable",
+    )
+    live_resume_readiness.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="preview target profile with two concurrent positions enabled",
+    )
+    live_resume_readiness.add_argument("--hypothetical-symbol", help="optional symbol for a hypothetical new entry")
+    live_resume_readiness.add_argument(
+        "--hypothetical-side",
+        choices=("long", "short"),
+        help="optional side for a hypothetical new entry",
+    )
+    live_resume_readiness.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
+    live_resume_readiness.add_argument(
+        "--exchange-state",
+        choices=("auto", "unknown", "clear", "manual_exposure", "agent_exposure", "open_orders"),
+        default="auto",
+        help="exchange exposure summary; auto uses read-only signed evidence when available",
+    )
+    live_resume_readiness.add_argument(
+        "--manual-exposure-symbols",
+        help="comma-separated manual exposure symbols to report separately from agent evidence",
+    )
+    live_resume_readiness.add_argument(
+        "--no-systemd-check",
+        action="store_true",
+        help="skip read-only systemctl state checks and use unknown/overridden service states",
+    )
+    live_resume_readiness.add_argument("--paper-timer-state", help="override paper.timer state, e.g. active")
+    live_resume_readiness.add_argument("--live-timer-state", help="override live.timer state, e.g. inactive")
+    live_resume_readiness.add_argument("--live-service-state", help="override live.service state, e.g. inactive")
+    live_resume_readiness.add_argument(
         "--no-operator-confirmation-required",
         action="store_true",
         help="omit the default operator confirmation blocker from this report",
@@ -1243,6 +1331,56 @@ def _run_ops(
             manual_exposure_symbols=_symbols_arg(args.manual_exposure_symbols)
             if args.manual_exposure_symbols
             else [],
+            require_operator_confirmation=not args.no_operator_confirmation_required,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.live_resume_allowed else 1
+    if args.ops_command == "live-resume-readiness":
+        report = build_live_resume_readiness_report(
+            config,
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            matrix_report_path=args.matrix_report,
+            variant=args.variant,
+            interval=args.interval,
+            since=args.since,
+            min_outcomes=args.min_outcomes,
+            min_win_rate=args.min_win_rate,
+            min_net_pnl_usdt=args.min_net_pnl_usdt,
+            min_profit_factor=args.min_profit_factor,
+            max_worst_drawdown_usdt=None
+            if args.max_worst_drawdown_usdt is not None and args.max_worst_drawdown_usdt < 0
+            else args.max_worst_drawdown_usdt,
+            latest_limit=args.latest_limit,
+            min_group_outcomes=args.min_group_outcomes,
+            worst_limit=args.worst_limit,
+            matrix_scope=args.matrix_scope,
+            matrix_intervals=_symbols_arg(args.matrix_intervals, uppercase=False)
+            if args.matrix_intervals
+            else None,
+            matrix_min_trade_count=args.matrix_min_trade_count,
+            matrix_min_positive_window_rate=args.matrix_min_positive_window_rate,
+            matrix_max_worst_drawdown_usdt=None
+            if args.matrix_max_worst_drawdown_usdt is not None
+            and args.matrix_max_worst_drawdown_usdt < 0
+            else args.matrix_max_worst_drawdown_usdt,
+            target_profile=args.target_profile or None,
+            allow_two_positions=args.allow_two_positions,
+            hypothetical_symbol=args.hypothetical_symbol,
+            hypothetical_side=args.hypothetical_side,
+            check_binance=not args.skip_binance,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if not args.skip_binance
+            else None,
+            exchange_state=args.exchange_state,
+            manual_exposure_symbols=_symbols_arg(args.manual_exposure_symbols)
+            if args.manual_exposure_symbols
+            else [],
+            check_systemd=not args.no_systemd_check,
+            server_state_overrides={
+                "paper.timer": args.paper_timer_state,
+                "live.timer": args.live_timer_state,
+                "live.service": args.live_service_state,
+            },
             require_operator_confirmation=not args.no_operator_confirmation_required,
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)

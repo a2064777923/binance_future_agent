@@ -603,8 +603,9 @@ any small live automation can be resumed.
 | Recalibration stays paper-first | Loss-driven filters should be explicit backtest/paper variants until repeated matrix and forward-paper evidence pass. | Phase 49 complete |
 | Matrix before forward-paper promotion | Backtest evidence must cover multiple hot universes and intervals before any post-change forward-paper gate can be trusted. | Phase 50 complete |
 | Paper promotion needs profit factor | Post-change forward-paper evidence must pass PnL, win-rate, profit-factor, and drawdown gates before readiness reporting can consider it. | Phase 51 complete |
+| Live resume requires a single read-only readiness report | Restoring live automation should depend on matrix, paper, server, exchange/manual exposure, risk-profile, and confirmation gates, not scattered command interpretation. | Phase 52 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-21 after completing Phase 51 post-change forward-paper gate.*
+*Last updated: 2026-06-21 after completing Phase 52 live-resume readiness report.*

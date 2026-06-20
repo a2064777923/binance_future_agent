@@ -58,18 +58,18 @@ projects or losing control of downside.
 
 ### Live Resume Readiness
 
-- [ ] **LRR-01**: Operator can run one read-only live-resume readiness command
+- [x] **LRR-01**: Operator can run one read-only live-resume readiness command
   that combines strategy promotion, forward-paper performance, server timer
   state, exchange state, risk-profile state, and confirmation requirements.
 
-- [ ] **LRR-02**: Readiness report distinguishes agent-managed exposure from
+- [x] **LRR-02**: Readiness report distinguishes agent-managed exposure from
   manual exchange exposure so manual positions do not get silently treated as
   agent-approved strategy evidence.
 
-- [ ] **LRR-03**: Live auto-hot remains disabled by default and can be previewed
+- [x] **LRR-03**: Live auto-hot remains disabled by default and can be previewed
   only through dry-run/read-only checks before any live timer restore.
 
-- [ ] **LRR-04**: `30u_10x_multi_dynamic` or any higher-risk profile remains
+- [x] **LRR-04**: `30u_10x_multi_dynamic` or any higher-risk profile remains
   preview/confirmation-gated and cannot be applied by readiness reporting.
 
 ## Future Requirements
@@ -115,10 +115,10 @@ projects or losing control of downside.
 | BFP-02 | Phase 50 | Complete |
 | BFP-03 | Phase 51 | Complete |
 | BFP-04 | Phase 51 | Complete |
-| LRR-01 | Phase 52 | Pending |
-| LRR-02 | Phase 52 | Pending |
-| LRR-03 | Phase 52 | Pending |
-| LRR-04 | Phase 52 | Pending |
+| LRR-01 | Phase 52 | Complete |
+| LRR-02 | Phase 52 | Complete |
+| LRR-03 | Phase 52 | Complete |
+| LRR-04 | Phase 52 | Complete |
 
 **Coverage:**
 
@@ -128,4 +128,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after v1.23 definition*
+*Last updated: 2026-06-21 after Phase 52 live-resume readiness report.*
