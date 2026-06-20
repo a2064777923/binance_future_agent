@@ -131,7 +131,7 @@
 - [x] Phase 61: Close-Review Exit Plan Repair (1/1 plan) (completed 2026-06-21)
 - [x] Phase 62: Guarded Position Exit Execution (1/1 plan) (completed 2026-06-21)
 - [x] Phase 63: Live Cycle Position Stewardship (1/1 plan) (completed 2026-06-21)
-- [ ] Phase 64: Live Outcome Ledger And Guard Feedback (0/1 plan)
+- [x] Phase 64: Live Outcome Ledger And Guard Feedback (1/1 plan) (completed 2026-06-21)
 - [ ] Phase 65: Server Canary And Pilot Learning Packet (0/1 plan)
 
 </details>
@@ -214,8 +214,8 @@ attribution into recommendation-only guard feedback.
 
 **Requirements:** LEARN-01, LEARN-02, LEARN-03
 
-**Plans:** 0/1 plans complete
-**Status:** Not started
+**Plans:** 1/1 plans complete
+**Status:** Complete
 
 **Success criteria:**
 
@@ -258,7 +258,7 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
 | v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
-| v1.26 Live Position Management And Pilot Learning | 61-65 | 3/5 | Active | - |
+| v1.26 Live Position Management And Pilot Learning | 61-65 | 4/5 | Active | - |
 
 ## Requirement Coverage
 
@@ -272,6 +272,6 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 
 ## Next Step
 
-Plan Phase 64 with `$gsd-plan-phase 64`. The immediate focus is to reconcile
-closed live outcomes quickly and turn lifecycle/exit evidence into
-recommendation-only guard feedback.
+Plan Phase 65 with `$gsd-plan-phase 65`. The immediate focus is to produce a
+server canary and pilot learning packet from live-cycle, exit, outcome, and
+guard evidence.

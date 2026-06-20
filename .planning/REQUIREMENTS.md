@@ -37,13 +37,13 @@ projects or losing control of downside.
 
 ### Outcome Learning
 
-- [ ] **LEARN-01**: Closed live outcomes are reconciled automatically or by a
+- [x] **LEARN-01**: Closed live outcomes are reconciled automatically or by a
   single scheduled command soon after exits, with net PnL, commission, fills,
   and matching order-intent IDs persisted idempotently.
-- [ ] **LEARN-02**: Operator can review live performance by symbol, side,
+- [x] **LEARN-02**: Operator can review live performance by symbol, side,
   setup profile, setup reasons, factor evidence, exit reason, and holding
   behavior across the small-capital pilot.
-- [ ] **LEARN-03**: Live loss and weak-performance groups can produce
+- [x] **LEARN-03**: Live loss and weak-performance groups can produce
   recommendation-only guard updates before any future live risk increase or
   strategy promotion.
 
@@ -57,7 +57,7 @@ projects or losing control of downside.
   timer running unless a deployment pause is necessary, and restores timers
   after verification.
 - [ ] **RISK-04**: Automatic or operator-confirmed position-management actions
-  remain bounded by current 30U/10x/8-position caps, per-trade and daily-loss
+  remain bounded by the active 30U/10x bot-managed pilot caps, per-trade and daily-loss
   limits, duplicate-exposure rules, and manual-symbol exclusion.
 
 ## v1.27+ Requirements
@@ -94,9 +94,9 @@ projects or losing control of downside.
 | EXIT-01 | Phase 62 | Satisfied |
 | EXIT-02 | Phase 63 | Satisfied |
 | EXIT-03 | Phase 62 | Satisfied |
-| LEARN-01 | Phase 64 | Pending |
-| LEARN-02 | Phase 64 | Pending |
-| LEARN-03 | Phase 64 | Pending |
+| LEARN-01 | Phase 64 | Satisfied |
+| LEARN-02 | Phase 64 | Satisfied |
+| LEARN-03 | Phase 64 | Satisfied |
 | OPS-01 | Phase 65 | Pending |
 | OPS-02 | Phase 65 | Pending |
 | RISK-04 | Phase 62 | Satisfied |
@@ -108,4 +108,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 63 verification*
+*Last updated: 2026-06-21 after Phase 64 verification*

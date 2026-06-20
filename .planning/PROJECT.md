@@ -174,6 +174,12 @@ control of downside.
   scanning. Server evidence shows lifecycle event `432682` written before
   candidate event `439056`; `NEARUSDT` remained `close_ready`, `BTWUSDT`
   remained `manual_hold`, and auto-management stayed explicitly disabled.
+- Phase 64 adds `ops live-outcome-ledger`, optional idempotent
+  `--reconcile --persist-closed`, live attribution groups, and
+  recommendation-only guard feedback. Server reconcile smoke produced
+  `outcome_count=5`, `open_or_unreconciled_submitted_intents=0`,
+  `total_net_pnl_usdt=0.21357602`, and mutation proof with no orders, cancels,
+  env writes, systemd changes, risk raises, or applied guard changes.
 
 ### Active
 
@@ -210,6 +216,8 @@ control of downside.
 - [x] Gate future timer resume with read-only exchange and AI-backoff checks.
 - [x] Persist closed live trade fill/outcome evidence with gross PnL,
   commission, net PnL, and closed/open status.
+- [x] Aggregate live outcomes by symbol, side, setup/factor evidence, exit
+  reason, and holding behavior with recommendation-only guard feedback.
 - [x] Gate leverage/risk-cap profile changes on clear exchange state and
   reconciled submitted-trade outcomes.
 - [x] Sweep submitted live trade intents and persist only final closed outcomes
@@ -388,8 +396,10 @@ secret-safe health check passed after deployment.
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
 out of band. The active trial profile is 30 USDT account capital, 10x max
-leverage, 80 USDT max position notional, 0.4 USDT max per-trade risk, 1 USDT max
-daily loss, and 8 open positions under dynamic sizing and portfolio caps.
+leverage, 100 USDT max bot-managed position notional, 0.4 USDT max per-trade
+risk, 1 USDT max daily loss, and 10 bot-managed open positions under dynamic
+sizing and portfolio caps. Manual symbols such as `BTWUSDT` remain visible in
+diagnostics but do not consume bot entry capacity.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`

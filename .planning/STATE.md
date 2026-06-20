@@ -2,28 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.26
 milestone_name: Live Position Management And Pilot Learning
-current_phase: 64
-current_phase_name: Live Outcome Ledger And Guard Feedback
+current_phase: Phase 65 — Server Canary And Pilot Learning Packet
+current_phase_name: Server Canary And Pilot Learning Packet
 status: ready_to_plan
-stopped_at: Phase 63 complete; live/paper timers active; lifecycle artifact verified before candidate event;
-last_updated: "2026-06-21T06:25:00+08:00"
+stopped_at: Phase 64 complete; live outcome ledger deployed and reconciled server outcomes; live/paper timers active;
+last_updated: "2026-06-21T06:55:17+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 63 complete; lifecycle stewardship deployed and verified
+last_activity_desc: Phase 64 complete; live outcome ledger deployed and verified
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 5
-  completed_plans: 3
-  percent: 60
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 64 — Live Outcome Ledger And Guard Feedback
-**Status:** Phase 63 complete; Phase 64 ready to plan
+**Current phase:** Phase 65 — Server Canary And Pilot Learning Packet
+**Status:** Phase 64 complete; Phase 65 ready to plan
 **Last planned:** 2026-06-21
-**Plan count:** 1
+**Plan count:** 0
 
 ## Project Reference
 
@@ -45,9 +45,11 @@ lifecycle/exit evidence into recommendation-only guard feedback.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 30 USDT account capital, 10x max leverage, 80 USDT max
-  position notional, 0.4 USDT max per-trade risk, 1 USDT max daily loss, and
-  8 open positions under dynamic sizing and portfolio caps.
+- Active trial profile: 30 USDT account capital, 10x max leverage, 100 USDT max
+  bot-managed position notional, 0.4 USDT max per-trade risk, 1 USDT max daily
+  loss, and 10 bot-managed open positions under dynamic sizing and portfolio
+  caps. Manual symbols such as `BTWUSDT` remain visible in diagnostics but do
+  not consume bot entry capacity.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -750,26 +752,35 @@ lifecycle/exit evidence into recommendation-only guard feedback.
   `close_ready` and `BTWUSDT` as `manual_hold`; auto-management remains
   explicitly disabled in server env.
 
+- Phase 64 is complete. `ops live-outcome-ledger` now reports live closed
+  outcomes, groups performance by symbol/side/setup/factor/exit/holding bucket,
+  and emits recommendation-only guard feedback. Server reconciliation smoke
+  checked 5 submitted intents, skipped 4 already-reconciled outcomes, persisted
+  3 fills plus 1 missing closed outcome, and left
+  `open_or_unreconciled_submitted_intents=0`; final ledger summary showed
+  `outcome_count=5`, `total_net_pnl_usdt=0.21357602`, and no order/env/systemd
+  mutation flags.
+
 ## Next Command
 
-Plan Phase 64 with `$gsd-plan-phase 64`: reconcile closed live outcomes quickly
-and turn live result attribution into recommendation-only guard feedback.
+Plan Phase 65 with `$gsd-plan-phase 65`: produce a server canary and pilot
+learning packet from live-cycle, exit, outcome, and guard evidence.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 63 complete; live/paper timers active; lifecycle
-artifact and event ordering verified on server; `NEARUSDT` remains plan-ready
-but no exit was executed; `BTWUSDT` remains manual.
-**Resume file:** .planning/phases/63-live-cycle-position-stewardship/63-VERIFICATION.md
+**Stopped at:** Phase 64 complete; live/paper timers active; live outcome
+ledger deployed and server outcomes reconciled without order/env/systemd
+mutation.
+**Resume file:** .planning/phases/64-live-outcome-ledger-and-guard-feedback/64-VERIFICATION.md
 
 ## Current Position
 
-Phase: 64 — Live Outcome Ledger And Guard Feedback
+Phase: 65 — Server Canary And Pilot Learning Packet
 Plan: —
 Status: Ready to plan
-Last activity: 2026-06-21 — Phase 63 complete
+Last activity: 2026-06-21 — Phase 64 complete
 
 ## Operator Next Steps
 
-- Plan Phase 64 with `$gsd-plan-phase 64`.
+- Plan Phase 65 with `$gsd-plan-phase 65`.
