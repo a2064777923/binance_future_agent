@@ -71,6 +71,26 @@ projects or losing control of downside.
   filters before exposing executable reduce orders, including step size,
   minimum quantity, and minimum notional checks.
 
+### Quant Setup And Traceability
+
+- [x] **QSE-01**: Entry, stop, target, hold-time, and notional generation come
+  from a deterministic multi-factor setup layer before AI is consulted.
+
+- [x] **QSE-02**: Setup scoring includes separate factor evidence for
+  momentum, liquidity, open interest, taker flow, funding, volatility,
+  narrative quality, and pilot tradability.
+
+- [x] **QSE-03**: AI trade responses act as overlay/veto only and are rejected
+  if they modify deterministic setup side, prices, notional, or hold time.
+
+- [x] **QSE-04**: New agent cycles persist trade setup records before AI
+  evaluation so future orders can be audited without reconstructing formulas
+  from logs.
+
+- [x] **QSE-05**: Operators can run read-only `ops trade-trace` to reconstruct
+  candidate, setup or legacy AI, risk/order intent, and exchange evidence for a
+  submitted trade.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -98,12 +118,17 @@ projects or losing control of downside.
 | APR-03 | Phase 31 | Complete locally |
 | APR-04 | Phase 32 | Complete locally |
 | APR-05 | Phase 33 | Complete and deployed |
+| QSE-01 | Phase 34 | Complete and deployed |
+| QSE-02 | Phase 34 | Complete and deployed |
+| QSE-03 | Phase 34 | Complete and deployed |
+| QSE-04 | Phase 34 | Complete and deployed |
+| QSE-05 | Phase 34 | Complete and deployed |
 
 **Coverage:**
-- v1.22 requirements: 15 total
-- Mapped to phases: 15
+- v1.22 requirements: 20 total
+- Mapped to phases: 20
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 33 filter-aware adjustment implementation*
+*Last updated: 2026-06-20 after Phase 34 deterministic quant setup and trade trace deployment*

@@ -32,6 +32,21 @@ def test_kline(open_time, *, open_price="100", high="101", low="99", close="100.
     ]
 
 
+def decision_from_quant_setup(context, *, fallback_confidence=0.7):
+    setup = context.get("quant_setup") or {}
+    return {
+        "decision": setup.get("decision", "trade"),
+        "side": setup.get("side", "long"),
+        "confidence": setup.get("confidence", fallback_confidence),
+        "entry_price": setup.get("entry_price", 100.0),
+        "stop_price": setup.get("stop_price", 96.0),
+        "target_price": setup.get("target_price", 108.0),
+        "notional_usdt": setup.get("notional_usdt", 20.0),
+        "hold_time_minutes": setup.get("hold_time_minutes", 30),
+        "reasons": setup.get("reasons", ["narrative and market confirmation"]),
+    }
+
+
 class CliTests(unittest.TestCase):
     def invoke(
         self,
@@ -316,38 +331,12 @@ class CliTests(unittest.TestCase):
     def test_ai_decide_uses_injected_fake_client_and_persists(self):
         class FakeAiClient:
             def create_decision(self, context, *, instructions, schema):
+                payload = decision_from_quant_setup(context)
                 return OpenAIResponse(
                     response_id="resp_1",
                     request_payload={"model": "fake", "context": context, "schema": schema},
-                    raw_response={
-                        "id": "resp_1",
-                        "output_text": json.dumps(
-                            {
-                                "decision": "trade",
-                                "side": "long",
-                                "confidence": 0.7,
-                                "entry_price": 100.0,
-                                "stop_price": 96.0,
-                                "target_price": 108.0,
-                                "notional_usdt": 20.0,
-                                "hold_time_minutes": 30,
-                                "reasons": ["narrative and market confirmation"],
-                            }
-                        ),
-                    },
-                    output_text=json.dumps(
-                        {
-                            "decision": "trade",
-                            "side": "long",
-                            "confidence": 0.7,
-                            "entry_price": 100.0,
-                            "stop_price": 96.0,
-                            "target_price": 108.0,
-                            "notional_usdt": 20.0,
-                            "hold_time_minutes": 30,
-                            "reasons": ["narrative and market confirmation"],
-                        }
-                    ),
+                    raw_response={"id": "resp_1", "output_text": json.dumps(payload)},
+                    output_text=json.dumps(payload),
                     response_headers={},
                 )
 
@@ -365,7 +354,21 @@ class CliTests(unittest.TestCase):
                         "reason_codes": ["narrative_heat", "price_momentum"],
                         "source_event_ids": [1],
                         "market_event_ids": [2],
-                        "features": {"quote_volume": 5_000_000},
+                        "features": {
+                            "mention_count": 2,
+                            "source_count": 2,
+                            "engagement_score": 100,
+                            "price_change_percent": 5.0,
+                            "quote_volume": 5_000_000,
+                            "open_interest_value": 5_000_000,
+                            "taker_buy_sell_ratio": 1.2,
+                            "funding_rate": -0.0001,
+                            "kline_range_mean_percent": 1.2,
+                            "kline_momentum_percent": 1.5,
+                            "kline_close_position_percent": 75,
+                            "reference_price": 100.0,
+                            "min_executable_notional": 5.0,
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -580,17 +583,7 @@ class CliTests(unittest.TestCase):
 
         class FakeAiClient:
             def create_decision(self, context, *, instructions, schema):
-                payload = {
-                    "decision": "trade",
-                    "side": "long",
-                    "confidence": 0.74,
-                    "entry_price": 100.0,
-                    "stop_price": 96.0,
-                    "target_price": 108.0,
-                    "notional_usdt": 20.0,
-                    "hold_time_minutes": 30,
-                    "reasons": ["narrative heat plus market confirmation"],
-                }
+                payload = decision_from_quant_setup(context, fallback_confidence=0.74)
                 return OpenAIResponse(
                     response_id="resp_agent_1",
                     request_payload={"context": context, "schema": schema},
@@ -755,6 +748,118 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         self.assertEqual(payload["exchange_evidence"]["account"]["available_balance"], "30")
+
+    def test_ops_trade_trace_reconstructs_decision_flow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            decided_at = "2026-06-20T10:00:00Z"
+            store.insert_artifact(
+                "candidates",
+                occurred_at=decided_at,
+                source="strategy.hot_coin",
+                symbol="BTCUSDT",
+                ref_id=f"candidate:BTCUSDT:{decided_at}",
+                payload={
+                    "symbol": "BTCUSDT",
+                    "score": 80,
+                    "reason_codes": ["price_momentum"],
+                    "features": {"reference_price": 100, "taker_buy_sell_ratio": 1.2},
+                },
+                event_type="candidate",
+            )
+            store.insert_artifact(
+                "trade_setups",
+                occurred_at=decided_at,
+                source="strategy.quant_setup",
+                symbol="BTCUSDT",
+                ref_id=f"trade_setup:BTCUSDT:{decided_at}",
+                payload={
+                    "setup": {
+                        "symbol": "BTCUSDT",
+                        "decision": "trade",
+                        "side": "long",
+                        "entry_price": 100,
+                        "stop_price": 98.8,
+                        "target_price": 102.2,
+                        "notional_usdt": 12,
+                        "hold_time_minutes": 15,
+                        "long_score": 55,
+                        "short_score": 18,
+                        "edge_score": 37,
+                        "factor_scores": [{"name": "momentum", "weighted_score": 20}],
+                        "reasons": ["quant_long_setup"],
+                    }
+                },
+                event_type="trade_setup",
+            )
+            store.insert_artifact(
+                "ai_decisions",
+                occurred_at=decided_at,
+                source="deepseek.chat_completions",
+                symbol="BTCUSDT",
+                ref_id=f"ai_decision:BTCUSDT:{decided_at}",
+                payload={
+                    "validation": {
+                        "accepted": True,
+                        "decision": {
+                            "decision": "trade",
+                            "side": "long",
+                            "confidence": 0.7,
+                            "reasons": ["echo quant setup"],
+                        },
+                        "validation_errors": [],
+                    }
+                },
+                event_type="ai_decision",
+            )
+            store.insert_artifact(
+                "order_intents",
+                occurred_at=decided_at,
+                source="execution.dry_run",
+                symbol="BTCUSDT",
+                ref_id=f"order_intent:BTCUSDT:{decided_at}",
+                payload={
+                    "status": "dry_run",
+                    "intent": {
+                        "symbol": "BTCUSDT",
+                        "side": "BUY",
+                        "entry_price": 100,
+                        "stop_price": 98.8,
+                        "target_price": 102.2,
+                        "notional_usdt": 12,
+                        "decided_at": decided_at,
+                    },
+                    "risk": {"accepted": True, "reason_codes": ["risk_accepted"]},
+                },
+                event_type="order_intent",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "trade-trace",
+                "--db",
+                str(db_path),
+                "--symbol",
+                "BTCUSDT",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertTrue(payload["found"])
+        self.assertEqual(payload["status"], "trace_ready")
+        self.assertEqual([stage["stage"] for stage in payload["decision_flow"]], [
+            "candidate",
+            "quant_setup",
+            "ai_overlay",
+            "risk_and_intent",
+        ])
+        self.assertEqual(payload["decision_flow"][1]["factor_scores"][0]["name"], "momentum")
+        self.assertEqual(payload["decision_flow"][3]["risk_reasons"], ["risk_accepted"])
 
     def test_ops_resume_check_requires_exchange_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -46,7 +46,9 @@ from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
 from bfa.ops.time_exit_execute import build_time_exit_execute_report
+from bfa.ops.trade_trace import build_trade_trace_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.setup import build_trade_setup
 from bfa.strategy.store import persist_candidates
 
 
@@ -313,6 +315,15 @@ def _build_parser() -> argparse.ArgumentParser:
     trade_outcome.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     trade_outcome.add_argument("--symbol", help="optional symbol filter, e.g. ZECUSDT")
     trade_outcome.add_argument("--persist", action="store_true", help="persist fills and outcome into the event store")
+
+    trade_trace = ops_subparsers.add_parser(
+        "trade-trace",
+        help="read-only reconstruction of candidate, quant setup, AI, risk, and exchange evidence for a trade",
+    )
+    trade_trace.add_argument("--env-file", help="optional env file to load before environment overrides")
+    trade_trace.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    trade_trace.add_argument("--event-id", type=int, help="order_intent event id or row id")
+    trade_trace.add_argument("--symbol", help="latest order intent for symbol, e.g. SOLUSDT")
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -785,10 +796,13 @@ def _run_ai(
             sizing_input_from_config(config, candidate=candidate),
             enabled=dynamic_sizing_enabled(config),
         )
+        risk_limits = RiskLimits.from_config(config, sizing_result=candidate_sizing)
+        setup = build_trade_setup(candidate, risk_limits=risk_limits)
         context = context_from_candidate(
             candidate,
-            risk_limits=RiskLimits.from_config(config, sizing_result=candidate_sizing),
+            risk_limits=risk_limits,
             decided_at=args.decided_at,
+            quant_setup=setup,
         )
         client = _build_ai_client(config, ai_client_factory)
         journal = AiDecisionJournal(args.journal) if args.journal else None
@@ -926,6 +940,14 @@ def _run_ops(
         payload = {"found": outcome is not None, "outcome": outcome.to_dict() if outcome else None}
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return 0 if outcome is not None else 1
+    if args.ops_command == "trade-trace":
+        report = build_trade_trace_report(
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            event_id=args.event_id,
+            symbol=args.symbol,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.found else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:

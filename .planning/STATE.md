@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 33
+current_phase: 34
 status: active
-stopped_at: Phase 33 deployed; timer paused while SOLUSDT close decision is pending
-last_updated: "2026-06-20T19:55:29+08:00"
+stopped_at: Phase 34 deployed; timer remains paused while SOLUSDT close/profile decision is pending
+last_updated: "2026-06-20T20:35:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 30
-  completed_phases: 30
-  total_plans: 51
-  completed_plans: 51
+  total_phases: 31
+  completed_phases: 31
+  total_plans: 52
+  completed_plans: 52
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 33 — Filter-Aware Position Adjustments
-**Status:** Phase 33 deployed and verified; live timer paused while operator reviews SOLUSDT
+**Current phase:** Phase 34 — Deterministic Quant Setup And Trade Trace
+**Status:** Phase 34 deployed and verified; live timer paused while operator reviews SOLUSDT
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,9 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Ensure partial take-profit and full-close adjustment plans
-respect Binance symbol filters before any confirmation token can execute.
+**Current focus:** Keep the live system paused while reviewing the active
+SOLUSDT position and strategy quality; new entry setup logic is now
+deterministic and traceable.
 
 ## Decisions
 
@@ -349,24 +350,50 @@ respect Binance symbol filters before any confirmation token can execute.
   confirmation token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
   No profile apply was run and the live env remains 30U/5x/12U/one-position.
 
+- Phase 34 local implementation adds deterministic multi-factor trade setup
+  generation before AI evaluation. Setup scoring separates momentum,
+  liquidity, open interest, taker flow, funding, volatility, narrative quality,
+  and pilot tradability; it outputs side, entry, stop, target, notional, hold
+  time, confidence, reasons, and warnings. AI is now overlay/veto only: an
+  accepted trade response must echo the deterministic setup side, prices,
+  notional, and hold time exactly or validation rejects it.
+
+- Phase 34 also adds read-only `ops trade-trace`, which reconstructs candidate,
+  setup or legacy AI, risk/order intent, and exchange response evidence from
+  the event store. It is backward-compatible with the existing live database
+  that predates the `trade_setups` table.
+
+- Phase 34 server deployment is complete under `/opt/binance-futures-agent/app`.
+  Source and tests were synchronized without changing live env settings,
+  without executing any live order, and without restoring the live timer.
+  Server full suite passed with `299` tests; focused server trade-trace CLI
+  test passed; live service and timer remained `inactive`.
+
+- Server read-only `ops trade-trace --symbol SOLUSDT` returned `trace_ready`
+  for the existing SOLUSDT live order. Because that order was submitted before
+  Phase 34, it has no persisted `trade_setup`; the trace reconstructs the old
+  path as candidate ranking, DeepSeek AI-generated point selection, risk/order
+  intent, and exchange response. This confirms the operator concern that the
+  old SOLUSDT order path was thinner than a mature deterministic quant setup.
+
 ## Next Command
 
-Await operator decision on the active `SOLUSDT` adjustment/profile change.
-Do not restore the live timer, execute adjustment orders, or apply
-`30u_10x_multi_dynamic` without explicit confirmation.
+Await operator decision on the active `SOLUSDT` adjustment/profile change and
+next validation direction. Do not restore the live timer, execute adjustment
+orders, or apply `30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 33 deployed; timer paused while SOLUSDT decision is pending
-**Resume file:** .planning/phases/33-filter-aware-position-adjustments/33-01-SUMMARY.md
+**Stopped at:** Phase 34 deployed; timer paused while SOLUSDT decision is pending
+**Resume file:** .planning/phases/34-deterministic-quant-setup-and-trade-trace/34-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 33 — Filter-Aware Position Adjustments
-Plan: 33-01 local implementation
+Phase: 34 — Deterministic Quant Setup And Trade Trace
+Plan: 34-01 local implementation
 Status: Deployed and verified; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — filter-aware adjustment planning deployed
+Last activity: 2026-06-20 — deterministic quant setup and trade trace deployed
 
 ## Operator Next Steps
 
@@ -374,6 +401,8 @@ Last activity: 2026-06-20 — filter-aware adjustment planning deployed
   the live timer.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
+- Review the old SOLUSDT decision chain through read-only
+  `ops trade-trace --symbol SOLUSDT`.
 - Apply `30u_10x_multi_dynamic` only if the operator explicitly confirms the
   fresh token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
 - Do not run `ops position-adjustment-execute --confirm-token ...` unless the

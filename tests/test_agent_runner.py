@@ -219,16 +219,17 @@ class FakeAiClient:
     def create_decision(self, context, *, instructions, schema):
         self.calls += 1
         self.contexts.append(context)
+        setup = context.get("quant_setup") or {}
         payload = {
-            "decision": "trade",
-            "side": "long",
-            "confidence": 0.74,
-            "entry_price": 100.0,
-            "stop_price": 96.0,
-            "target_price": 108.0,
-            "notional_usdt": 20.0,
-            "hold_time_minutes": 30,
-            "reasons": ["narrative heat plus market confirmation"],
+            "decision": setup.get("decision", "trade"),
+            "side": setup.get("side", "long"),
+            "confidence": setup.get("confidence", 0.74),
+            "entry_price": setup.get("entry_price", 100.0),
+            "stop_price": setup.get("stop_price", 96.0),
+            "target_price": setup.get("target_price", 108.0),
+            "notional_usdt": setup.get("notional_usdt", 20.0),
+            "hold_time_minutes": setup.get("hold_time_minutes", 30),
+            "reasons": setup.get("reasons", ["narrative heat plus market confirmation"]),
         }
         return OpenAIResponse(
             response_id="resp_agent_1",

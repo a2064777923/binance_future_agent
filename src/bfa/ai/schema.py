@@ -71,15 +71,19 @@ class AiDecisionContext:
     candidate: dict[str, Any]
     risk_limits: RiskLimits
     decided_at: str
-    prompt_version: str = "bfa-ai-decision-v1"
+    quant_setup: dict[str, Any] | None = None
+    prompt_version: str = "bfa-ai-decision-v2"
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "prompt_version": self.prompt_version,
             "decided_at": self.decided_at,
             "candidate": dict(self.candidate),
             "risk_limits": self.risk_limits.to_dict(),
         }
+        if self.quant_setup is not None:
+            payload["quant_setup"] = dict(self.quant_setup)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -129,14 +133,17 @@ def context_from_candidate(
     *,
     risk_limits: RiskLimits,
     decided_at: str,
+    quant_setup: Mapping[str, Any] | Any | None = None,
 ) -> AiDecisionContext:
     """Build a compact, reproducible context packet from a candidate payload."""
 
     candidate_payload = candidate.to_dict() if hasattr(candidate, "to_dict") else dict(candidate)
+    setup_payload = quant_setup.to_dict() if hasattr(quant_setup, "to_dict") else quant_setup
     return AiDecisionContext(
         candidate=_compact_candidate(candidate_payload),
         risk_limits=risk_limits,
         decided_at=decided_at,
+        quant_setup=_compact_quant_setup(setup_payload) if isinstance(setup_payload, Mapping) else None,
     )
 
 
@@ -199,12 +206,66 @@ def _compact_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
                 "open_interest",
                 "open_interest_value",
                 "taker_buy_sell_ratio",
+                "taker_buy_sell_ratio_change",
                 "funding_rate",
                 "kline_range_percent",
+                "kline_range_mean_percent",
+                "kline_range_max_percent",
+                "kline_momentum_percent",
+                "kline_micro_momentum_percent",
+                "kline_close_position_percent",
+                "kline_quote_volume_change_percent",
                 "reference_price",
                 "min_executable_notional",
                 "quality_notes",
             )
             if key in features
         }
+    return compact
+
+
+def _compact_quant_setup(setup: Mapping[str, Any]) -> dict[str, Any]:
+    compact = {
+        key: setup[key]
+        for key in (
+            "symbol",
+            "decision",
+            "side",
+            "confidence",
+            "entry_price",
+            "stop_price",
+            "target_price",
+            "notional_usdt",
+            "hold_time_minutes",
+            "long_score",
+            "short_score",
+            "edge_score",
+            "regime",
+            "risk_reward_ratio",
+            "stop_distance_percent",
+            "target_distance_percent",
+            "reasons",
+            "warnings",
+        )
+        if key in setup
+    }
+    factors = setup.get("factor_scores")
+    if isinstance(factors, list):
+        compact["factor_scores"] = [
+            {
+                key: factor[key]
+                for key in (
+                    "name",
+                    "value",
+                    "score",
+                    "weight",
+                    "weighted_score",
+                    "direction",
+                    "reasons",
+                )
+                if isinstance(factor, Mapping) and key in factor
+            }
+            for factor in factors
+            if isinstance(factor, Mapping)
+        ]
     return compact

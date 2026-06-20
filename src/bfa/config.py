@@ -21,6 +21,7 @@ DEFAULTS = {
     "BFA_MODE": RuntimeMode.DRY_RUN.value,
     "BFA_AI_PROVIDER": "openai",
     "BFA_OPENAI_ENABLED": "false",
+    "BFA_AI_FALLBACK_TO_QUANT_ENABLED": "false",
     "BFA_ACCOUNT_CAPITAL_USDT": "100",
     "BFA_MAX_LEVERAGE": "3",
     "BFA_MAX_POSITION_NOTIONAL_USDT": "20",

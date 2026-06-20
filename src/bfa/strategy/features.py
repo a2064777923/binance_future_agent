@@ -24,8 +24,15 @@ class SymbolFeatures:
     open_interest: float | None = None
     open_interest_value: float | None = None
     taker_buy_sell_ratio: float | None = None
+    taker_buy_sell_ratio_change: float | None = None
     funding_rate: float | None = None
     kline_range_percent: float | None = None
+    kline_range_mean_percent: float | None = None
+    kline_range_max_percent: float | None = None
+    kline_momentum_percent: float | None = None
+    kline_micro_momentum_percent: float | None = None
+    kline_close_position_percent: float | None = None
+    kline_quote_volume_change_percent: float | None = None
     reference_price: float | None = None
     min_qty: float | None = None
     step_size: float | None = None
@@ -49,8 +56,15 @@ class SymbolFeatures:
             "open_interest": self.open_interest,
             "open_interest_value": self.open_interest_value,
             "taker_buy_sell_ratio": self.taker_buy_sell_ratio,
+            "taker_buy_sell_ratio_change": self.taker_buy_sell_ratio_change,
             "funding_rate": self.funding_rate,
             "kline_range_percent": self.kline_range_percent,
+            "kline_range_mean_percent": self.kline_range_mean_percent,
+            "kline_range_max_percent": self.kline_range_max_percent,
+            "kline_momentum_percent": self.kline_momentum_percent,
+            "kline_micro_momentum_percent": self.kline_micro_momentum_percent,
+            "kline_close_position_percent": self.kline_close_position_percent,
+            "kline_quote_volume_change_percent": self.kline_quote_volume_change_percent,
             "reference_price": self.reference_price,
             "min_qty": self.min_qty,
             "step_size": self.step_size,
@@ -120,12 +134,11 @@ def _apply_market(
     elif "open_interest" in snapshot_type:
         item.open_interest = _number(snapshot_payload.get("open_interest"))
     elif "taker_buy_sell_volume" in snapshot_type:
-        item.taker_buy_sell_ratio = _number(snapshot_payload.get("buy_sell_ratio"))
+        _apply_taker_flow(item, snapshot_payload)
     elif "funding_rate" in snapshot_type:
         item.funding_rate = _number(snapshot_payload.get("funding_rate"))
     elif "kline" in snapshot_type:
-        item.kline_range_percent = _kline_range(snapshot_payload)
-        item.reference_price = _number(snapshot_payload.get("close") or snapshot_payload.get("open"))
+        _apply_kline(item, snapshot_payload)
     elif "exchange_symbol" in snapshot_type:
         _apply_execution_filters(item, snapshot_payload)
 
@@ -139,6 +152,66 @@ def _apply_execution_filters(item: SymbolFeatures, payload: Mapping[str, Any]) -
     item.min_qty = _number(lot_filter.get("minQty"))
     item.step_size = _number(lot_filter.get("stepSize"))
     item.min_notional = _number(notional_filter.get("notional") or notional_filter.get("minNotional"))
+
+
+def _apply_taker_flow(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
+    ratio = _number(payload.get("buy_sell_ratio"))
+    if ratio is None:
+        return
+    previous = item.taker_buy_sell_ratio
+    item.taker_buy_sell_ratio = ratio
+    if previous is not None:
+        item.taker_buy_sell_ratio_change = ratio - previous
+
+
+def _apply_kline(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
+    open_price = _number(payload.get("open"))
+    high = _number(payload.get("high"))
+    low = _number(payload.get("low"))
+    close = _number(payload.get("close") or payload.get("open"))
+    if close is None or close <= 0:
+        return
+
+    previous_close = item.reference_price
+    previous_quote_volume = getattr(item, "_last_kline_quote_volume", None)
+    previous_mean_range = getattr(item, "_kline_range_mean", None)
+    previous_count = getattr(item, "_kline_count", 0)
+    previous_max_range = getattr(item, "_kline_range_max", 0.0)
+    first_open = getattr(item, "_first_kline_open", None)
+
+    if first_open is None and open_price is not None and open_price > 0:
+        first_open = open_price
+        setattr(item, "_first_kline_open", first_open)
+
+    range_percent = _kline_range(payload)
+    if range_percent is not None:
+        count = int(previous_count) + 1
+        mean = (
+            range_percent
+            if previous_mean_range is None
+            else (float(previous_mean_range) * int(previous_count) + range_percent) / count
+        )
+        item.kline_range_percent = range_percent
+        item.kline_range_mean_percent = mean
+        item.kline_range_max_percent = max(float(previous_max_range), range_percent)
+        setattr(item, "_kline_count", count)
+        setattr(item, "_kline_range_mean", mean)
+        setattr(item, "_kline_range_max", item.kline_range_max_percent)
+
+    if first_open is not None and first_open > 0:
+        item.kline_momentum_percent = ((close - first_open) / first_open) * 100.0
+    if previous_close is not None and previous_close > 0:
+        item.kline_micro_momentum_percent = ((close - previous_close) / previous_close) * 100.0
+    if high is not None and low is not None and high > low:
+        item.kline_close_position_percent = ((close - low) / (high - low)) * 100.0
+
+    quote_volume = _number(payload.get("quote_volume"))
+    if quote_volume is not None:
+        if previous_quote_volume is not None and previous_quote_volume > 0:
+            item.kline_quote_volume_change_percent = ((quote_volume - previous_quote_volume) / previous_quote_volume) * 100.0
+        setattr(item, "_last_kline_quote_volume", quote_volume)
+
+    item.reference_price = close
 
 
 def _set_min_executable_notional(item: SymbolFeatures) -> None:
@@ -167,6 +240,7 @@ def _add_missing_feature_notes(item: SymbolFeatures) -> None:
         "missing_taker_flow": item.taker_buy_sell_ratio is None,
         "missing_funding": item.funding_rate is None,
         "missing_volatility_proxy": item.kline_range_percent is None,
+        "missing_kline_momentum": item.kline_momentum_percent is None,
         "missing_reference_price": item.reference_price is None,
         "missing_min_executable_notional": item.min_executable_notional is None,
     }

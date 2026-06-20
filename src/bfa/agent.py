@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from bfa.ai.client import OpenAIAPIError
+from bfa.ai.decision import AiDecisionRun
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
 from bfa.ai.providers import ai_source, build_ai_client
@@ -30,6 +31,7 @@ from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.position_adjustment import build_position_adjustment_plan_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.setup import build_trade_setup, persist_trade_setup
 from bfa.strategy.store import persist_candidates
 
 
@@ -64,6 +66,7 @@ class AgentRunResult:
             "ai_rejected",
             "ai_error",
             "openai_backoff",
+            "quant_pass",
             "entry_capacity_blocked",
             "rejected",
         }
@@ -111,17 +114,21 @@ def run_agent_once(
             started_at=started_at,
             validation_errors=list(validation.errors),
         )
-    if not _truthy(config.get("BFA_OPENAI_ENABLED")):
+    ai_enabled = _truthy(config.get("BFA_OPENAI_ENABLED"))
+    quant_fallback_enabled = _ai_fallback_to_quant_enabled(config)
+    if not ai_enabled and not quant_fallback_enabled:
         return AgentRunResult(
             status="openai_disabled",
             mode=config.get("BFA_MODE"),
             started_at=started_at,
-            validation_errors=["BFA_OPENAI_ENABLED must be true for automated trading"],
+            validation_errors=[
+                "BFA_OPENAI_ENABLED must be true for automated trading unless BFA_AI_FALLBACK_TO_QUANT_ENABLED=true"
+            ],
         )
 
     mode = RuntimeMode(config.get("BFA_MODE"))
     backoff = _openai_backoff(config)
-    if backoff.active:
+    if backoff.active and not quant_fallback_enabled:
         return AgentRunResult(
             status="openai_backoff",
             mode=mode.value,
@@ -161,7 +168,7 @@ def run_agent_once(
         received_at=started_at,
     )
     narrative_runner = narrative_runner or _build_narrative_runner(config, collected_at=started_at)
-    ai_client = ai_client or build_ai_client(config)
+    ai_client = ai_client or (build_ai_client(config) if ai_enabled else None)
 
     connection = connect(db_path or config.get("BFA_DB_PATH"))
     try:
@@ -236,6 +243,7 @@ def run_agent_once(
             candidates=candidates.candidates,
             exchange_info=exchange_info,
             ai_client=ai_client,
+            ai_enabled=ai_enabled and not backoff.active,
             journal_path=journal_path,
             store=store,
             signed_client=signed_client,
@@ -290,6 +298,7 @@ def _evaluate_candidate_queue(
     candidates,
     exchange_info,
     ai_client,
+    ai_enabled: bool,
     journal_path: str | None,
     store: EventStore,
     signed_client,
@@ -304,6 +313,7 @@ def _evaluate_candidate_queue(
 ) -> AgentRunResult:
     evaluated_symbols: list[str] = []
     ai_decisions_persisted = 0
+    trade_setups_persisted = 0
     skipped_risk_reasons: list[str] = []
     last_status = "no_candidate"
     last_validation_errors: list[str] = []
@@ -316,20 +326,77 @@ def _evaluate_candidate_queue(
             enabled=dynamic_sizing_enabled(config),
         )
         risk_limits = RiskLimits.from_config(config, sizing_result=candidate_sizing)
-        try:
-            ai_run = run_ai_decision(
-                client=ai_client,
-                context=context_from_candidate(
-                    candidate,
+        setup = build_trade_setup(candidate, risk_limits=risk_limits)
+        persist_trade_setup(
+            store,
+            setup=setup,
+            candidate=candidate,
+            decided_at=started_at,
+        )
+        trade_setups_persisted += 1
+        if setup.decision != "trade":
+            last_status = "quant_pass"
+            last_validation_errors = list(setup.reasons)
+            skipped_risk_reasons.append(f"{candidate.symbol}:quant_pass")
+            continue
+        if ai_enabled and ai_client is not None:
+            try:
+                ai_run = run_ai_decision(
+                    client=ai_client,
+                    context=context_from_candidate(
+                        candidate,
+                        risk_limits=risk_limits,
+                        decided_at=started_at,
+                        quant_setup=setup,
+                    ),
+                    journal=AiDecisionJournal(journal_path) if journal_path else None,
+                    store=store,
+                    source=ai_source(config),
+                )
+            except Exception as exc:
+                _record_openai_backoff(config, exc)
+                if not _ai_fallback_to_quant_enabled(config):
+                    return AgentRunResult(
+                        status="ai_error",
+                        mode=mode.value,
+                        started_at=started_at,
+                        market_snapshot_count=market_snapshot_count,
+                        narrative_record_count=narrative_record_count,
+                        candidate_count=candidate_count,
+                        rejected_count=rejected_count,
+                        selected_symbol=candidate.symbol,
+                        evaluated_symbols=evaluated_symbols,
+                        validation_errors=[_safe_ai_error(exc)],
+                        risk_reasons=_dedupe(skipped_risk_reasons),
+                        position_review=_position_review_summary(position_adjustment_plan),
+                        position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                        persisted={
+                            "candidates": persisted_candidate_count,
+                            "trade_setups": trade_setups_persisted,
+                            "ai_decisions": ai_decisions_persisted,
+                        },
+                    )
+                ai_run = _quant_fallback_run(
+                    candidate=candidate,
                     risk_limits=risk_limits,
+                    setup=setup,
                     decided_at=started_at,
-                ),
-                journal=AiDecisionJournal(journal_path) if journal_path else None,
-                store=store,
-                source=ai_source(config),
+                    reason=_safe_ai_error(exc),
+                )
+                skipped_risk_reasons.append(f"{candidate.symbol}:ai_fallback_to_quant")
+            else:
+                _clear_openai_backoff(config)
+                ai_decisions_persisted += ai_run.persisted
+        elif _ai_fallback_to_quant_enabled(config):
+            ai_run = _quant_fallback_run(
+                candidate=candidate,
+                risk_limits=risk_limits,
+                setup=setup,
+                decided_at=started_at,
+                reason="ai_disabled_or_backoff",
             )
-        except Exception as exc:
-            _record_openai_backoff(config, exc)
+            skipped_risk_reasons.append(f"{candidate.symbol}:quant_only")
+        else:
             return AgentRunResult(
                 status="ai_error",
                 mode=mode.value,
@@ -340,14 +407,16 @@ def _evaluate_candidate_queue(
                 rejected_count=rejected_count,
                 selected_symbol=candidate.symbol,
                 evaluated_symbols=evaluated_symbols,
-                validation_errors=[_safe_ai_error(exc)],
+                validation_errors=["ai_client_unavailable"],
                 risk_reasons=_dedupe(skipped_risk_reasons),
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
-                persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_decisions_persisted},
+                persisted={
+                    "candidates": persisted_candidate_count,
+                    "trade_setups": trade_setups_persisted,
+                    "ai_decisions": ai_decisions_persisted,
+                },
             )
-        _clear_openai_backoff(config)
-        ai_decisions_persisted += ai_run.persisted
         if not ai_run.validation.accepted:
             last_status = (
                 "ai_pass"
@@ -402,6 +471,7 @@ def _evaluate_candidate_queue(
             position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
             persisted={
                 "candidates": persisted_candidate_count,
+                "trade_setups": trade_setups_persisted,
                 "ai_decisions": ai_decisions_persisted,
                 **execution.persisted,
             },
@@ -424,7 +494,11 @@ def _evaluate_candidate_queue(
         risk_reasons=_dedupe([*skipped_risk_reasons, *last_risk_reasons]),
         position_review=_position_review_summary(position_adjustment_plan),
         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
-        persisted={"candidates": persisted_candidate_count, "ai_decisions": ai_decisions_persisted},
+        persisted={
+            "candidates": persisted_candidate_count,
+            "trade_setups": trade_setups_persisted,
+            "ai_decisions": ai_decisions_persisted,
+        },
     )
 
 
@@ -446,6 +520,30 @@ def _should_try_next_candidate(reason_codes: list[str]) -> bool:
         "symbol_filters_missing",
     }
     return bool(reason_codes) and all(reason in retryable for reason in reason_codes)
+
+
+def _quant_fallback_run(
+    *,
+    candidate,
+    risk_limits: RiskLimits,
+    setup,
+    decided_at: str,
+    reason: str,
+) -> AiDecisionRun:
+    return AiDecisionRun(
+        context=context_from_candidate(
+            candidate,
+            risk_limits=risk_limits,
+            decided_at=decided_at,
+            quant_setup=setup,
+        ),
+        request_payload={"fallback": "quant_setup"},
+        raw_response={"fallback_reason": reason},
+        validation=setup.to_validation(),
+        response_text="",
+        journaled=False,
+        persisted=0,
+    )
 
 
 def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, signed_client):
@@ -635,6 +733,10 @@ def _narrative_records(event_ids, records) -> list[dict[str, Any]]:
 
 def _truthy(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ai_fallback_to_quant_enabled(config: AppConfig) -> bool:
+    return _truthy(config.get("BFA_AI_FALLBACK_TO_QUANT_ENABLED"))
 
 
 def _dedupe(values: list[str]) -> list[str]:

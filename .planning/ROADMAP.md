@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-33, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-34, active.
 
 ## Phases
 
@@ -152,13 +152,39 @@ minimum-notional constraints.
 4. Confirmed adjustment execution requires exchange filters.
 5. Full local test suite passes.
 
+### Phase 34: Deterministic Quant Setup And Trade Trace
+
+**Goal:** Move point selection and sizing from AI-owned output into a
+deterministic multi-factor setup layer, and make submitted trade decisions
+auditable end-to-end.
+
+**Requirements:** QSE-01, QSE-02, QSE-03, QSE-04, QSE-05
+
+**Status:** Complete and deployed.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Setup scoring includes deterministic factor evidence for momentum,
+   liquidity, open interest, taker flow, funding, volatility, narrative quality,
+   and pilot tradability.
+2. Setup generation outputs side, entry, stop, target, notional, hold time,
+   confidence, reasons, and warnings before AI is consulted.
+3. AI accepted trade responses must echo the setup side, prices, notional, and
+   hold time exactly, or be rejected.
+4. New agent cycles persist `trade_setups` before AI evaluation.
+5. `ops trade-trace` reconstructs candidate, setup/legacy AI, risk/order
+   intent, and exchange evidence without mutating exchange state.
+6. Full local and server test suites pass.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-33 | 4/4 | Phase 33 deployed | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-34 | 5/5 | Phase 34 deployed | Pending |
 
 ## Requirement Coverage
 
@@ -168,6 +194,7 @@ minimum-notional constraints.
 
 ## Next Step
 
-Monitor `SOLUSDT` through filter-aware `ops position-adjustment-plan`. Do not
-execute adjustment orders or apply `30u_10x_multi_dynamic` without an explicit
-confirmation token.
+Monitor `SOLUSDT` through filter-aware `ops position-adjustment-plan` and use
+`ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
+adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`
+without an explicit confirmation token.

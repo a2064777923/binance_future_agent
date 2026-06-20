@@ -12,6 +12,7 @@ CATEGORY_TABLES = (
     "narratives",
     "market_snapshots",
     "candidates",
+    "trade_setups",
     "ai_decisions",
     "order_intents",
     "exchange_responses",
@@ -87,4 +88,3 @@ def migrate(connection: sqlite3.Connection) -> None:
         (SCHEMA_VERSION,),
     )
     connection.commit()
-

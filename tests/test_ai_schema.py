@@ -65,6 +65,44 @@ class AiSchemaTests(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", payload["candidate"])
         self.assertNotIn("ignored_extra", payload["candidate"]["features"])
 
+    def test_context_can_include_compact_quant_setup(self):
+        context = context_from_candidate(
+            {
+                "symbol": "BTCUSDT",
+                "features": {"reference_price": 100.0, "ignored_extra": "drop-me"},
+            },
+            risk_limits=self.risk_limits(),
+            decided_at="2026-06-19T10:00:00Z",
+            quant_setup={
+                "symbol": "BTCUSDT",
+                "decision": "trade",
+                "side": "long",
+                "entry_price": 100.0,
+                "stop_price": 98.8,
+                "target_price": 102.2,
+                "notional_usdt": 12.5,
+                "hold_time_minutes": 15,
+                "ignored_extra": "drop-me",
+                "factor_scores": [
+                    {
+                        "name": "momentum",
+                        "score": 22,
+                        "weight": 1.5,
+                        "weighted_score": 33,
+                        "direction": "long",
+                        "ignored_extra": "drop-me",
+                    }
+                ],
+            },
+        )
+
+        payload = context.to_dict()
+
+        self.assertEqual(payload["prompt_version"], "bfa-ai-decision-v2")
+        self.assertEqual(payload["quant_setup"]["entry_price"], 100.0)
+        self.assertNotIn("ignored_extra", payload["quant_setup"])
+        self.assertNotIn("ignored_extra", payload["quant_setup"]["factor_scores"][0])
+
     def test_context_can_include_dynamic_sizing_limits(self):
         config = load_config(
             {

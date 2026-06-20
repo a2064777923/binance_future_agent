@@ -21,6 +21,13 @@ Never claim that an order was placed. notional_usdt means contract position noti
 not initial margin; approximate initial margin is notional_usdt divided by leverage.
 Keep notional within the provided risk limits.
 
+When quant_setup is present, treat it as the primary deterministic trading plan.
+Do not invent better prices or larger size. If you agree with the setup, echo
+its side, entry_price, stop_price, target_price, notional_usdt, and
+hold_time_minutes exactly. If you disagree, return decision=pass with side=flat
+and explain the veto in reasons. Your role is an overlay/veto, not point
+generation.
+
 If you choose decision=trade, you MUST provide non-null entry_price, stop_price,
 target_price, notional_usdt, hold_time_minutes, and side long/short. Use the
 candidate features.reference_price as the market reference when present: entry
@@ -130,6 +137,7 @@ def validate_decision_payload(
         _validate_pass(parsed, errors, warnings)
     elif decision == "trade":
         _validate_trade(parsed, context, errors)
+        _validate_quant_setup_echo(parsed, context, errors)
 
     return DecisionValidationResult(
         accepted=not errors,
@@ -284,6 +292,37 @@ def estimate_stop_risk_usdt(decision: AiTradeDecision) -> float:
         return 0.0
     stop_distance = abs(decision.entry_price - decision.stop_price) / decision.entry_price
     return decision.notional_usdt * stop_distance
+
+
+def _validate_quant_setup_echo(
+    decision: AiTradeDecision,
+    context: AiDecisionContext,
+    errors: list[str],
+) -> None:
+    setup = context.quant_setup
+    if not isinstance(setup, Mapping):
+        return
+    if setup.get("decision") != "trade":
+        errors.append("quant_setup_not_trade")
+        return
+    if _text(setup.get("side")) != decision.side:
+        errors.append("quant_setup_side_mismatch")
+    checks = {
+        "entry_price": decision.entry_price,
+        "stop_price": decision.stop_price,
+        "target_price": decision.target_price,
+        "notional_usdt": decision.notional_usdt,
+    }
+    for key, actual in checks.items():
+        expected = _float(setup.get(key))
+        if expected is None or actual is None:
+            continue
+        tolerance = max(abs(expected) * 0.000001, 0.00000001)
+        if abs(actual - expected) > tolerance:
+            errors.append(f"quant_setup_{key}_mismatch")
+    hold_time = _int(setup.get("hold_time_minutes"))
+    if hold_time is not None and decision.hold_time_minutes != hold_time:
+        errors.append("quant_setup_hold_time_mismatch")
 
 
 def _reference_price(context: AiDecisionContext) -> float | None:
