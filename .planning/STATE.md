@@ -4,23 +4,23 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 42
 status: active
-stopped_at: Phase 42 local implementation in progress; paper-only timer active; live timer inactive
-last_updated: "2026-06-20T22:24:53+08:00"
+stopped_at: Phase 42 deployed; paper performance gate keeps live paused
+last_updated: "2026-06-20T22:47:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Added forward-paper performance gate locally for paper signal/outcome evidence
+last_activity_desc: Deployed forward-paper performance gate and verified negative paper evidence
 progress:
   total_phases: 38
-  completed_phases: 37
+  completed_phases: 38
   total_plans: 59
-  completed_plans: 58
-  percent: 97
+  completed_plans: 59
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 42 — Forward-Paper Performance Gate
-**Status:** Phase 42 local implementation in progress; paper-only timer active; live timer remains paused while default all-interval strategy promotion and paper outcome evidence are insufficient
+**Status:** Phase 42 deployed; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -496,43 +496,54 @@ gated by all-interval strategy evidence.
   `order_intents`; DB counts after timer/manual paper runs were
   `paper_signals=23`, `paper_outcomes=0`, `order_intents=18`.
 
-- Phase 42 local implementation is adding read-only
-  `ops forward-paper-performance-check`. The gate summarizes stored
-  `paper_signals` and `paper_outcomes` by selected variant/interval, checks
-  minimum outcome count, win rate, total net PnL, and worst drawdown, and keeps
-  `live_resume_allowed=false` even when paper thresholds pass. It is intended
-  to turn the active paper timer's output into auditable evidence rather than
-  blindly restoring live automation.
+- Phase 42 implementation is deployed. Read-only
+  `ops forward-paper-performance-check` summarizes stored `paper_signals` and
+  `paper_outcomes` by selected variant/interval, checks minimum outcome count,
+  win rate, total net PnL, and worst drawdown, and keeps
+  `live_resume_allowed=false` even when paper thresholds pass.
+
+- Latest server Phase 42 gate evidence after deployment: focused tests passed
+  with `5` tests, full suite passed with `327` tests, health-check passed with
+  network checks skipped, paper timer is active, and live service/timer remain
+  inactive. `ops forward-paper-performance-check --min-outcomes 20` returned
+  `keep_live_paused` with `signal_count=57`, `outcome_count=35`,
+  `open_signal_count=22`, `win_rate=0.34285714`,
+  `total_net_pnl_usdt=-1.46500894`, `profit_factor=0.53973765`, and
+  `worst_drawdown_usdt=1.60719683`. Reasons were
+  `paper_total_net_pnl_not_above_min`, `paper_win_rate_below_min`, and
+  `paper_worst_drawdown_exceeds_cap`. Python sqlite count check showed
+  `paper_signals=57`, `paper_outcomes=35`, and `order_intents=18`.
 
 ## Next Command
 
-Finish Phase 42 verification, deploy `ops forward-paper-performance-check`, run
-it against `/opt/binance-futures-agent/data/agent.sqlite`, and keep collecting
-out-of-sample `ops forward-paper-run` evidence from the active paper-only
-timer. Do not restore the live timer, execute adjustment orders, or apply
-`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
-`keep_live_paused` and paper outcomes remain insufficient.
+Recalibrate the `quant_setup_selective` 5m setup or add stricter filters before
+any live resume. Keep collecting out-of-sample `ops forward-paper-run` evidence
+from the active paper-only timer, then rerun
+`ops forward-paper-performance-check`. Do not restore the live timer, execute
+adjustment orders, or apply `30u_10x_multi_dynamic` while the default
+all-interval promotion gate returns `keep_live_paused` and paper performance is
+negative.
 
 ## Session
 
-**Last session:** 2026-06-20T22:24:53+08:00
-**Stopped at:** Phase 42 local implementation in progress; paper-only timer active; live timer inactive
+**Last session:** 2026-06-20T22:47:00+08:00
+**Stopped at:** Phase 42 deployed; paper performance gate keeps live paused
 **Resume file:** .planning/phases/42-forward-paper-performance-gate/42-01-SUMMARY.md
 
 ## Current Position
 
 Phase: 42 — Forward-Paper Performance Gate
 Plan: 42-01 local implementation
-Status: Local implementation in progress; deployment pending
-Last activity: 2026-06-20 — performance gate command added locally
+Status: Complete and deployed; paper gate negative
+Last activity: 2026-06-20 — performance gate deployed and verified on server
 
 ## Operator Next Steps
 
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
-- Use `ops forward-paper-performance-check` after deployment to decide whether
-  paper evidence is still missing, insufficient, failing, or promising.
+- Use `ops forward-paper-performance-check` after more paper runs to decide
+  whether recalibration improved the negative 5m paper evidence.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

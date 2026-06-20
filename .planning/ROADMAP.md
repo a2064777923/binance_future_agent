@@ -359,7 +359,8 @@ alone.
 
 **Requirements:** FPG-01, FPG-02, FPG-03, FPG-04
 
-**Status:** In progress locally.
+**Status:** Complete and deployed; latest paper performance gate keeps live
+paused.
 
 **Plans:** 1 plan
 
@@ -382,7 +383,7 @@ alone.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-42 | 12/13 | Phase 42 in progress, paper performance gate local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-42 | 13/13 | Phase 42 deployed, paper gate keeps live paused | Pending |
 
 ## Requirement Coverage
 
@@ -399,11 +400,12 @@ observation through `--scope selected-intervals --intervals 5m`, and local
 `ops forward-paper-run` can record paper signals/outcomes without order
 intents, and deployment assets now include an active paper-only systemd timer
 on the server. The paper timer uses auto-hot symbol selection rather than the
-10-symbol live pilot allowlist. Current work is adding
-`ops forward-paper-performance-check` so the collected paper outcomes become a
-read-only performance gate. Next work should collect out-of-sample paper
-evidence and/or recalibrate failed `15m` behavior before restoring live
-automation. Monitor any active position through
+10-symbol live pilot allowlist. `ops forward-paper-performance-check` is now
+deployed and the latest server gate returns `keep_live_paused` from negative
+5m paper performance: 57 signals, 35 settled outcomes, win rate 0.34285714,
+total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Next work
+should recalibrate the setup and keep collecting out-of-sample paper evidence
+before restoring live automation. Monitor any active position through
 filter-aware `ops position-adjustment-plan` and use
 `ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
 adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`
