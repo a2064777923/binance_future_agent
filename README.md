@@ -136,6 +136,13 @@ candidate queue. If the first hot symbol is skipped by AI pass or retryable
 symbol-level risk such as duplicate same-direction exposure, the runner can
 evaluate the next candidate while still submitting at most one order per cycle.
 
+Live auto-hot scanning is optional and disabled by default. When
+`BFA_LIVE_AUTO_HOT_SYMBOLS=true`, the runner can select a wider hot-symbol
+scanning universe from Binance USD-M 24h ticker data, then still applies
+`--top-n`, setup gates, AI overlay or quant fallback, risk caps, and the
+one-order-per-cycle limit. If auto-hot selection is off or returns no symbols,
+live falls back to `BFA_MARKET_SYMBOLS`.
+
 Higher-leverage or concurrent-position profiles must also stay inside portfolio
 caps. The risk layer checks total initial margin, total notional, and same-side
 notional after the proposed new entry using:

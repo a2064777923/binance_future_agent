@@ -43,6 +43,10 @@ def base_env(**overrides):
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
         "BFA_MARKET_SYMBOLS": ",".join(PILOT_SYMBOLS),
+        "BFA_LIVE_AUTO_HOT_SYMBOLS": "false",
+        "BFA_LIVE_AUTO_HOT_TOP_N": "40",
+        "BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT": "10000000",
+        "BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT": "0.5",
         "BFA_FORWARD_PAPER_SYMBOLS": "",
         "BFA_FORWARD_PAPER_AUTO_HOT_SYMBOLS": "true",
         "BFA_FORWARD_PAPER_TOP_N": "40",
@@ -85,6 +89,8 @@ class ConfigTests(unittest.TestCase):
         config = load_config({})
 
         self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
+        self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS"), "false")
+        self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "40")
 
     def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
@@ -221,6 +227,7 @@ class ConfigTests(unittest.TestCase):
                 BFA_ACCOUNT_CAPITAL_USDT="lots",
                 BFA_MAX_LEVERAGE="-3",
                 BFA_MAX_OPEN_POSITIONS="0",
+                BFA_LIVE_AUTO_HOT_TOP_N="0",
                 BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT="0",
                 BFA_MARKET_HEAT_MAX_RECORDS="0",
             )
@@ -231,6 +238,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BFA_ACCOUNT_CAPITAL_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MAX_LEVERAGE must be a positive number", result.errors)
         self.assertIn("BFA_MAX_OPEN_POSITIONS must be a positive integer", result.errors)
+        self.assertIn("BFA_LIVE_AUTO_HOT_TOP_N must be a positive integer", result.errors)
         self.assertIn("BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MARKET_HEAT_MAX_RECORDS must be a positive integer", result.errors)
 

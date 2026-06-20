@@ -13,8 +13,9 @@ from bfa.ai.client import OpenAIAPIError
 from bfa.ai.decision import AiDecisionRun
 from bfa.ai.decision import run_ai_decision
 from bfa.ai.journal import AiDecisionJournal
-from bfa.ai.providers import ai_source, build_ai_client
 from bfa.ai.schema import RiskLimits, context_from_candidate
+from bfa.ai.providers import ai_source, build_ai_client
+from bfa.backtest.matrix import HotUniverseConfig, select_hot_usdt_symbols
 from bfa.config import AppConfig, RuntimeMode, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect
 from bfa.event_store.store import EventStore
@@ -44,6 +45,7 @@ class AgentRunResult:
     narrative_record_count: int = 0
     candidate_count: int = 0
     rejected_count: int = 0
+    scan_symbols: list[str] = field(default_factory=list)
     selected_symbol: str | None = None
     evaluated_symbols: list[str] = field(default_factory=list)
     ai_accepted: bool = False
@@ -80,6 +82,7 @@ class AgentRunResult:
             "narrative_record_count": self.narrative_record_count,
             "candidate_count": self.candidate_count,
             "rejected_count": self.rejected_count,
+            "scan_symbols": list(self.scan_symbols),
             "selected_symbol": self.selected_symbol,
             "evaluated_symbols": list(self.evaluated_symbols),
             "ai_accepted": self.ai_accepted,
@@ -162,12 +165,18 @@ def run_agent_once(
         )
 
     market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
+    scan_symbols = _agent_scan_symbols(config, market)
     collector = collector or MarketDataCollector(
         client=market,
-        symbols=market_symbols(config),
+        symbols=scan_symbols,
+        max_symbols=max(len(scan_symbols), 1),
         received_at=started_at,
     )
-    narrative_runner = narrative_runner or _build_narrative_runner(config, collected_at=started_at)
+    narrative_runner = narrative_runner or _build_narrative_runner(
+        config,
+        collected_at=started_at,
+        known_symbols=scan_symbols,
+    )
     ai_client = ai_client or (build_ai_client(config) if ai_enabled else None)
 
     connection = connect(db_path or config.get("BFA_DB_PATH"))
@@ -177,7 +186,12 @@ def run_agent_once(
         market_event_ids = [store.insert_market_snapshot(snapshot) for snapshot in market_snapshots]
         narrative_records = narrative_runner.collect()
         if not narrative_records and _truthy(config.get("BFA_MARKET_HEAT_NARRATIVE_ENABLED")):
-            narrative_records = _collect_market_heat_narratives(config, market_snapshots, started_at)
+            narrative_records = _collect_market_heat_narratives(
+                config,
+                market_snapshots,
+                started_at,
+                known_symbols=scan_symbols,
+            )
         narrative_event_ids = [store.insert_narrative(record) for record in narrative_records]
 
         replay_packet = {
@@ -185,7 +199,7 @@ def run_agent_once(
             "end": started_at,
             "symbol": None,
             "event_count": len(market_event_ids) + len(narrative_event_ids),
-            "symbols": market_symbols(config),
+            "symbols": scan_symbols,
             "records": [
                 *_market_records(market_event_ids, market_snapshots),
                 *_narrative_records(narrative_event_ids, narrative_records),
@@ -198,7 +212,7 @@ def run_agent_once(
         candidates = generate_candidates(
             replay_packet,
             StrategyConfig(
-                allowed_symbols=market_symbols(config),
+                allowed_symbols=scan_symbols,
                 generated_at=started_at,
                 top_n=top_n,
                 max_position_notional_usdt=base_sizing.max_position_notional_usdt,
@@ -214,6 +228,7 @@ def run_agent_once(
                 narrative_record_count=len(narrative_records),
                 candidate_count=0,
                 rejected_count=len(candidates.rejected),
+                scan_symbols=scan_symbols,
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 persisted={"candidates": persisted_candidate_count},
@@ -230,6 +245,7 @@ def run_agent_once(
                 narrative_record_count=len(narrative_records),
                 candidate_count=len(candidates.candidates),
                 rejected_count=len(candidates.rejected),
+                scan_symbols=scan_symbols,
                 ai_accepted=True,
                 validation_errors=["unable to read live position risk"],
                 position_review=_position_review_summary(position_adjustment_plan),
@@ -253,6 +269,7 @@ def run_agent_once(
             narrative_record_count=len(narrative_records),
             candidate_count=len(candidates.candidates),
             rejected_count=len(candidates.rejected),
+            scan_symbols=scan_symbols,
             persisted_candidate_count=persisted_candidate_count,
             position_adjustment_plan=position_adjustment_plan,
         )
@@ -260,8 +277,34 @@ def run_agent_once(
         connection.close()
 
 
-def _build_narrative_runner(config: AppConfig, *, collected_at: str) -> NarrativeCollectionRunner:
-    symbols = market_symbols(config)
+def _agent_scan_symbols(config: AppConfig, market_client) -> list[str]:
+    fallback = market_symbols(config)
+    if not _truthy(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS")):
+        return fallback
+    try:
+        ticker_response = market_client.ticker_24hr()
+        ticker_payload = ticker_response.payload if isinstance(ticker_response.payload, list) else []
+        hot_rows = select_hot_usdt_symbols(
+            ticker_payload,
+            HotUniverseConfig(
+                top_n=int(config.get("BFA_LIVE_AUTO_HOT_TOP_N")),
+                min_quote_volume_usdt=float(config.get("BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT")),
+                min_abs_price_change_percent=float(config.get("BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT")),
+            ),
+        )
+    except Exception:
+        return fallback
+    selected = [str(item["symbol"]) for item in hot_rows]
+    return selected or fallback
+
+
+def _build_narrative_runner(
+    config: AppConfig,
+    *,
+    collected_at: str,
+    known_symbols: list[str] | None = None,
+) -> NarrativeCollectionRunner:
+    symbols = known_symbols or market_symbols(config)
     collectors = [
         ManualExportCollector(
             config.get("SQUARE_EXPORT_DIR"),
@@ -277,10 +320,16 @@ def _build_narrative_runner(config: AppConfig, *, collected_at: str) -> Narrativ
     return NarrativeCollectionRunner(collectors)
 
 
-def _collect_market_heat_narratives(config: AppConfig, market_snapshots, collected_at: str):
+def _collect_market_heat_narratives(
+    config: AppConfig,
+    market_snapshots,
+    collected_at: str,
+    *,
+    known_symbols: list[str] | None = None,
+):
     return MarketHeatNarrativeCollector(
         market_snapshots,
-        known_symbols=market_symbols(config),
+        known_symbols=known_symbols or market_symbols(config),
         collected_at=collected_at,
         min_quote_volume=float(config.get("BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT")),
         min_price_change_percent=float(config.get("BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT")),
@@ -308,6 +357,7 @@ def _evaluate_candidate_queue(
     narrative_record_count: int,
     candidate_count: int,
     rejected_count: int,
+    scan_symbols: list[str],
     persisted_candidate_count: int,
     position_adjustment_plan,
 ) -> AgentRunResult:
@@ -364,6 +414,7 @@ def _evaluate_candidate_queue(
                         narrative_record_count=narrative_record_count,
                         candidate_count=candidate_count,
                         rejected_count=rejected_count,
+                        scan_symbols=scan_symbols,
                         selected_symbol=candidate.symbol,
                         evaluated_symbols=evaluated_symbols,
                         validation_errors=[_safe_ai_error(exc)],
@@ -405,6 +456,7 @@ def _evaluate_candidate_queue(
                 narrative_record_count=narrative_record_count,
                 candidate_count=candidate_count,
                 rejected_count=rejected_count,
+                scan_symbols=scan_symbols,
                 selected_symbol=candidate.symbol,
                 evaluated_symbols=evaluated_symbols,
                 validation_errors=["ai_client_unavailable"],
@@ -461,6 +513,7 @@ def _evaluate_candidate_queue(
             narrative_record_count=narrative_record_count,
             candidate_count=candidate_count,
             rejected_count=rejected_count,
+            scan_symbols=scan_symbols,
             selected_symbol=candidate.symbol,
             evaluated_symbols=evaluated_symbols,
             ai_accepted=True,
@@ -485,6 +538,7 @@ def _evaluate_candidate_queue(
         narrative_record_count=narrative_record_count,
         candidate_count=candidate_count,
         rejected_count=rejected_count,
+        scan_symbols=scan_symbols,
         selected_symbol=evaluated_symbols[-1] if evaluated_symbols else None,
         evaluated_symbols=evaluated_symbols,
         ai_accepted=False,

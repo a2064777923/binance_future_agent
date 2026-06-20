@@ -178,6 +178,16 @@ metrics. This is controlled by `BFA_MARKET_HEAT_NARRATIVE_ENABLED` and the
 `BFA_MARKET_HEAT_*` thresholds in the env file; it does not replace the AI
 decision gate or deterministic execution risk checks.
 
+Live and dry-run cycles can optionally scan a wider hot-symbol universe before
+candidate ranking by setting `BFA_LIVE_AUTO_HOT_SYMBOLS=true`. When enabled,
+the runner selects up to `BFA_LIVE_AUTO_HOT_TOP_N` USDT USD-M symbols from the
+public 24h ticker using quote-volume and absolute price-change filters, then
+uses that same universe for market collection, narrative matching, market-heat
+fallback, and candidate allowlisting. This only widens scanning: `agent run-once
+--top-n`, deterministic setup gates, AI overlay or quant fallback, risk caps,
+and one-order-per-cycle behavior still apply. The default is `false`; when
+disabled or empty, the runner falls back to `BFA_MARKET_SYMBOLS`.
+
 ## Forward-Paper Recorder
 
 Forward-paper collection is separate from live automation. It records

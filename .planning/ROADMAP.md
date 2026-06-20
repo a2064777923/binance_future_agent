@@ -12,7 +12,7 @@
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
 
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-42, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-45, active.
 
 ## Phases
 
@@ -473,13 +473,42 @@ the paper timer default.
 
 1. Setup profiles can explicitly disable sides without changing existing
    default/live profiles.
+
 2. Setup profiles can exclude symbols identified by paper attribution.
 3. A built-in guarded quant setup variant exists for backtest and forward
    paper observation.
+
 4. Guarded variants are accepted by CLI/matrix/forward-paper paths.
 5. Full local and server tests pass before any paper timer switch.
 6. Server guarded matrix evidence is recorded before deciding whether to switch
    the paper timer variant.
+
+### Phase 45: Live Auto-Hot Candidate Breadth
+
+**Goal:** Let live and dry-run cycles optionally scan a wider auto-hot
+Binance USD-M symbol universe while keeping actual order authority behind the
+existing candidate queue, setup, AI/quant, and risk gates.
+
+**Requirements:** LAC-01, LAC-02, LAC-03, LAC-04
+**Depends on:** Phase 44
+**Status:** Complete locally; server deployment pending.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Config exposes live auto-hot symbol selection and keeps it disabled by
+   default.
+2. The live runner can derive a hot-symbol scanning universe from Binance 24h
+   ticker data and fall back to `BFA_MARKET_SYMBOLS` when auto-hot selection is
+   off or empty.
+3. The same selected universe drives market collection, narrative known
+   symbols, market-heat fallback, replay packet symbols, and candidate
+   allowlisting.
+4. Per-cycle `--top-n`, deterministic setup, AI overlay/quant fallback, risk
+   caps, and one-order-per-cycle behavior remain unchanged.
+5. Focused and full local tests pass; deployment docs/env examples include the
+   new variables without enabling them in live server env.
 
 ## Progress
 
@@ -487,7 +516,7 @@ the paper timer default.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-44 | 15/15 | Phase 44 complete and deployed; guarded not promoted | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-45 | 16/16 | Phase 45 complete locally; deployment pending | Pending |
 
 ## Requirement Coverage
 

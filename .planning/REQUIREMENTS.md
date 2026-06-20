@@ -243,6 +243,23 @@ projects or losing control of downside.
 - [x] **FGC-04**: Guarded calibration remains paper/backtest evidence only and
   does not restore live automation or change risk profiles.
 
+### Live Auto-Hot Candidate Breadth
+
+- [x] **LAC-01**: Live/dry-run agent cycles can optionally select a wider
+  hot-symbol scanning universe from Binance USD-M 24h ticker data instead of
+  only the fixed `BFA_MARKET_SYMBOLS` allowlist.
+
+- [x] **LAC-02**: Live auto-hot selection is disabled by default and falls
+  back to `BFA_MARKET_SYMBOLS` whenever it is disabled, empty, or unavailable.
+
+- [x] **LAC-03**: The selected live scanning universe is reused consistently
+  for market collection, narrative symbol extraction, market-heat fallback, and
+  candidate allowlisting.
+
+- [x] **LAC-04**: Wider scanning does not increase order authority by itself:
+  per-cycle candidate evaluation, setup gates, AI overlay or quant fallback,
+  risk caps, and one-order-per-cycle behavior remain in force.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -314,10 +331,14 @@ projects or losing control of downside.
 | FGC-02 | Phase 44 | Complete and deployed |
 | FGC-03 | Phase 44 | Complete and deployed |
 | FGC-04 | Phase 44 | Complete and deployed |
+| LAC-01 | Phase 45 | Complete locally |
+| LAC-02 | Phase 45 | Complete locally |
+| LAC-03 | Phase 45 | Complete locally |
+| LAC-04 | Phase 45 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 59 total
-- Mapped to phases: 59
+- v1.22 requirements: 63 total
+- Mapped to phases: 63
 - Unmapped: 0
 
 ---

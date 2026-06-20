@@ -18,6 +18,9 @@ class FakeMarketClient:
     def exchange_info(self):
         return MarketDataResponse(endpoint="/fapi/v1/exchangeInfo", params={}, payload=exchange_info_payload())
 
+    def ticker_24hr(self, symbol=None):
+        return MarketDataResponse(endpoint="/fapi/v1/ticker/24hr", params={}, payload=[])
+
 
 def exchange_info_payload(*symbols):
     payload = json.loads(EXCHANGE_INFO.read_text(encoding="utf-8"))
@@ -275,6 +278,31 @@ class TwoSymbolMarketClient:
             endpoint="/fapi/v1/exchangeInfo",
             params={},
             payload=exchange_info_payload("HYPEUSDT", "BTCUSDT"),
+        )
+
+
+class AutoHotMarketClient:
+    def __init__(self):
+        self.calls = []
+
+    def ticker_24hr(self, symbol=None):
+        self.calls.append(("ticker_24hr", symbol))
+        return MarketDataResponse(
+            endpoint="/fapi/v1/ticker/24hr",
+            params={},
+            payload=[
+                {"symbol": "HOTUSDT", "priceChangePercent": "9.0", "quoteVolume": "95000000", "count": 1000},
+                {"symbol": "ALTUSDT", "priceChangePercent": "-7.0", "quoteVolume": "90000000", "count": 1000},
+                {"symbol": "SLOWUSDT", "priceChangePercent": "0.1", "quoteVolume": "100000000", "count": 1000},
+            ],
+        )
+
+    def exchange_info(self):
+        self.calls.append(("exchange_info",))
+        return MarketDataResponse(
+            endpoint="/fapi/v1/exchangeInfo",
+            params={},
+            payload=exchange_info_payload("HOTUSDT", "ALTUSDT"),
         )
 
 
@@ -619,6 +647,123 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(ai_client.calls, 2)
         self.assertIn("HYPEUSDT:duplicate_symbol_direction_exposure", result.risk_reasons)
         self.assertIn("risk_accepted", result.risk_reasons)
+
+    def test_run_once_can_scan_auto_hot_symbols_beyond_fixed_live_allowlist(self):
+        class AutoHotCollector:
+            def __init__(self, symbols):
+                self.symbols = symbols
+
+            def collect_rest_snapshots(self):
+                snapshots = []
+                for symbol in self.symbols:
+                    snapshots.extend(snapshots_for_symbol(symbol, price_change="8.0", quote_volume="50000000"))
+                return snapshots
+
+        class AutoHotNarrativeRunner:
+            def __init__(self, symbols):
+                self.symbols = symbols
+
+            def collect(self):
+                return [
+                    NormalizedNarrativeRecord(
+                        source="binance_square",
+                        source_id=f"square-{symbol}",
+                        author="poster",
+                        symbol_mentions=[symbol],
+                        text=f"{symbol} hot narrative",
+                        url=None,
+                        published_at="2026-06-20T09:58:00Z",
+                        collected_at="2026-06-20T10:00:00Z",
+                        engagement={"likes": 70, "comments": 7},
+                        raw={},
+                        quality_flags=[],
+                    )
+                    for symbol in self.symbols
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            market_client = AutoHotMarketClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_LIVE_AUTO_HOT_SYMBOLS": "true",
+                    "BFA_LIVE_AUTO_HOT_TOP_N": "2",
+                    "BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT": "10000000",
+                    "BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT": "0.5",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=market_client,
+                collector=AutoHotCollector(["HOTUSDT", "ALTUSDT"]),
+                narrative_runner=AutoHotNarrativeRunner(["HOTUSDT", "ALTUSDT"]),
+                ai_client=FakeAiClient(),
+                top_n=1,
+            )
+
+        self.assertEqual(result.scan_symbols, ["HOTUSDT", "ALTUSDT"])
+        self.assertEqual(result.candidate_count, 1)
+        self.assertEqual(len(result.evaluated_symbols), 1)
+        self.assertIn(result.selected_symbol, {"HOTUSDT", "ALTUSDT"})
+        self.assertIn(("ticker_24hr", None), market_client.calls)
+
+    def test_run_once_auto_hot_falls_back_to_market_symbols_when_empty(self):
+        class EmptyHotMarketClient(FakeMarketClient):
+            def __init__(self):
+                self.calls = []
+
+            def ticker_24hr(self, symbol=None):
+                self.calls.append(("ticker_24hr", symbol))
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {"symbol": "SLOWUSDT", "priceChangePercent": "0.1", "quoteVolume": "100000000", "count": 1000}
+                    ],
+                )
+
+            def exchange_info(self):
+                self.calls.append(("exchange_info",))
+                return MarketDataResponse(endpoint="/fapi/v1/exchangeInfo", params={}, payload=exchange_info_payload())
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            market_client = EmptyHotMarketClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_LIVE_AUTO_HOT_SYMBOLS": "true",
+                    "BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT": "5",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=market_client,
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+
+        self.assertEqual(result.scan_symbols, ["BTCUSDT"])
+        self.assertEqual(result.selected_symbol, "BTCUSDT")
+        self.assertIn(("ticker_24hr", None), market_client.calls)
 
 
 if __name__ == "__main__":

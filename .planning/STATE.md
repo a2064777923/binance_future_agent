@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 44
+current_phase: 45
 status: active
-stopped_at: Phase 44 complete and deployed; guarded not promoted
-last_updated: "2026-06-20T23:35:00+08:00"
+stopped_at: Phase 45 complete locally; server deployment pending
+last_updated: "2026-06-20T23:55:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Deployed guarded setup calibration and kept paper default unchanged
+last_activity_desc: Implemented live auto-hot candidate breadth locally
 progress:
-  total_phases: 40
+  total_phases: 41
   completed_phases: 40
-  total_plans: 61
-  completed_plans: 61
+  total_plans: 62
+  completed_plans: 62
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 44 — Forward-Paper Guarded Setup Calibration
-**Status:** Phase 44 complete and deployed; paper-only timer active; live
+**Current phase:** Phase 45 — Live Auto-Hot Candidate Breadth
+**Status:** Phase 45 complete locally; paper-only timer active; live
 service/timer remain inactive while default all-interval strategy promotion and
 latest paper performance evidence fail
 **Last planned:** 2026-06-20
@@ -544,30 +544,26 @@ gated by all-interval strategy evidence.
 
 ## Next Command
 
-Plan the next calibration phase around wider live candidate discovery and
-stronger multi-factor selection. The immediate design problem is that live
-trading still uses the fixed 10-symbol `BFA_MARKET_SYMBOLS` allowlist and
-`agent run-once --top-n 3`, while paper observation can auto-select 40 hot
-symbols. Add live auto-hot candidate breadth only behind explicit risk gates
-and evidence checks; do not restore live automation, execute adjustment orders,
-or apply `30u_10x_multi_dynamic` while the default all-interval promotion gate
-returns `keep_live_paused` and paper performance is negative.
+Deploy Phase 45 as a code-only/server-assets update with
+`BFA_LIVE_AUTO_HOT_SYMBOLS=false` unchanged, then run server tests and a
+secret-safe health check. Do not enable live auto-hot in the server env, restore
+live automation, execute adjustment orders, or apply `30u_10x_multi_dynamic`
+while the default all-interval promotion gate returns `keep_live_paused` and
+paper performance is negative.
 
 ## Session
 
 **Last session:** 2026-06-20T23:23:00+08:00
-**Stopped at:** Phase 44 complete and deployed; next phase should address
-candidate breadth and calibration.
-**Resume file:** none
+**Stopped at:** Phase 45 complete locally; server deployment pending.
+**Resume file:** .planning/phases/45-live-auto-hot-candidate-breadth/45-01-PLAN.md
 
 ## Current Position
 
-Phase: 44 — Forward-Paper Guarded Setup Calibration
-Plan: 44-01 implementation and deployment
-Status: Complete and deployed; guarded variant not promoted and paper timer not
-switched
-Last activity: 2026-06-20 — server guarded matrix recorded and paper timer
-restored on original variant
+Phase: 45 — Live Auto-Hot Candidate Breadth
+Plan: 45-01 implementation
+Status: Complete locally; deployment pending
+Last activity: 2026-06-20 — optional live auto-hot scanning implemented with
+defaults disabled
 
 ## Operator Next Steps
 
