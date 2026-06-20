@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-36, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-37, active.
 
 ## Phases
 
@@ -225,13 +225,39 @@ and trace-visible stop/target rationale.
    without giving AI authority to rewrite deterministic setup prices.
 5. Focused and full local test suites pass.
 
+### Phase 37: Strategy Promotion Gate
+
+**Goal:** Convert recent matrix backtest evidence into a read-only gate that
+prevents live resume or risk-profile promotion when the selected strategy fails
+pilot profitability and drawdown checks.
+
+**Requirements:** SPG-01, SPG-02, SPG-03, SPG-04
+
+**Status:** Complete locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Operators can run `ops strategy-promotion-check --matrix-report ...` against
+   a backtest matrix JSON file.
+2. The gate rejects missing/invalid reports and variants that are not promoted
+   by the matrix summary.
+3. The gate rejects variants with non-positive total PnL or worst drawdown at
+   or above the pilot drawdown cap.
+4. The gate checks every interval cell for verdict, trade count, PnL,
+   positive-window-rate, and drawdown.
+5. The Phase 36 `quant_setup` matrix report is checked and returns
+   `keep_live_paused`.
+6. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-36 | 7/7 | Phase 36 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-37 | 8/8 | Phase 37 local | Pending |
 
 ## Requirement Coverage
 
@@ -241,8 +267,10 @@ and trace-visible stop/target rationale.
 
 ## Next Step
 
-Run broader indicator-based `quant_setup` backtest matrix sweeps on recent hot
-symbols before restoring live automation. Monitor `SOLUSDT` through filter-aware
-`ops position-adjustment-plan` and use `ops trade-trace --symbol SOLUSDT` for
-decision-chain review. Do not execute adjustment orders, restore the live
-timer, or apply `30u_10x_multi_dynamic` without an explicit confirmation token.
+Keep live automation paused while the latest indicator-based `quant_setup`
+matrix report fails `ops strategy-promotion-check`. Continue strategy
+calibration and rerun matrix/promotion checks before restoring live automation.
+Monitor `SOLUSDT` through filter-aware `ops position-adjustment-plan` and use
+`ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
+adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`
+without an explicit confirmation token.

@@ -1963,6 +1963,53 @@ class CliTests(unittest.TestCase):
         self.assertEqual(saved["schema"], "bfa_hot_backtest_matrix_v1")
         self.assertIn("overall", payload["promotion"])
 
+    def test_ops_strategy_promotion_check_blocks_negative_matrix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "matrix.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "schema": "bfa_hot_backtest_matrix_v1",
+                        "promotion": {
+                            "overall": "keep_caps_unchanged_drawdown_risk",
+                            "cells": [
+                                {
+                                    "interval": "5m",
+                                    "variant": "quant_setup",
+                                    "verdict": "negative_or_flat",
+                                    "trade_count": 10,
+                                    "net_pnl_usdt": -0.5,
+                                    "positive_window_rate": 0.33,
+                                    "worst_drawdown_usdt": 2.2,
+                                    "max_daily_loss_usdt": 2.0,
+                                }
+                            ],
+                            "variants": {
+                                "quant_setup": {
+                                    "total_net_pnl_usdt": -0.5,
+                                    "worst_drawdown_usdt": 2.2,
+                                    "verdict": "drawdown_exceeds_pilot_cap",
+                                }
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "strategy-promotion-check",
+                "--matrix-report",
+                str(report),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertFalse(payload["promotion_allowed"])
+        self.assertIn("variant_not_promoted", payload["reasons"])
+
 
 if __name__ == "__main__":
     unittest.main()

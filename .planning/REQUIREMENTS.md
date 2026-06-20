@@ -120,6 +120,22 @@ projects or losing control of downside.
 - [x] **QSI-04**: AI context and read-only trade trace expose the new indicator
   features and `price_basis` while preserving AI overlay/veto semantics.
 
+### Strategy Promotion Gates
+
+- [x] **SPG-01**: Operators can run a read-only strategy promotion check against
+  a `backtest matrix` JSON report before restoring live automation or changing
+  risk profiles.
+
+- [x] **SPG-02**: Promotion requires the selected variant to be promoted by the
+  matrix summary, have positive total net PnL, and stay below the drawdown cap.
+
+- [x] **SPG-03**: Promotion also requires every interval cell to meet minimum
+  trade count, positive PnL, positive-window-rate, and drawdown checks.
+
+- [x] **SPG-04**: Negative recent-market evidence for indicator-based
+  `quant_setup` is recorded as a keep-live-paused condition, not treated as a
+  deploy success.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -159,12 +175,16 @@ projects or losing control of downside.
 | QSI-02 | Phase 36 | Complete locally |
 | QSI-03 | Phase 36 | Complete locally |
 | QSI-04 | Phase 36 | Complete locally |
+| SPG-01 | Phase 37 | Complete locally |
+| SPG-02 | Phase 37 | Complete locally |
+| SPG-03 | Phase 37 | Complete locally |
+| SPG-04 | Phase 37 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 27 total
-- Mapped to phases: 27
+- v1.22 requirements: 31 total
+- Mapped to phases: 31
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 36 indicator-based setup point logic*
+*Last updated: 2026-06-20 after Phase 37 strategy promotion gate*

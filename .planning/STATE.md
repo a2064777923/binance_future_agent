@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 36
+current_phase: 37
 status: active
-stopped_at: Phase 36 complete locally; broader indicator-based quant_setup matrix calibration remains next
-last_updated: "2026-06-20T22:20:00+08:00"
+stopped_at: Phase 37 complete locally; latest quant_setup matrix failed promotion gate
+last_updated: "2026-06-20T22:45:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 33
-  completed_phases: 33
-  total_plans: 54
-  completed_plans: 54
+  total_phases: 34
+  completed_phases: 34
+  total_plans: 55
+  completed_plans: 55
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 36 — Indicator-Based Setup Point Logic
-**Status:** Phase 36 complete locally; live timer remains paused while operator reviews SOLUSDT
+**Current phase:** Phase 37 — Strategy Promotion Gate
+**Status:** Phase 37 complete locally; live timer remains paused while strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Validate the indicator-based deterministic setup layer with
-staged backtests/matrix sweeps before restoring live automation.
+**Current focus:** Calibrate the indicator-based deterministic setup until
+recent matrix/promotion checks justify forward-paper or live resumption.
 
 ## Decisions
 
@@ -398,32 +398,48 @@ staged backtests/matrix sweeps before restoring live automation.
   risk/reward geometry. AI remains overlay/veto only and cannot rewrite setup
   prices.
 
+- Phase 36 recent hot-symbol matrix evidence was negative. The report at
+  `runtime/quant_setup_matrix_phase36.json` checked 8 hot Binance USD-M symbols
+  (`REUSDT`, `SOLUSDT`, `HYPEUSDT`, `ZECUSDT`, `BICOUSDT`, `BTWUSDT`,
+  `LABUSDT`, `BSBUSDT`) across `5m` and `15m`. `quant_setup` produced
+  total net PnL `-5.10446676` USDT, worst drawdown `4.44266063` USDT, and
+  promotion verdict `drawdown_exceeds_pilot_cap`.
+
+- Phase 37 local implementation adds read-only
+  `ops strategy-promotion-check --matrix-report ...`. It validates a matrix
+  report and blocks promotion when the selected variant has non-positive total
+  PnL, drawdown at/above the cap, non-promoted interval cells, insufficient
+  trade count, low positive-window rate, or invalid/missing report evidence.
+  Running it on `runtime/quant_setup_matrix_phase36.json` returned
+  `status=keep_live_paused`, `promotion_allowed=false`, with both `5m` and
+  `15m` cells failing PnL, positive-window-rate, and drawdown checks.
+
 ## Next Command
 
-Run broader indicator-based `quant_setup` matrix sweeps on recent hot-symbol
-data, then decide whether the deterministic setup is ready for forward
-paper/live small-size trial. Do not restore the live timer, execute adjustment
-orders, or apply `30u_10x_multi_dynamic` without explicit confirmation.
+Calibrate the indicator-based `quant_setup` rules and rerun matrix plus
+`ops strategy-promotion-check`. Do not restore the live timer, execute
+adjustment orders, or apply `30u_10x_multi_dynamic` while the latest strategy
+promotion gate returns `keep_live_paused`.
 
 ## Session
 
-**Last session:** 2026-06-20T22:20:00+08:00
-**Stopped at:** Phase 36 complete locally; broader indicator-based quant_setup matrix calibration remains next
-**Resume file:** .planning/phases/36-indicator-based-setup-point-logic/36-01-SUMMARY.md
+**Last session:** 2026-06-20T22:45:00+08:00
+**Stopped at:** Phase 37 complete locally; latest quant_setup matrix failed promotion gate
+**Resume file:** .planning/phases/37-strategy-promotion-gate/37-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 36 — Indicator-Based Setup Point Logic
-Plan: 36-01 local implementation
+Phase: 37 — Strategy Promotion Gate
+Plan: 37-01 local implementation
 Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — indicator-based setup point logic implemented
+Last activity: 2026-06-20 — strategy promotion gate implemented and latest matrix blocked
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Run recent hot-symbol matrix sweeps with indicator-based `quant_setup` and
-  compare against old fixed variants before using the new setup live.
+- Calibrate `quant_setup`, rerun recent hot-symbol matrix sweeps, then require
+  `ops strategy-promotion-check` to pass before using the new setup live.
 - Monitor the active `SOLUSDT` position through filter-aware
   `ops position-adjustment-plan`.
 - Review the old SOLUSDT decision chain through read-only

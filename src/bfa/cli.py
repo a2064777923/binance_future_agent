@@ -45,6 +45,7 @@ from bfa.ops.position_review import build_position_review_report
 from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
+from bfa.ops.strategy_promotion import build_strategy_promotion_check_report
 from bfa.ops.time_exit_execute import build_time_exit_execute_report
 from bfa.ops.trade_trace import build_trade_trace_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
@@ -324,6 +325,26 @@ def _build_parser() -> argparse.ArgumentParser:
     trade_trace.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     trade_trace.add_argument("--event-id", type=int, help="order_intent event id or row id")
     trade_trace.add_argument("--symbol", help="latest order intent for symbol, e.g. SOLUSDT")
+
+    strategy_promotion = ops_subparsers.add_parser(
+        "strategy-promotion-check",
+        help="read-only gate for promoting a backtest matrix toward forward/live use",
+    )
+    strategy_promotion.add_argument("--env-file", help="optional env file to load before environment overrides")
+    strategy_promotion.add_argument("--matrix-report", required=True, help="JSON report from backtest matrix")
+    strategy_promotion.add_argument("--variant", default="quant_setup", help="variant to check")
+    strategy_promotion.add_argument("--min-trade-count", type=int, default=5, help="minimum trades per interval cell")
+    strategy_promotion.add_argument(
+        "--min-positive-window-rate",
+        type=float,
+        default=0.5,
+        help="minimum positive window rate per interval cell",
+    )
+    strategy_promotion.add_argument(
+        "--max-worst-drawdown-usdt",
+        type=float,
+        help="optional absolute drawdown cap; defaults to matrix cell max_daily_loss_usdt",
+    )
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -948,6 +969,16 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.found else 1
+    if args.ops_command == "strategy-promotion-check":
+        report = build_strategy_promotion_check_report(
+            args.matrix_report,
+            variant=args.variant,
+            min_trade_count=args.min_trade_count,
+            min_positive_window_rate=args.min_positive_window_rate,
+            max_worst_drawdown_usdt=args.max_worst_drawdown_usdt,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.promotion_allowed else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:
