@@ -276,6 +276,7 @@ class CliTests(unittest.TestCase):
             str(replay_path),
             "--generated-at",
             "2026-06-19T09:30:00Z",
+            env={"BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT"},
         )
 
         payload = json.loads(stdout)
@@ -301,6 +302,7 @@ class CliTests(unittest.TestCase):
                 "2026-06-19T09:30:00Z",
                 "--db",
                 str(db_path),
+                env={"BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT"},
             )
 
         payload = json.loads(stdout)

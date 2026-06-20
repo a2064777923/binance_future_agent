@@ -73,6 +73,8 @@ control of downside.
   converted into `min_executable_notional`, cap-incompatible hot symbols are
   rejected before AI calls, and AI notional below executable minimum fails
   closed.
+- Phase 13 validated a controlled 10-symbol pilot universe whose current Binance
+  minimum executable notionals fit the 20 USDT max-position-notional cap.
 
 ### Active
 
@@ -92,6 +94,8 @@ control of downside.
   entry, stop, and target prices derived from market reference data.
 - [x] Avoid spending AI/live execution cycles on hot symbols whose Binance
   minimum executable notional exceeds the 100 USDT pilot position cap.
+- [x] Use a controlled pilot symbol universe that is compatible with current
+  Binance filters under the 20 USDT max-position-notional cap.
 - [ ] Capture LVA-05 protective-order evidence after the first submitted live
   entry, or prove the fail-closed emergency path if protective orders fail.
 
@@ -157,7 +161,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 12 are complete and verified. The project is installable as an
+Phases 1 through 13 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -167,7 +171,8 @@ execution helpers, reconciliation reports, deployment health checks, CLI smoke
 commands, automated one-cycle trading runner, live systemd timer assets,
 exchange-side protective order submission, OpenAI-compatible base URL
 configuration, AI timeout/backoff behavior, market-heat fallback narratives, and
-pilot tradability filtering. The server deployment is installed under
+pilot tradability filtering, and a 10-symbol cap-compatible pilot universe. The
+server deployment is installed under
 `/opt/binance-futures-agent` with a dedicated env file and systemd units. Binance
 and OpenAI credentials are configured out of band, the live timer is enabled and
 active, and a candidate-driven live cycle has reached OpenAI and returned
@@ -177,16 +182,20 @@ Recent live and public Binance filter checks showed that BTCUSDT and ETHUSDT can
 be cap-incompatible under the 20 USDT max-position-notional pilot setting, while
 SOLUSDT can currently fit. Candidate generation now rejects cap-incompatible
 symbols before AI calls instead of relying only on later order-intent rejection.
+The default pilot universe now avoids BTC/ETH under current caps and uses:
+HYPEUSDT, SOLUSDT, ZECUSDT, WLDUSDT, XRPUSDT, AVAXUSDT, BNBUSDT, DOGEUSDT,
+NEARUSDT, and ADAUSDT.
 
-## Current Milestone: v1.4 Pilot Tradability Filter
+## Current Milestone: v1.5 Pilot Symbol Universe
 
-**Goal:** Keep the live pilot inside 100 USDT caps while avoiding hot-symbol
-selection that cannot satisfy current Binance minimum quantity/notional filters.
+**Goal:** Keep the live pilot inside 100 USDT caps while giving the hot-coin
+selector enough cap-compatible symbols to find real candidates.
 
 **Target features:**
-- Include minimum executable notional in candidate and AI context.
-- Reject cap-incompatible candidates before AI calls.
-- Reject AI trade notional below Binance executable minimum.
+- Use at most 10 symbols to preserve existing collector API limits.
+- Prefer high-liquidity Binance USD-M symbols whose minimum executable notional
+  fits the 20 USDT cap.
+- Keep test fixtures explicit about their own symbol allowlists.
 - Preserve 100 USDT pilot caps and unchanged execution risk gates.
 
 ## Key Decisions
@@ -206,8 +215,9 @@ selection that cannot satisfy current Binance minimum quantity/notional filters.
 | Track margin vs notional explicitly | Futures UI can show small margin such as 1 USDT, while Binance order filters validate contract notional and quantity. | Phase 9 follow-up |
 | Require market reference price for AI trade geometry | The model should not invent executable prices from summaries alone. | Phase 11 complete |
 | Filter for pilot tradability before AI | Hot symbols that cannot fit Binance minimum executable notional under the pilot cap should not consume AI/execution cycles. | Phase 12 complete |
+| Use cap-compatible pilot universe | BTC/ETH can be impossible under a 20 USDT notional cap; the pilot needs tradable high-liquidity symbols without raising caps. | Phase 13 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only, with 100 USDT initial capital. | Phase 9 active on server |
 
 ---
-*Last updated: 2026-06-20 after completing v1.4 pilot tradability filtering.*
+*Last updated: 2026-06-20 after completing v1.5 pilot symbol universe.*

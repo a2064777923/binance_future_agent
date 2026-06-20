@@ -3,6 +3,20 @@ import unittest
 from bfa.config import RuntimeMode, load_config, market_symbols, rss_feed_urls, telegram_channels, validate_config
 
 
+PILOT_SYMBOLS = [
+    "HYPEUSDT",
+    "SOLUSDT",
+    "ZECUSDT",
+    "WLDUSDT",
+    "XRPUSDT",
+    "AVAXUSDT",
+    "BNBUSDT",
+    "DOGEUSDT",
+    "NEARUSDT",
+    "ADAUSDT",
+]
+
+
 def base_env(**overrides):
     env = {
         "BFA_MODE": "dry_run",
@@ -17,7 +31,7 @@ def base_env(**overrides):
         "BFA_DB_PATH": "/tmp/binance-futures-agent/data/agent.sqlite",
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
-        "BFA_MARKET_SYMBOLS": "BTCUSDT,ETHUSDT,SOLUSDT",
+        "BFA_MARKET_SYMBOLS": ",".join(PILOT_SYMBOLS),
         "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "true",
         "BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT": "5000000",
         "BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT": "0.3",
@@ -51,7 +65,7 @@ class ConfigTests(unittest.TestCase):
     def test_market_symbols_default_to_small_controlled_allowlist(self):
         config = load_config({})
 
-        self.assertEqual(market_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+        self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
 
     def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))

@@ -1,26 +1,26 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Pilot Tradability Filter
-current_phase: Phase 12 - Pilot Tradability Filter
+milestone: v1.5
+milestone_name: Pilot Symbol Universe
+current_phase: Phase 13 - Pilot Symbol Universe
 status: completed
-stopped_at: Phase 12 complete; awaiting future submitted entry for LVA-05 evidence
-last_updated: "2026-06-20T01:15:00.000Z"
+stopped_at: Phase 13 complete; awaiting future submitted entry for LVA-05 evidence
+last_updated: "2026-06-20T01:25:00.000Z"
 last_activity: 2026-06-20
-last_activity_desc: Phase 12 complete
+last_activity_desc: Phase 13 complete
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 5
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 12 - Pilot Tradability Filter
-**Status:** v1.4 complete; live timer remains under pilot caps
+**Current phase:** Phase 13 - Pilot Symbol Universe
+**Status:** v1.5 complete; live timer remains under pilot caps
 **Last planned:** 2026-06-20
 **Plan count:** 5
 
@@ -75,6 +75,9 @@ projects or losing control of downside.
   max-position-notional cap, so pilot tradability filtering must remain active
   until risk caps are explicitly changed.
 
+- The pilot symbol universe is capped at 10 Binance USD-M symbols that currently
+  fit the 20 USDT max-position-notional cap.
+
 ## Next Command
 
 Keep live caps unchanged and observe timer cycles. After the first submitted
@@ -88,15 +91,15 @@ live entry, use `ops live-status` to verify protective-order evidence.
 
 ## Current Position
 
-Phase: Phase 12 - Pilot Tradability Filter
-Plan: 12-01 complete
-Status: Min executable notional is included in candidate/AI context and cap-incompatible candidates are rejected before AI
-Last activity: 2026-06-20 — Phase 12 complete
+Phase: Phase 13 - Pilot Symbol Universe
+Plan: 13-01 complete
+Status: Defaults and env templates use a cap-compatible 10-symbol pilot universe
+Last activity: 2026-06-20 — Phase 13 complete
 
 ## Operator Next Steps
 
 - Keep 100 USDT pilot caps unchanged.
-- Confirm live cycles skip AI when all hot candidates are cap-incompatible, or send only pilot-tradable candidates to AI.
+- Confirm live cycles use the cap-compatible pilot universe and still fail closed on weak/no-trade signals.
 - Rerun staged matrix backtests before any risk-limit change.
 - Observe future timer cycles; if the endpoint is down, expect
   `openai_backoff` and no order intent.

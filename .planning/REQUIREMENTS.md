@@ -86,6 +86,18 @@ v1.0 requirements are archived at
 - [x] **PTF-04**: Live pilot keeps existing 100 USDT caps unchanged while
   avoiding AI calls for cap-incompatible hot symbols.
 
+### Pilot Symbol Universe
+
+- [x] **PSU-01**: Default market symbols are a capped 10-symbol Binance USD-M
+  universe whose current minimum executable notionals fit the 20 USDT pilot
+  position cap.
+
+- [x] **PSU-02**: Local and server env examples match the pilot-tradable default
+  symbol universe and keep risk caps unchanged.
+
+- [x] **PSU-03**: CLI and config tests remain explicit about fixture-specific
+  symbol allowlists so test fixtures do not depend on live defaults.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -116,13 +128,16 @@ v1.0 requirements are archived at
 | PTF-02 | Phase 12 | Complete - cap-incompatible candidates rejected |
 | PTF-03 | Phase 12 | Complete - AI context and validation include min executable notional |
 | PTF-04 | Phase 12 | Complete - pilot caps unchanged; AI skipped for impossible candidates |
+| PSU-01 | Phase 13 | Complete - 10 pilot-tradable high-liquidity symbols selected |
+| PSU-02 | Phase 13 | Complete - defaults and env examples updated |
+| PSU-03 | Phase 13 | Complete - tests override fixture allowlists explicitly |
 
 **Coverage:**
 
-- v1.1-v1.4 requirements: 17 total
-- Mapped to phases: 17
+- v1.1-v1.5 requirements: 20 total
+- Mapped to phases: 20
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after completing v1.4 pilot tradability filtering*
+*Last updated: 2026-06-20 after completing v1.5 pilot symbol universe*

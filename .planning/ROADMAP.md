@@ -14,6 +14,7 @@
 - ✅ **v1.2 Backtest Calibration** — Phase 10, completed 2026-06-20.
 - ✅ **v1.3 Decision Robustness** — Phase 11, completed 2026-06-20.
 - ✅ **v1.4 Pilot Tradability Filter** — Phase 12, completed 2026-06-20.
+- ✅ **v1.5 Pilot Symbol Universe** — Phase 13, completed 2026-06-20.
 
 ## Phases
 
@@ -141,6 +142,25 @@ minimum executable notional cannot fit the configured max position notional cap.
    spending model calls on impossible trades.
 5. Full tests and server health checks pass after deployment.
 
+### Phase 13: Pilot Symbol Universe
+
+**Goal:** Replace the BTC/ETH-heavy default symbol list with a controlled
+10-symbol universe that currently fits the 20 USDT pilot notional cap.
+
+**Requirements:** PSU-01, PSU-02, PSU-03
+
+**Status:** Complete.
+
+**Success Criteria:**
+
+1. Default `BFA_MARKET_SYMBOLS` contains at most 10 symbols so the existing
+   collector cap remains valid.
+2. Each default symbol was selected from current Binance USD-M public filters as
+   cap-compatible under the 20 USDT max-position-notional setting.
+3. `.env.example` and `deploy/server-env.example` match the new default list.
+4. CLI/config tests explicitly override fixture-specific BTC/ETH allowlists.
+5. Full tests and server health checks pass after deployment.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -157,15 +177,16 @@ minimum executable notional cannot fit the configured max position notional cap.
 | 10 | v1.2 | 1/1 | Complete    | 2026-06-20 |
 | 11 | v1.3 | 1/1 | Complete | 2026-06-20 |
 | 12 | v1.4 | 1/1 | Complete | 2026-06-20 |
+| 13 | v1.5 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.4 requirements: 17
-- Mapped: 17
+- v1.1-v1.5 requirements: 20
+- Mapped: 20
 - Unmapped: 0
 
 ## Next Step
 
-Pilot tradability filtering is complete. Keep 100 USDT pilot caps unchanged and
+Pilot symbol universe is cap-compatible. Keep 100 USDT pilot caps unchanged and
 observe live timer cycles; after the first submitted live entry, verify
 protective-order evidence with `ops live-status`.
