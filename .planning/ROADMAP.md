@@ -334,9 +334,9 @@ quant setup variants without creating live or dry-run order intents.
 **Goal:** Add a paper-only systemd service and timer so forward-paper evidence
 can be collected repeatedly without enabling live automation.
 
-**Requirements:** FPS-01, FPS-02, FPS-03
+**Requirements:** FPS-01, FPS-02, FPS-03, FPS-04
 
-**Status:** Complete locally; server deployment pending.
+**Status:** Complete and deployed; paper-only timer active.
 
 **Plans:** 1 plan
 
@@ -347,7 +347,9 @@ can be collected repeatedly without enabling live automation.
 3. The paper service runs `ops forward-paper-run`, not `agent run-once`.
 4. Bootstrap installs the paper unit/timer but does not start or enable them.
 5. Deployment docs explain paper-only manual start and timer enablement.
-6. Full local test suite passes.
+6. Paper scheduling can auto-select a wider hot-symbol universe for paper
+   observation without widening the live trading allowlist.
+7. Full local test suite passes.
 
 ## Progress
 
@@ -355,7 +357,7 @@ can be collected repeatedly without enabling live automation.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-41 | 12/12 | Phase 41 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-41 | 12/12 | Phase 41 deployed | Pending |
 
 ## Requirement Coverage
 
@@ -370,10 +372,11 @@ still fails default all-interval `ops strategy-promotion-check`. The
 `quant_setup_selective` variant is now eligible only for `5m` forward-paper
 observation through `--scope selected-intervals --intervals 5m`, and local
 `ops forward-paper-run` can record paper signals/outcomes without order
-intents, and local deployment assets now include a paper-only systemd timer.
-Next work should deploy and optionally enable the paper-only timer on the
-server, then collect out-of-sample evidence and/or recalibrate failed `15m`
-behavior before restoring live automation. Monitor `SOLUSDT` through
+intents, and deployment assets now include an active paper-only systemd timer
+on the server. The paper timer should use auto-hot symbol selection rather than
+the 10-symbol live pilot allowlist after the next deploy. Next work should
+collect out-of-sample paper evidence and/or recalibrate failed `15m` behavior
+before restoring live automation. Monitor any active position through
 filter-aware `ops position-adjustment-plan` and use
 `ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
 adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`

@@ -11,6 +11,9 @@
 - Updated deployment docs with paper-only manual service and timer commands.
 - Updated deployment asset tests to verify the paper service uses
   `ops forward-paper-run` and not `agent run-once`.
+- Added paper-only auto-hot symbol selection so scheduled forward-paper
+  observation can scan up to 40 Binance USD-M USDT hot symbols without
+  widening the live pilot trading allowlist.
 
 ## Operational Result
 
@@ -19,15 +22,33 @@ collection. These assets are isolated from live automation and are intended to
 collect out-of-sample `paper_signals` and `paper_outcomes` while the strict
 all-interval live gate remains blocked.
 
+## Server Result
+
+- Deployed to `/opt/binance-futures-agent/app`.
+- Server deploy asset tests passed with `6` tests.
+- Server full suite passed with `319` tests.
+- Secret-safe health-check passed with network checks skipped.
+- `binance-futures-agent-paper.service` and
+  `binance-futures-agent-paper.timer` are installed.
+- `binance-futures-agent-paper.timer` is enabled and active.
+- `binance-futures-agent-live.service` and
+  `binance-futures-agent-live.timer` remain `inactive`.
+- First systemd-triggered paper run returned `paper_run_complete` with
+  `generated_signals=0`, `skipped_signals=10`, `paper_signals=0`, and
+  `paper_outcomes=0`.
+- The first deployed timer used the 10-symbol live pilot allowlist. A
+  follow-up local fix changes the paper service to auto-select top hot symbols
+  from Binance 24h ticker data before falling back to configured paper/live
+  symbols.
+
 ## Not Changed
 
-- Live timer was not restored by this local work.
+- Live timer was not restored.
 - Risk profile was not changed.
 - No exchange order or position adjustment was executed.
 - No Binance signed endpoint is required by the paper service command.
 
 ## Next
 
-Deploy the assets to `/opt/binance-futures-agent/app`, verify that the live
-timer remains inactive, then optionally enable only
-`binance-futures-agent-paper.timer` for scheduled observation.
+Let the paper timer collect out-of-sample evidence, then rerun recent matrix
+and promotion checks before any live resume.

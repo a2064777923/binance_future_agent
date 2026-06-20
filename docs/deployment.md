@@ -182,7 +182,10 @@ decision gate or deterministic execution risk checks.
 
 Forward-paper collection is separate from live automation. It records
 `paper_signals` and `paper_outcomes` from public klines and never creates
-`order_intents`:
+`order_intents`. By default the paper service auto-selects up to 40 hot USD-M
+USDT symbols from Binance 24h ticker data using quote-volume and absolute
+price-change filters. This is deliberately wider than the live
+`BFA_MARKET_SYMBOLS` pilot allowlist:
 
 ```bash
 systemctl start binance-futures-agent-paper.service

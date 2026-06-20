@@ -2117,6 +2117,9 @@ class CliTests(unittest.TestCase):
 
     def test_ops_forward_paper_run_records_paper_signal_only(self):
         class FakeClient:
+            def ticker_24hr(self, symbol=None):
+                return MarketDataResponse(endpoint="/fapi/v1/ticker/24hr", params={}, payload=[])
+
             def klines(self, symbol, *, interval, limit=30, start_time=None, end_time=None):
                 rows = []
                 price = 100.0
@@ -2168,6 +2171,69 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["persisted"]["paper_signals"], 1)
         self.assertEqual(signal_count, 1)
         self.assertEqual(intent_count, 0)
+
+    def test_ops_forward_paper_run_auto_selects_hot_symbols(self):
+        class FakeClient:
+            def __init__(self):
+                self.kline_symbols = []
+
+            def ticker_24hr(self, symbol=None):
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {"symbol": "HOTUSDT", "priceChangePercent": "6", "quoteVolume": "90000000", "count": 1000},
+                        {"symbol": "SLOWUSDT", "priceChangePercent": "0.1", "quoteVolume": "100000000", "count": 1000},
+                        {"symbol": "USDCUSDT", "priceChangePercent": "8", "quoteVolume": "120000000", "count": 1000},
+                    ],
+                )
+
+            def klines(self, symbol, *, interval, limit=30, start_time=None, end_time=None):
+                self.kline_symbols.append(symbol)
+                rows = []
+                price = 100.0
+                for index in range(limit):
+                    close = price * 1.01
+                    rows.append(
+                        test_kline(
+                            1_700_000_000_000 + index * 300_000,
+                            open_price=str(price),
+                            high=str(close * 1.01),
+                            low=str(price * 0.999),
+                            close=str(close),
+                        )
+                    )
+                    price = close
+                return MarketDataResponse(endpoint="/fapi/v1/klines", params={}, payload=rows)
+
+        fake_client = FakeClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "forward-paper-run",
+                "--db",
+                str(db),
+                "--top-n",
+                "2",
+                "--min-quote-volume-usdt",
+                "10000000",
+                "--min-abs-price-change-percent",
+                "0.5",
+                "--interval",
+                "5m",
+                "--variant",
+                "quant_setup_selective",
+                "--limit",
+                "18",
+                client_factory=lambda _config: fake_client,
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["symbols"], ["HOTUSDT"])
+        self.assertEqual(fake_client.kline_symbols, ["HOTUSDT"])
 
 
 if __name__ == "__main__":

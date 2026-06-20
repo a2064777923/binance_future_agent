@@ -195,6 +195,10 @@ projects or losing control of downside.
 - [x] **FPS-03**: Deployment documentation explains how to run or enable the
   paper-only timer separately from live automation.
 
+- [x] **FPS-04**: Forward-paper scheduling uses a wider auto-hot symbol
+  universe than the live pilot allowlist, without changing the live
+  `BFA_MARKET_SYMBOLS` trading universe.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -250,13 +254,14 @@ projects or losing control of downside.
 | FPE-02 | Phase 40 | Complete locally |
 | FPE-03 | Phase 40 | Complete locally |
 | FPE-04 | Phase 40 | Complete locally |
-| FPS-01 | Phase 41 | Complete locally |
-| FPS-02 | Phase 41 | Complete locally |
-| FPS-03 | Phase 41 | Complete locally |
+| FPS-01 | Phase 41 | Complete and deployed |
+| FPS-02 | Phase 41 | Complete and deployed |
+| FPS-03 | Phase 41 | Complete and deployed |
+| FPS-04 | Phase 41 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 46 total
-- Mapped to phases: 46
+- v1.22 requirements: 47 total
+- Mapped to phases: 47
 - Unmapped: 0
 
 ---

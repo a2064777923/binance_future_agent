@@ -15,9 +15,9 @@ from bfa.ai.providers import ai_source, build_ai_client
 from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.backtest.data import fetch_historical_klines, load_klines_dataset, write_klines_dataset
 from bfa.backtest.engine import run_hot_momentum_backtest, run_staged_sweep
-from bfa.backtest.matrix import BacktestMatrixConfig, HotUniverseConfig, run_hot_backtest_matrix
+from bfa.backtest.matrix import BacktestMatrixConfig, HotUniverseConfig, run_hot_backtest_matrix, select_hot_usdt_symbols
 from bfa.backtest.models import BacktestConfig, built_in_variants
-from bfa.config import AppConfig, load_config, market_symbols, rss_feed_urls, validate_config
+from bfa.config import AppConfig, forward_paper_symbols, load_config, market_symbols, rss_feed_urls, validate_config
 from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.report import generate_review_report
 from bfa.event_store.store import EventStore
@@ -363,7 +363,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     forward_paper.add_argument("--env-file", help="optional env file to load before environment overrides")
     forward_paper.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
-    forward_paper.add_argument("--symbols", help="comma-separated symbols; defaults to configured market symbols")
+    forward_paper.add_argument(
+        "--symbols",
+        help="comma-separated symbols; defaults to auto hot symbols, then BFA_FORWARD_PAPER_SYMBOLS, then BFA_MARKET_SYMBOLS",
+    )
+    forward_paper.add_argument(
+        "--auto-hot-symbols",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="auto-select symbols from Binance 24h ticker before falling back to configured paper symbols",
+    )
+    forward_paper.add_argument("--top-n", type=int, help="number of auto hot symbols to select")
+    forward_paper.add_argument("--min-quote-volume-usdt", type=float, help="minimum 24h quote volume for auto hot symbols")
+    forward_paper.add_argument(
+        "--min-abs-price-change-percent",
+        type=float,
+        help="minimum absolute 24h price change percent for auto hot symbols",
+    )
     forward_paper.add_argument("--interval", default="5m", help="kline interval to observe")
     forward_paper.add_argument("--variant", default="quant_setup_selective", help="quant_setup backtest variant to observe")
     forward_paper.add_argument("--limit", type=int, default=36, help="recent kline bars to fetch per symbol")
@@ -917,6 +933,42 @@ def _build_signed_client(config: AppConfig, signed_client_factory):
     )
 
 
+def _forward_paper_symbols_from_config(config: AppConfig, client, args: argparse.Namespace) -> list[str]:
+    if _forward_paper_auto_hot_enabled(config, args):
+        hot_symbols = _select_forward_paper_hot_symbols(config, client, args)
+        if hot_symbols:
+            return hot_symbols
+    return forward_paper_symbols(config)
+
+
+def _forward_paper_auto_hot_enabled(config: AppConfig, args: argparse.Namespace) -> bool:
+    if args.auto_hot_symbols is not None:
+        return bool(args.auto_hot_symbols)
+    return _truthy(config.get("BFA_FORWARD_PAPER_AUTO_HOT_SYMBOLS"))
+
+
+def _select_forward_paper_hot_symbols(config: AppConfig, client, args: argparse.Namespace) -> list[str]:
+    ticker_response = client.ticker_24hr()
+    ticker_payload = ticker_response.payload if isinstance(ticker_response.payload, list) else []
+    hot_rows = select_hot_usdt_symbols(
+        ticker_payload,
+        HotUniverseConfig(
+            top_n=args.top_n or int(config.get("BFA_FORWARD_PAPER_TOP_N")),
+            min_quote_volume_usdt=(
+                args.min_quote_volume_usdt
+                if args.min_quote_volume_usdt is not None
+                else float(config.get("BFA_FORWARD_PAPER_MIN_QUOTE_VOLUME_USDT"))
+            ),
+            min_abs_price_change_percent=(
+                args.min_abs_price_change_percent
+                if args.min_abs_price_change_percent is not None
+                else float(config.get("BFA_FORWARD_PAPER_MIN_ABS_PRICE_CHANGE_PERCENT"))
+            ),
+        ),
+    )
+    return [str(item["symbol"]) for item in hot_rows]
+
+
 def _run_ops(
     args: argparse.Namespace,
     *,
@@ -1005,9 +1057,14 @@ def _run_ops(
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.promotion_allowed else 1
     if args.ops_command == "forward-paper-run":
-        symbols = _symbols_arg(args.symbols) if args.symbols else market_symbols(config)
+        client = _build_client(config, client_factory)
+        symbols = (
+            _symbols_arg(args.symbols)
+            if args.symbols
+            else _forward_paper_symbols_from_config(config, client, args)
+        )
         report = run_forward_paper(
-            client=_build_client(config, client_factory),
+            client=client,
             db_path=args.db or config.get("BFA_DB_PATH"),
             symbols=symbols,
             interval=args.interval,

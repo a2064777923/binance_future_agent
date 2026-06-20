@@ -1,6 +1,14 @@
 import unittest
 
-from bfa.config import RuntimeMode, load_config, market_symbols, rss_feed_urls, telegram_channels, validate_config
+from bfa.config import (
+    RuntimeMode,
+    forward_paper_symbols,
+    load_config,
+    market_symbols,
+    rss_feed_urls,
+    telegram_channels,
+    validate_config,
+)
 
 
 PILOT_SYMBOLS = [
@@ -35,6 +43,11 @@ def base_env(**overrides):
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
         "BFA_MARKET_SYMBOLS": ",".join(PILOT_SYMBOLS),
+        "BFA_FORWARD_PAPER_SYMBOLS": "",
+        "BFA_FORWARD_PAPER_AUTO_HOT_SYMBOLS": "true",
+        "BFA_FORWARD_PAPER_TOP_N": "40",
+        "BFA_FORWARD_PAPER_MIN_QUOTE_VOLUME_USDT": "10000000",
+        "BFA_FORWARD_PAPER_MIN_ABS_PRICE_CHANGE_PERCENT": "0.5",
         "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "true",
         "BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT": "5000000",
         "BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT": "0.3",
@@ -77,6 +90,17 @@ class ConfigTests(unittest.TestCase):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
 
         self.assertEqual(market_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+
+    def test_forward_paper_symbols_can_be_wider_than_live_market_symbols(self):
+        config = load_config(base_env(BFA_FORWARD_PAPER_SYMBOLS=" btcusdt, ethusdt,solusdt "))
+
+        self.assertEqual(forward_paper_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+        self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
+
+    def test_forward_paper_symbols_fall_back_to_live_market_symbols(self):
+        config = load_config(base_env(BFA_FORWARD_PAPER_SYMBOLS=""))
+
+        self.assertEqual(forward_paper_symbols(config), PILOT_SYMBOLS)
 
     def test_narrative_source_lists_are_trimmed_and_ordered(self):
         config = load_config(

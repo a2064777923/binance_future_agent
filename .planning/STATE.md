@@ -4,8 +4,8 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 41
 status: active
-stopped_at: Phase 41 local assets added; deployment and optional paper timer enablement pending
-last_updated: "2026-06-20T21:48:53+08:00"
+stopped_at: Phase 41 deployed; paper-only timer active; live timer inactive
+last_updated: "2026-06-20T21:53:07+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 41 — Forward-Paper Scheduling Assets
-**Status:** Phase 41 local assets added; live timer remains paused while default all-interval strategy promotion fails
+**Status:** Phase 41 deployed; paper-only timer active; live timer remains paused while default all-interval strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,9 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Deploy paper-only systemd scheduling assets, optionally
-enable the paper timer, and keep live resume gated by all-interval strategy
-evidence.
+**Current focus:** Collect paper-only forward evidence and keep live resume
+gated by all-interval strategy evidence.
 
 ## Decisions
 
@@ -472,34 +471,46 @@ evidence.
   `agent run-once`. The bootstrap installs the paper unit/timer but does not
   enable or start them. Full local suite passed with `319` tests.
 
+- Phase 41 server deployment is complete under `/opt/binance-futures-agent/app`.
+  Server deploy asset tests passed with `6` tests, server full suite passed
+  with `319` tests, and secret-safe health-check passed with network checks
+  skipped. `binance-futures-agent-paper.timer` is enabled and active; the first
+  systemd-triggered paper run returned `paper_run_complete` with
+  `generated_signals=0`, `skipped_signals=10`, `paper_signals=0`, and
+  `paper_outcomes=0`. `binance-futures-agent-live.service` and
+  `binance-futures-agent-live.timer` remain `inactive`.
+
+- Follow-up Phase 41 fix separates paper observation universe from the live
+  pilot allowlist. Live `BFA_MARKET_SYMBOLS` remains the controlled 10-symbol
+  trading universe, while `ops forward-paper-run` can auto-select up to 40 hot
+  USDT USD-M symbols from Binance 24h ticker data using quote-volume and
+  absolute price-change filters before falling back to
+  `BFA_FORWARD_PAPER_SYMBOLS` or `BFA_MARKET_SYMBOLS`.
+
 ## Next Command
 
-Deploy Phase 41 paper scheduling assets, verify live timer remains inactive,
-then optionally enable only `binance-futures-agent-paper.timer` so
-`ops forward-paper-run` collects repeated out-of-sample evidence. Do not
-restore the live timer, execute adjustment orders, or apply
-`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
-`keep_live_paused`.
+Collect repeated out-of-sample `ops forward-paper-run` evidence from the active
+paper-only timer, then rerun matrix and promotion checks. Do not restore the
+live timer, execute adjustment orders, or apply `30u_10x_multi_dynamic` while
+the default all-interval promotion gate returns `keep_live_paused`.
 
 ## Session
 
 **Last session:** 2026-06-21T00:30:00+08:00
-**Stopped at:** Phase 41 local assets added; deployment and optional paper timer enablement pending
+**Stopped at:** Phase 41 deployed; paper-only timer active; live timer inactive
 **Resume file:** .planning/phases/41-forward-paper-scheduling-assets/41-01-SUMMARY.md
 
 ## Current Position
 
 Phase: 41 — Forward-Paper Scheduling Assets
 Plan: 41-01 local implementation
-Status: Local assets added; deployment pending; live service/timer should remain inactive
-Last activity: 2026-06-20 — paper-only systemd service/timer added and local tests passed
+Status: Deployed; paper-only timer active; live service/timer inactive
+Last activity: 2026-06-20 — paper-only systemd service/timer deployed and enabled
 
 ## Operator Next Steps
 
-- Decide whether to close/review the active `SOLUSDT` position before restoring
-  the live timer.
-- Deploy and optionally enable only the paper timer for repeated
-  `ops forward-paper-run` on `quant_setup_selective` `5m`, while keeping
+- Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
+  `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
