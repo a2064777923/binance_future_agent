@@ -62,7 +62,7 @@ projects or losing control of downside.
 - [x] **LIVE-02**: Confirmed live resume refuses to mutate server env, systemd
   timers, services, or Binance state unless the operator decision packet is
   `eligible_for_operator_resume`.
-- [ ] **LIVE-03**: The first resumed live cycles include active-position
+- [x] **LIVE-03**: The first resumed live cycles include active-position
   review, adjustment-plan summaries, entry-capacity preflight, and trade-trace
   identifiers for any submitted order.
 
@@ -74,7 +74,7 @@ projects or losing control of downside.
 - [x] **RISK-02**: Public Lana/Square/X claims can influence factor design and
   source selection, but no claim can count as proof of profitability or unlock
   live risk without local backtest, paper, and exchange evidence.
-- [ ] **RISK-03**: Server deployment and evidence collection remain isolated to
+- [x] **RISK-03**: Server deployment and evidence collection remain isolated to
   `/opt/binance-futures-agent` and `/etc/binance-futures-agent`, with no writes
   to `F:\stock` or unrelated server projects.
 
@@ -117,10 +117,10 @@ projects or losing control of downside.
 | LOSS-02 | Phase 58 | Complete |
 | LIVE-01 | Phase 59 | Complete |
 | LIVE-02 | Phase 59 | Complete |
-| LIVE-03 | Phase 60 | Pending |
+| LIVE-03 | Phase 60 | Complete |
 | RISK-01 | Phase 59 | Complete |
 | RISK-02 | Phase 58 | Complete |
-| RISK-03 | Phase 60 | Pending |
+| RISK-03 | Phase 60 | Complete |
 
 **Coverage:**
 - v1.25 requirements: 17 total
@@ -129,4 +129,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 59 completion*
+*Last updated: 2026-06-21 after Phase 60 completion*

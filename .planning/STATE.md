@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
-current_phase: 60
-current_phase_name: Server Evidence And Pilot Resume Packet
-status: live-pilot-active
-stopped_at: Phase 59 complete locally; Phase 60 ready to plan/deploy.
-last_updated: "2026-06-21T04:43:54+08:00"
+current_phase: null
+current_phase_name: null
+status: milestone-complete-live-pilot-active
+stopped_at: Phase 60 complete; v1.25 milestone ready for archive/next milestone.
+last_updated: "2026-06-21T05:05:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 59 complete
+last_activity_desc: Phase 60 complete
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 5
-  completed_plans: 4
-  percent: 80
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 60 — Server Evidence And Pilot Resume Packet
-**Status:** Live pilot active; Phase 60 ready to plan
+**Current phase:** None — v1.25 milestone complete
+**Status:** Live pilot active; v1.25 complete
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -32,8 +32,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Deploy and verify Phase 59 controls on the isolated server,
-then produce the current operator packet and server evidence for Phase 60.
+**Current focus:** Start the next milestone for live pilot iteration from the
+Phase 60 server evidence.
 
 ## Decisions
 
@@ -45,9 +45,9 @@ then produce the current operator packet and server evidence for Phase 60.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 30 USDT account capital, 10x max leverage, 50 USDT max
+- Active trial profile: 30 USDT account capital, 10x max leverage, 60 USDT max
   position notional, 0.4 USDT max per-trade risk, 1 USDT max daily loss, and
-  5 open positions under dynamic sizing and portfolio caps.
+  6 open positions under dynamic sizing and portfolio caps.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -705,14 +705,15 @@ then produce the current operator packet and server evidence for Phase 60.
 
 - Operator clarified the current `BTWUSDT` position is manual and must remain
   ignored by agent management. The live pilot cap profile was widened one step
-  beyond the previous 4-position/40U profile to a 5-position/50U profile:
-  `BFA_MAX_OPEN_POSITIONS=5`, `BFA_MAX_POSITION_NOTIONAL_USDT=50`,
-  `BFA_MAX_MARGIN_PER_POSITION_USDT=5`,
-  `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=50`,
-  `BFA_MAX_PORTFOLIO_MARGIN_USDT=25`,
-  `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.85`,
-  `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=300`, and
-  `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=250`. The per-trade risk cap remains
+  beyond the previous 5-position/50U profile to a 6-position/60U profile:
+  `BFA_MAX_OPEN_POSITIONS=6`, `BFA_MAX_POSITION_NOTIONAL_USDT=60`,
+  `BFA_MAX_MARGIN_PER_POSITION_USDT=6`,
+  `BFA_MAX_MARGIN_FRACTION=0.20`,
+  `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=60`,
+  `BFA_MAX_PORTFOLIO_MARGIN_USDT=30`,
+  `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.95`,
+  `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=360`, and
+  `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=300`. The per-trade risk cap remains
   `BFA_MAX_RISK_PER_TRADE_USDT=0.4`.
 
 - Phase 59 is complete locally. It adds `ops live-resume-plan` and
@@ -724,32 +725,42 @@ then produce the current operator packet and server evidence for Phase 60.
   live service is inactive. The path does not place/cancel orders, create order
   intents, or mutate Binance exchange state.
 
+- Phase 60 is complete. Phase 59 controls and the widened 6-position/60U
+  `30u_10x_multi_dynamic` profile are deployed on the isolated server. Local
+  and server full suites passed with 386 tests each. Server artifacts show
+  `phase60-operator-decision.status=resolve_exposure`,
+  `eligible_for_operator_resume=false`,
+  `phase60-live-resume-plan.status=resume_apply_blocked`,
+  `resume_allowed=false`, and `applies_changes=false`. Exposure status reports
+  current-profile entry capacity available under the widened caps. Position
+  review reports `NEARUSDT` as `close_review` for `hold_time_expired` and
+  `BTWUSDT` as `manual_hold` with `manual_position_ignored`. No resume apply,
+  adjustment execution, time-exit execution, live order, or cancelation was run.
+
 ## Next Command
 
-Plan Phase 60 with live automation already active. Deploy and verify the
-Phase 59 controls on `/opt/binance-futures-agent`, capture server timer/service
-state before and after deploy, and produce the current operator packet. Current
-Phase 58 evidence still says `collect_more_paper`, so any apply path should
-remain fail-closed unless a future packet becomes eligible.
+Start a new milestone for live pilot iteration: active-position handling,
+automatic review/exit policy, strategy improvement, and ongoing evidence
+collection while the live timer remains active under the widened caps.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 59 complete locally; live timer active; protected
-NEARUSDT live position open; BTWUSDT marked manual; widened
-10x/5-position/50U dynamic caps deployed; Phase 60 ready to plan/deploy.
-**Resume file:** .planning/phases/59-confirmation-gated-live-resume-path/59-VERIFICATION.md
+**Stopped at:** Phase 60 complete; live timer active; NEARUSDT needs review;
+BTWUSDT marked manual; 10x/6-position/60U dynamic caps deployed and verified.
+**Resume file:** .planning/phases/60-server-evidence-and-pilot-resume-packet/60-VERIFICATION.md
 
 ## Current Position
 
-Phase: 60 — Server Evidence And Pilot Resume Packet
-Plan: —
-Status: Ready to plan/deploy with live pilot active and Phase 58 evidence fail-closed
-Last activity: 2026-06-21 — Phase 59 completed locally
+Phase: none — v1.25 complete
+Plan: none
+Status: Live pilot active; next milestone needed for iteration
+Last activity: 2026-06-21 — Phase 60 completed and deployed
 
 ## Operator Next Steps
 
 - Monitor/reconcile the open protected `NEARUSDT` live position.
 - Keep `BTWUSDT` classified as manual unless the operator explicitly hands it
   to the agent.
-- Plan Phase 60 and deploy/verify the Phase 59 controls on the isolated server.
+- Start the next milestone for active-position automation and strategy
+  improvement from Phase 60 evidence.

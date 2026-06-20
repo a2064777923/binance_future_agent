@@ -21,8 +21,8 @@
 - ✅ **v1.24 Server Readiness And Paper Promotion** — Phases 53-55,
   shipped 2026-06-21 ([archive](milestones/v1.24-ROADMAP.md)).
 
-- ◆ **v1.25 Live Resume Clearance And Adaptive Pilot** — Phases 56-60,
-  active.
+- ✅ **v1.25 Live Resume Clearance And Adaptive Pilot** — Phases 56-60,
+  shipped 2026-06-21.
 
 ## Phases
 
@@ -112,13 +112,13 @@
 </details>
 
 <details open>
-<summary>◆ v1.25 Live Resume Clearance And Adaptive Pilot (Phases 56-60) — ACTIVE</summary>
+<summary>✅ v1.25 Live Resume Clearance And Adaptive Pilot (Phases 56-60) — SHIPPED 2026-06-21</summary>
 
 - [x] Phase 56: Exposure Clearance And Manual Loss Intake (1/1 plan) (completed 2026-06-21)
 - [x] Phase 57: Adaptive Forward-Paper Observation (1/1 plan) (completed 2026-06-21)
 - [x] Phase 58: Promotion Matrix And Loss Review (1/1 plan) (completed 2026-06-21)
 - [x] Phase 59: Confirmation-Gated Live Resume Path (1/1 plan) (completed 2026-06-21)
-- [ ] Phase 60: Server Evidence And Pilot Resume Packet (0/1 plan)
+- [x] Phase 60: Server Evidence And Pilot Resume Packet (1/1 plan) (completed 2026-06-21)
 
 </details>
 
@@ -219,6 +219,10 @@ operator-confirmed resume.
 
 **Requirements:** LIVE-03, RISK-03
 
+**Plans:** 1/1 plan complete
+
+**Status:** Complete - 2026-06-21
+
 **Success criteria:**
 
 1. Server deployment is scoped to `/opt/binance-futures-agent` and
@@ -240,7 +244,7 @@ operator-confirmed resume.
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
 | v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 5/5 | Complete | 2026-06-21 |
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
-| v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 4/5 | Active | - |
+| v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
 
 ## Requirement Coverage
 
@@ -253,6 +257,5 @@ operator-confirmed resume.
 
 ## Next Step
 
-Plan Phase 60 with `$gsd-plan-phase 60`. Phase 59 added the
-confirmation-gated resume/profile mutation path locally; Phase 60 must deploy
-and verify it on the isolated server, then produce the current operator packet.
+Start the next milestone for live pilot iteration, especially active-position
+handling and strategy improvement from the latest server evidence.

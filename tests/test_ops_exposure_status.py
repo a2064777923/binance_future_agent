@@ -95,7 +95,7 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertIn("duplicate_symbol_direction_exposure", payload["entry_capacity"]["reasons"])
         self.assertEqual(payload["target_profile"]["target_leverage"], 10)
         self.assertTrue(payload["target_sizing"]["enabled"])
-        self.assertAlmostEqual(payload["target_sizing"]["max_position_notional_usdt"], 50)
+        self.assertAlmostEqual(payload["target_sizing"]["max_position_notional_usdt"], 55.8)
         self.assertTrue(payload["risk_change"]["risk_change_allowed"])
         self.assertIn("active_position_within_target_profile_caps", payload["risk_change"]["reasons"])
         self.assertIn("active_position_present", payload["risk_change"]["reasons"])
@@ -138,7 +138,7 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertEqual(payload["entry_capacity"]["hypothetical"]["order_side"], "SELL")
         self.assertEqual(payload["entry_capacity"]["hypothetical"]["direction"], "SHORT")
         self.assertTrue(payload["risk_change"]["risk_change_allowed"])
-        self.assertEqual(payload["target_profile"]["target_values"]["BFA_MAX_OPEN_POSITIONS"], "5")
+        self.assertEqual(payload["target_profile"]["target_values"]["BFA_MAX_OPEN_POSITIONS"], "6")
         self.assertEqual(payload["target_profile"]["target_values"]["BFA_MULTI_POSITION_ENABLED"], "true")
         self.assertEqual(
             payload["target_profile"]["confirmation_token"],

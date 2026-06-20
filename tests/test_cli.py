@@ -1169,7 +1169,7 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["resume_allowed"])
         self.assertFalse(payload["applies_changes"])
         self.assertFalse(payload["read_only"]["writes_env_files"])
-        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 50.0)
+        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 60.0)
 
     def test_ops_live_resume_apply_blocks_non_eligible_packet_without_writing_env(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1197,7 +1197,7 @@ class CliTests(unittest.TestCase):
                     [
                         "BFA_MODE=live",
                         "BFA_MAX_LEVERAGE=10",
-                        "BFA_MAX_POSITION_NOTIONAL_USDT=50",
+                        "BFA_MAX_POSITION_NOTIONAL_USDT=60",
                         "BINANCE_API_KEY=synthetic-binance-key-abcdef",
                         "BINANCE_API_SECRET=synthetic-binance-secret-abcdef",
                     ]

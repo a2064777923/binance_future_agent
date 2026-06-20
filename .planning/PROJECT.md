@@ -156,6 +156,12 @@ control of downside.
   and refuses to apply unless the operator decision packet is
   `eligible_for_operator_resume`, the token matches, and the live service is
   inactive.
+- Phase 60 deploys and verifies the Phase 59 controls on the isolated server,
+  refreshes server operator artifacts, preserves `BTWUSDT` as manual exposure,
+  and widens the active 30U/10x dynamic pilot caps to 6 open positions, 60 USDT
+  max position notional, 360 USDT portfolio notional, and 300 USDT
+  same-direction notional while keeping 0.4 USDT per-trade risk and 1 USDT
+  daily loss.
 
 ### Active
 
@@ -306,7 +312,7 @@ The user's chosen direction:
 ## Current State
 
 Milestones v1.0, v1.21, v1.22, v1.23, and v1.24 are archived. Phases 1 through
-59 are complete locally, and the current server deployment is installed under the isolated
+60 are complete, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
@@ -359,9 +365,9 @@ secret-safe health check passed after deployment.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
-out of band. The active trial profile is 30 USDT account capital, 5x max
-leverage, 12 USDT max position notional, 0.3 USDT max per-trade risk, 1 USDT max
-daily loss, and 1 open position.
+out of band. The active trial profile is 30 USDT account capital, 10x max
+leverage, 60 USDT max position notional, 0.4 USDT max per-trade risk, 1 USDT max
+daily loss, and 6 open positions under dynamic sizing and portfolio caps.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`
@@ -419,7 +425,7 @@ be considered cleared. Phase 56 also fixes a readiness false blocker so
 manual-symbol overrides only block when the symbol is actually active on the
 exchange.
 
-## Current Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
+## Completed Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 
 **Goal:** Clear the current live-resume blockers, make paper evidence generate
 useful post-change samples again, and prepare a separately confirmed small live
@@ -741,8 +747,8 @@ remains paused.
 | Guarded paper before live | The Phase 50 guarded variant needs post-change server paper evidence before any live timer restore discussion. | Phase 54 complete; evidence not promoted |
 | Operator packet before live | Readiness JSON needs one operator-facing next action before any separate live resume confirmation flow is prepared. | Phase 55 complete; current packet says `resolve_exposure` |
 | Paper observation before resume | Low-signal or zero-signal paper runs must show generated candidates, rejected setup reasons, factor snapshots, and source health before any promotion review. | Phase 57 complete |
-| Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 active |
-| Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete locally |
+| Public hot-coin claims require local proof | Lana/Square/X screenshots can inspire data and factor design, but cannot promote live risk without local matrix, paper, and live outcome evidence. | v1.25 complete |
+| Live resume is a separate mutation | Readiness can only produce eligibility; profile/timer changes need a fresh confirmation command and token. | Phase 59 complete; Phase 60 deployed |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
@@ -766,4 +772,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 59 completion.*
+*Last updated: 2026-06-21 after Phase 60 completion.*
