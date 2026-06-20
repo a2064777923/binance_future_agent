@@ -4,8 +4,8 @@ milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
 current_phase: 40
 status: active
-stopped_at: Phase 40 complete locally; forward-paper recorder implemented but not scheduled on server
-last_updated: "2026-06-21T00:10:00+08:00"
+stopped_at: Phase 40 deployed; forward-paper recorder verified on server, first run produced no qualifying signal
+last_updated: "2026-06-21T00:30:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
@@ -20,7 +20,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 40 — Forward-Paper Evidence Recorder
-**Status:** Phase 40 complete locally; live timer remains paused while default all-interval strategy promotion fails
+**Status:** Phase 40 deployed; live timer remains paused while default all-interval strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -452,32 +452,45 @@ keeping live resume gated by all-interval strategy evidence.
   does not use signed Binance endpoints, and does not modify live env, timer,
   positions, or risk profile.
 
+- Phase 40 server deployment is complete under `/opt/binance-futures-agent/app`.
+  The package was reinstalled editable in `/opt/binance-futures-agent/.venv`.
+  Server focused tests passed with `10` tests, server full suite passed with
+  `319` tests, and secret-safe health check passed with network checks skipped.
+  The live service and live timer remained `inactive`.
+
+- Server `ops forward-paper-run --symbols HYPEUSDT,SOLUSDT,ZECUSDT,WLDUSDT,
+  XRPUSDT,AVAXUSDT,BNBUSDT,DOGEUSDT,NEARUSDT,ADAUSDT --interval 5m --variant
+  quant_setup_selective --limit 36` completed with `generated_signals=0`,
+  `skipped_signals=10`, and no paper outcomes. DB counts after the run were
+  `paper_signals=0`, `paper_outcomes=0`, and existing `order_intents=18`,
+  confirming no live/dry-run order intent was created.
+
 ## Next Command
 
-Deploy or schedule `ops forward-paper-run` for `quant_setup_selective` on `5m`,
-then collect out-of-sample paper outcomes and rerun matrix plus both selected
-and all-interval `ops strategy-promotion-check`. Do not restore the live timer,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while the default
-all-interval promotion gate returns `keep_live_paused`.
+Schedule repeated `ops forward-paper-run` collection for `quant_setup_selective`
+on `5m`, then collect out-of-sample paper outcomes and rerun matrix plus both
+selected and all-interval `ops strategy-promotion-check`. Do not restore the
+live timer, execute adjustment orders, or apply `30u_10x_multi_dynamic` while
+the default all-interval promotion gate returns `keep_live_paused`.
 
 ## Session
 
-**Last session:** 2026-06-21T00:10:00+08:00
-**Stopped at:** Phase 40 complete locally; forward-paper recorder implemented but not scheduled on server
+**Last session:** 2026-06-21T00:30:00+08:00
+**Stopped at:** Phase 40 deployed; forward-paper recorder verified on server, first run produced no qualifying signal
 **Resume file:** .planning/phases/40-forward-paper-evidence-recorder/40-01-SUMMARY.md
 
 ## Current Position
 
 Phase: 40 — Forward-Paper Evidence Recorder
 Plan: 40-01 local implementation
-Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — forward-paper signal/outcome recorder implemented locally
+Status: Deployed; live service/timer inactive; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — forward-paper recorder deployed and server smoke run completed
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Deploy or schedule `ops forward-paper-run` for `quant_setup_selective` on
+- Schedule repeated `ops forward-paper-run` for `quant_setup_selective` on
   `5m`, while keeping `live_resume_allowed=false` until all-interval evidence
   passes.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval

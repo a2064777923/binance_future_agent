@@ -21,7 +21,20 @@ the `5m` selective setup before any live resume. This is still observation only:
 no signed Binance endpoint, live service, timer, exchange order, position
 adjustment, or risk profile was changed.
 
+## Server Result
+
+- Deployed to `/opt/binance-futures-agent/app`.
+- Server focused tests passed with `10` tests.
+- Server full suite passed with `319` tests.
+- Secret-safe health check passed with network checks skipped.
+- Live service and live timer remained `inactive`.
+- First server `ops forward-paper-run` over the configured hot-symbol universe
+  produced no qualifying `quant_setup_selective` 5m signal:
+  `generated_signals=0`, `skipped_signals=10`.
+- DB counts after the run: `paper_signals=0`, `paper_outcomes=0`,
+  `order_intents=18`.
+
 ## Next
 
-Deploy or schedule `ops forward-paper-run` on the isolated server so paper
+Schedule repeated `ops forward-paper-run` on the isolated server so paper
 signals/outcomes accumulate across fresh market windows.
