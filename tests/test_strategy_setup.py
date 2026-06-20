@@ -190,6 +190,49 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.decision, "pass")
         self.assertIn("symbol_excluded_by_profile", setup.reasons)
 
+    def test_profile_can_require_open_interest_liquidity_momentum_and_volume_impulse(self):
+        setup = build_trade_setup(
+            self.candidate(
+                open_interest_value=None,
+                quote_volume=2_000_000,
+                price_change_percent=0.2,
+                kline_momentum_percent=0.15,
+                kline_micro_momentum_percent=0.05,
+                kline_quote_volume_change_percent=3.0,
+            ),
+            risk_limits=self.risk_limits(),
+            profile={
+                "name": "loss_recalibrated",
+                "require_open_interest": True,
+                "min_quote_volume_usdt": 10_000_000,
+                "min_abs_momentum_percent": 0.8,
+                "min_volume_impulse_percent": 10.0,
+            },
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("missing_open_interest", setup.reasons)
+        self.assertIn("quote_volume_below_profile_min", setup.reasons)
+        self.assertIn("momentum_below_profile_min", setup.reasons)
+        self.assertIn("volume_impulse_below_profile_min", setup.reasons)
+
+    def test_profile_can_block_setup_reason_and_negative_factor_name(self):
+        crowded = build_trade_setup(
+            self.candidate(funding_rate=0.001, taker_buy_sell_ratio=1.9),
+            risk_limits=self.risk_limits(),
+            profile={"name": "loss_recalibrated", "blocked_setup_reasons": ["crowding_risk"]},
+        )
+        weak_volume = build_trade_setup(
+            self.candidate(kline_quote_volume_change_percent=-30.0),
+            risk_limits=self.risk_limits(),
+            profile={"name": "loss_recalibrated", "blocked_factor_names": ["volume_impulse"]},
+        )
+
+        self.assertEqual(crowded.decision, "pass")
+        self.assertIn("profile_blocked_setup_reason:crowding_risk", crowded.reasons)
+        self.assertEqual(weak_volume.decision, "pass")
+        self.assertIn("profile_blocked_factor_name:volume_impulse", weak_volume.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

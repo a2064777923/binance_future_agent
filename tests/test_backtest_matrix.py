@@ -154,18 +154,29 @@ class BacktestMatrixTests(unittest.TestCase):
                 limit=16,
                 window_bars=8,
                 step_bars=4,
-                variants=("quant_setup", "quant_setup_selective", "quant_setup_selective_guarded"),
+                variants=(
+                    "quant_setup",
+                    "quant_setup_selective",
+                    "quant_setup_selective_guarded",
+                    "quant_setup_loss_recalibrated",
+                ),
             ),
             symbols=["AAAUSDT"],
         )
 
         self.assertEqual(
             payload["matrix_config"]["variants"],
-            ["quant_setup", "quant_setup_selective", "quant_setup_selective_guarded"],
+            [
+                "quant_setup",
+                "quant_setup_selective",
+                "quant_setup_selective_guarded",
+                "quant_setup_loss_recalibrated",
+            ],
         )
         self.assertIn("quant_setup", payload["promotion"]["variants"])
         self.assertIn("quant_setup_selective", payload["promotion"]["variants"])
         self.assertIn("quant_setup_selective_guarded", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_loss_recalibrated", payload["promotion"]["variants"])
 
     def test_hot_backtest_matrix_reports_no_symbols_selected(self):
         client = FakeClient()

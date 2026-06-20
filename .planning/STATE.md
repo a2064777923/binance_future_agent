@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.23
 milestone_name: Strategy Evidence And Live Resume Readiness
-current_phase: 49 — Loss-Driven Setup Recalibration
-current_phase_name: Loss-Driven Setup Recalibration
+current_phase: 50 — Multi-Window Hot-Symbol Backtest Matrix
+current_phase_name: Multi-Window Hot-Symbol Backtest Matrix
 status: planning
-stopped_at: Phase 48 complete, ready to plan Phase 49.
-last_updated: "2026-06-21T01:00:52+08:00"
+stopped_at: Phase 49 complete, ready to plan Phase 50.
+last_updated: "2026-06-21T01:08:02+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 48 complete, transitioned to Phase 49
+last_activity_desc: Phase 49 complete, transitioned to Phase 50
 progress:
   total_phases: 5
-  completed_phases: 1
-  total_plans: 1
-  completed_plans: 1
-  percent: 20
+  completed_phases: 2
+  total_plans: 2
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 49 — Loss-Driven Setup Recalibration
+**Current phase:** 50 — Multi-Window Hot-Symbol Backtest Matrix
 **Status:** Ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 0
@@ -32,9 +32,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Recalibrate weak setup conditions from the new evidence
-baseline, then rerun backtest and forward-paper gates before any small live
-automation can resume.
+**Current focus:** Run multi-window hot-symbol backtests for baseline and
+loss-recalibrated setup variants before any small live automation can resume.
 
 ## Decisions
 
@@ -588,11 +587,11 @@ performance are negative.
 
 ## Current Position
 
-Phase: 49 — Loss-Driven Setup Recalibration
+Phase: 50 — Multi-Window Hot-Symbol Backtest Matrix
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-06-21 — Phase 48 complete, transitioned to Phase 49
+Last activity: 2026-06-21 — Phase 49 complete, transitioned to Phase 50
 
 ## Operator Next Steps
 
-- Run /gsd-plan-phase 49
+- Run /gsd-plan-phase 50

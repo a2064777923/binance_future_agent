@@ -129,6 +129,12 @@ class TradeSetupProfile:
     disabled_sides: tuple[str, ...] = ()
     excluded_symbols: tuple[str, ...] = ()
     blocked_factor_reasons: tuple[str, ...] = ()
+    blocked_setup_reasons: tuple[str, ...] = ()
+    blocked_factor_names: tuple[str, ...] = ()
+    require_open_interest: bool = False
+    min_quote_volume_usdt: float | None = None
+    min_abs_momentum_percent: float | None = None
+    min_volume_impulse_percent: float | None = None
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -228,14 +234,15 @@ def build_trade_setup(
     if target_distance / stop_distance < setup_profile.min_risk_reward:
         decision = "pass"
         reasons = _dedupe([*reasons, "risk_reward_below_profile_min"])
+    if _high_crowding(features, side):
+        warnings.append("crowding_risk")
+        reasons = _dedupe([*reasons, "crowding_risk"])
     profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
+    profile_rejections.extend(_setup_reason_rejections(reasons, setup_profile))
     profile_rejections.extend(_factor_guard_rejections(factor_scores, setup_profile))
     if profile_rejections:
         decision = "pass"
         reasons = _dedupe([*reasons, *profile_rejections])
-    if _high_crowding(features, side):
-        warnings.append("crowding_risk")
-        reasons = _dedupe([*reasons, "crowding_risk"])
     if decision == "pass":
         return TradeSetup(
             symbol=symbol,
@@ -745,6 +752,22 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
             rejections.append("rsi_extreme_for_long")
         if side == "short" and rsi <= 22:
             rejections.append("rsi_extreme_for_short")
+    if profile.require_open_interest and _float(features.get("open_interest_value")) is None and _float(features.get("open_interest")) is None:
+        rejections.append("missing_open_interest")
+    min_quote_volume = _float(profile.min_quote_volume_usdt)
+    quote_volume = _float(features.get("quote_volume"))
+    if min_quote_volume is not None and (quote_volume is None or quote_volume < min_quote_volume):
+        rejections.append("quote_volume_below_profile_min")
+    min_momentum = _float(profile.min_abs_momentum_percent)
+    if min_momentum is not None and _abs_momentum(features) < min_momentum:
+        rejections.append("momentum_below_profile_min")
+    min_volume_impulse = _float(profile.min_volume_impulse_percent)
+    volume_impulse = _float(features.get("kline_quote_volume_change_percent"))
+    if min_volume_impulse is not None:
+        if volume_impulse is None:
+            rejections.append("missing_volume_impulse")
+        elif abs(volume_impulse) < min_volume_impulse:
+            rejections.append("volume_impulse_below_profile_min")
     return _dedupe(rejections)
 
 
@@ -761,6 +784,10 @@ def _setup_profile(profile: TradeSetupProfile | Mapping[str, Any] | None) -> Tra
             values["excluded_symbols"] = tuple(str(item).upper() for item in _sequence(values["excluded_symbols"]))
         if "blocked_factor_reasons" in values:
             values["blocked_factor_reasons"] = tuple(str(item) for item in _sequence(values["blocked_factor_reasons"]))
+        if "blocked_setup_reasons" in values:
+            values["blocked_setup_reasons"] = tuple(str(item) for item in _sequence(values["blocked_setup_reasons"]))
+        if "blocked_factor_names" in values:
+            values["blocked_factor_names"] = tuple(str(item) for item in _sequence(values["blocked_factor_names"]))
         return TradeSetupProfile(**values)
     return STANDARD_SETUP_PROFILE
 
@@ -783,14 +810,37 @@ def _high_crowding(features: Mapping[str, Any], side: str) -> bool:
 
 def _factor_guard_rejections(factors: list[FactorScore], profile: TradeSetupProfile) -> list[str]:
     blocked = {item.lower() for item in profile.blocked_factor_reasons}
-    if not blocked:
+    blocked_names = {item.lower() for item in profile.blocked_factor_names}
+    if not blocked and not blocked_names:
         return []
     reasons: list[str] = []
     for factor in factors:
+        if factor.name.lower() in blocked_names and factor.weighted_score < 0:
+            reasons.append(f"profile_blocked_factor_name:{factor.name}")
         for reason in factor.reasons:
             if reason.lower() in blocked:
                 reasons.append(f"forward_paper_guard_factor:{reason}")
     return _dedupe(reasons)
+
+
+def _setup_reason_rejections(reasons: list[str], profile: TradeSetupProfile) -> list[str]:
+    blocked = {item.lower() for item in profile.blocked_setup_reasons}
+    if not blocked:
+        return []
+    return [f"profile_blocked_setup_reason:{reason}" for reason in reasons if reason.lower() in blocked]
+
+
+def _abs_momentum(features: Mapping[str, Any]) -> float:
+    values = [
+        abs(value)
+        for value in (
+            _float(features.get("price_change_percent")),
+            _float(features.get("kline_momentum_percent")),
+            _float(features.get("kline_micro_momentum_percent")),
+        )
+        if value is not None
+    ]
+    return max(values, default=0.0)
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:

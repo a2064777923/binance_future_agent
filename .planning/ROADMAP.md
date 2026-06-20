@@ -120,9 +120,9 @@ setup profiles and point geometry without changing live defaults.
 
 **Depends on:** Phase 48
 
-**Status:** Not started.
+**Status:** Complete — 2026-06-21.
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 **Success Criteria:**
 
@@ -226,7 +226,7 @@ operator confirmation requirements.
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
 | v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Complete | 2026-06-20 |
-| v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 1/5 | Planning | - |
+| v1.23 Strategy Evidence And Live Resume Readiness | 48-52 | 2/5 | Planning | - |
 
 ## Requirement Coverage
 
@@ -237,7 +237,7 @@ operator confirmation requirements.
 
 ## Next Step
 
-Start Phase 49 with `$gsd-plan-phase 49`. Keep live automation paused while
+Start Phase 50 with `$gsd-plan-phase 50`. Keep live automation paused while
 strategy matrix evidence and forward-paper evidence remain negative. The paper
 timer stays active for paper-only evidence collection; live auto-hot and live
 service/timer remain disabled until explicit readiness gates pass.

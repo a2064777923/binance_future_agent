@@ -1969,6 +1969,46 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["config"]["setup_profile"]["disabled_sides"], ["short"])
         self.assertIn("BICOUSDT", payload["config"]["setup_profile"]["excluded_symbols"])
 
+    def test_backtest_quant_setup_loss_recalibrated_variant_emits_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset = root / "klines.json"
+            rows = []
+            price = 100.0
+            for index in range(20):
+                close = price * 1.012
+                rows.append(
+                    test_kline(
+                        1_700_000_000_000 + index * 300_000,
+                        open_price=str(price),
+                        high=str(close * 1.025),
+                        low=str(price * 0.997),
+                        close=str(close),
+                    )
+                )
+                price = close
+            dataset.write_text(
+                json.dumps({"schema": "bfa_klines_v1", "interval": "5m", "symbols": {"BTCUSDT": rows}}),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "run",
+                "--input",
+                str(dataset),
+                "--variant",
+                "quant_setup_loss_recalibrated",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["config"]["setup_profile"]["name"], "loss_recalibrated")
+        self.assertEqual(payload["config"]["setup_profile"]["disabled_sides"], ["short"])
+        self.assertIn("taker_flow_acceleration", payload["config"]["setup_profile"]["blocked_factor_reasons"])
+        self.assertIn("volume_impulse", payload["config"]["setup_profile"]["blocked_factor_names"])
+
     def test_backtest_matrix_auto_selects_hot_symbols_and_writes_report(self):
         class FakeClient:
             def ticker_24hr(self, symbol=None):

@@ -114,6 +114,10 @@ control of downside.
   forward-paper performance, loss attribution, adaptive guard output, server
   timer/service state, exchange/manual exposure state, confirmation blockers,
   and explicit non-mutation guarantees.
+- Phase 49 adds a paper/backtest-only `quant_setup_loss_recalibrated` variant
+  and setup profile gates for blocked setup reasons, blocked negative factor
+  names, missing open interest, thin liquidity, weak momentum, and weak volume
+  impulse while leaving live defaults unchanged.
 
 ### Active
 
@@ -588,8 +592,9 @@ any small live automation can be resumed.
 | Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
 | Evidence before live resume | The latest paper evidence is negative, so v1.23 prioritizes strategy evidence, recalibration, and explicit readiness gates over restoring unattended live automation. | v1.23 active |
 | Baseline before recalibration | Weak setup changes should be driven by one compact current evidence report before profiles or live-readiness gates are changed. | Phase 48 complete |
+| Recalibration stays paper-first | Loss-driven filters should be explicit backtest/paper variants until repeated matrix and forward-paper evidence pass. | Phase 49 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-21 after completing Phase 48 strategy evidence baseline.*
+*Last updated: 2026-06-21 after completing Phase 49 loss-driven setup recalibration.*

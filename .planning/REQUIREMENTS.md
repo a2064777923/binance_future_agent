@@ -25,19 +25,19 @@ projects or losing control of downside.
 
 ### Setup Recalibration
 
-- [ ] **SRC-01**: Strategy profiles can tighten or disable weak symbol, side,
+- [x] **SRC-01**: Strategy profiles can tighten or disable weak symbol, side,
   setup-reason, factor-reason, and factor-name groups identified by paper loss
   attribution.
 
-- [ ] **SRC-02**: Stop-loss and take-profit geometry can be recalibrated using
+- [x] **SRC-02**: Stop-loss and take-profit geometry can be recalibrated using
   ATR, support/resistance, VWAP, recent swing structure, and observed
   stop-loss/time-exit attribution.
 
-- [ ] **SRC-03**: Setup scoring can penalize missing open-interest evidence,
+- [x] **SRC-03**: Setup scoring can penalize missing open-interest evidence,
   thin liquidity, weak RSI/trend/momentum regimes, and historically losing
   taker-flow or volume-impulse conditions.
 
-- [ ] **SRC-04**: Recalibrated setup variants remain paper/backtest-first and
+- [x] **SRC-04**: Recalibrated setup variants remain paper/backtest-first and
   do not change live defaults until promotion gates pass.
 
 ### Backtest And Forward Paper
@@ -107,10 +107,10 @@ projects or losing control of downside.
 | EVB-02 | Phase 48 | Complete |
 | EVB-03 | Phase 48 | Complete |
 | EVB-04 | Phase 48 | Complete |
-| SRC-01 | Phase 49 | Pending |
-| SRC-02 | Phase 49 | Pending |
-| SRC-03 | Phase 49 | Pending |
-| SRC-04 | Phase 49 | Pending |
+| SRC-01 | Phase 49 | Complete |
+| SRC-02 | Phase 49 | Complete |
+| SRC-03 | Phase 49 | Complete |
+| SRC-04 | Phase 49 | Complete |
 | BFP-01 | Phase 50 | Pending |
 | BFP-02 | Phase 50 | Pending |
 | BFP-03 | Phase 51 | Pending |
