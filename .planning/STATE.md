@@ -86,6 +86,15 @@ resume path.
   Final server state: paper timer active, paper service inactive, live timer
   inactive, live service inactive.
 
+- Latest server paper-performance check after Phase 57 still returns
+  `keep_live_paused`: `signal_count=276`, `outcome_count=276`,
+  `win_rate=0.28623188`, `total_net_pnl_usdt=-8.76169297`,
+  `profit_factor=0.55632721`, and `worst_drawdown_usdt=9.0869244`.
+  Blockers are `paper_total_net_pnl_not_above_min`,
+  `paper_win_rate_below_min`, `paper_profit_factor_below_min`, and
+  `paper_worst_drawdown_exceeds_cap`. Artifact:
+  `/opt/binance-futures-agent/app/runtime/server-phase57-performance-latest.json`.
+
 - Timer resume must now be gated by read-only `ops resume-check`.
 - First strategy: hot coins from Binance Square and fallback narrative sources.
 - Backtest discipline: use short-window staged sweeps with completed candles,
