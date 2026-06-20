@@ -765,6 +765,88 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.selected_symbol, "BTCUSDT")
         self.assertIn(("ticker_24hr", None), market_client.calls)
 
+    def test_run_once_auto_hot_excludes_manual_position_symbols(self):
+        class AutoHotMarketClient(FakeMarketClient):
+            def __init__(self):
+                self.calls = []
+
+            def ticker_24hr(self, symbol=None):
+                self.calls.append(("ticker_24hr", symbol))
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {"symbol": "BTWUSDT", "priceChangePercent": "80", "quoteVolume": "900000000", "count": 1000},
+                        {"symbol": "HOTUSDT", "priceChangePercent": "9", "quoteVolume": "120000000", "count": 1000},
+                    ],
+                )
+
+            def exchange_info(self):
+                self.calls.append(("exchange_info",))
+                return MarketDataResponse(endpoint="/fapi/v1/exchangeInfo", params={}, payload=exchange_info_payload("HOTUSDT"))
+
+        class HotCollector:
+            def collect_rest_snapshots(self):
+                return [
+                    NormalizedMarketSnapshot(
+                        source="binance_usdm",
+                        event_type="ticker_24h",
+                        symbol="HOTUSDT",
+                        event_time=1700000000000,
+                        received_at="2026-06-20T10:00:00Z",
+                        payload={"price_change_percent": "9", "quote_volume": "120000000"},
+                    )
+                ]
+
+        class HotNarrativeRunner:
+            def collect(self):
+                return [
+                    NormalizedNarrativeRecord(
+                        source="binance_square",
+                        source_id="square-hot",
+                        author="poster",
+                        symbol_mentions=["HOTUSDT"],
+                        text="HOTUSDT narrative",
+                        url=None,
+                        published_at="2026-06-20T09:58:00Z",
+                        collected_at="2026-06-20T10:00:00Z",
+                        engagement={"likes": 70},
+                        raw={},
+                        quality_flags=[],
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            market_client = AutoHotMarketClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTWUSDT,HOTUSDT",
+                    "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                    "BFA_LIVE_AUTO_HOT_SYMBOLS": "true",
+                    "BFA_LIVE_AUTO_HOT_TOP_N": "2",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=market_client,
+                collector=HotCollector(),
+                narrative_runner=HotNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+
+        self.assertEqual(result.scan_symbols, ["HOTUSDT"])
+        self.assertNotIn("BTWUSDT", result.evaluated_symbols)
+        self.assertIn(("ticker_24hr", None), market_client.calls)
+
     def test_run_once_forward_paper_guard_rejects_blocked_symbol_before_ai(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

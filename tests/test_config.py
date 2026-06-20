@@ -43,6 +43,7 @@ def base_env(**overrides):
         "BFA_LOG_DIR": "/tmp/binance-futures-agent/logs",
         "BFA_RUNTIME_DIR": "/tmp/binance-futures-agent/runtime",
         "BFA_MARKET_SYMBOLS": ",".join(PILOT_SYMBOLS),
+        "BFA_MANUAL_POSITION_SYMBOLS": "",
         "BFA_LIVE_AUTO_HOT_SYMBOLS": "false",
         "BFA_LIVE_AUTO_HOT_TOP_N": "40",
         "BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT": "10000000",
@@ -105,6 +106,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS"), "false")
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "40")
+        self.assertEqual(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"), [])
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_ENABLED"), "true")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES"), "30")
 
@@ -112,6 +114,11 @@ class ConfigTests(unittest.TestCase):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
 
         self.assertEqual(market_symbols(config), ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+
+    def test_manual_position_symbols_are_trimmed_uppercased_and_ordered(self):
+        config = load_config(base_env(BFA_MANUAL_POSITION_SYMBOLS=" btwusdt, ethusdt,, "))
+
+        self.assertEqual(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"), ["BTWUSDT", "ETHUSDT"])
 
     def test_forward_paper_symbols_can_be_wider_than_live_market_symbols(self):
         config = load_config(base_env(BFA_FORWARD_PAPER_SYMBOLS=" btcusdt, ethusdt,solusdt "))

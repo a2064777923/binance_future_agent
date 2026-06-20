@@ -53,18 +53,18 @@ PROFILE_30U_8X_DYNAMIC = {
 PROFILE_30U_10X_MULTI_DYNAMIC = {
     "BFA_ACCOUNT_CAPITAL_USDT": "30",
     "BFA_MAX_LEVERAGE": "10",
-    "BFA_MAX_POSITION_NOTIONAL_USDT": "25",
-    "BFA_MAX_RISK_PER_TRADE_USDT": "0.25",
+    "BFA_MAX_POSITION_NOTIONAL_USDT": "40",
+    "BFA_MAX_RISK_PER_TRADE_USDT": "0.4",
     "BFA_MAX_DAILY_LOSS_USDT": "1",
-    "BFA_MAX_OPEN_POSITIONS": "2",
+    "BFA_MAX_OPEN_POSITIONS": "4",
     "BFA_DYNAMIC_POSITION_SIZING_ENABLED": "true",
-    "BFA_MAX_MARGIN_PER_POSITION_USDT": "2.5",
-    "BFA_MAX_MARGIN_FRACTION": "0.07",
-    "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "25",
-    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "5",
-    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.16",
-    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "45",
-    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "30",
+    "BFA_MAX_MARGIN_PER_POSITION_USDT": "4",
+    "BFA_MAX_MARGIN_FRACTION": "0.15",
+    "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "40",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "24",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.80",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "240",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "200",
     "BFA_MULTI_POSITION_ENABLED": "true",
 }
 
@@ -221,7 +221,7 @@ def target_profile_values(profile: str, *, allow_two_positions: bool = False) ->
     else:
         raise ValueError("profile must be 30u_8x_dynamic or 30u_10x_multi_dynamic")
     if allow_two_positions:
-        target["BFA_MAX_OPEN_POSITIONS"] = "2"
+        target["BFA_MAX_OPEN_POSITIONS"] = str(max(int(target["BFA_MAX_OPEN_POSITIONS"]), 2))
         target["BFA_MULTI_POSITION_ENABLED"] = "true"
     return target
 

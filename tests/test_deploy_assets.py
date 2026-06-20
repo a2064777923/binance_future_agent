@@ -28,6 +28,7 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn("BFA_MODE=dry_run", text)
         self.assertIn("BFA_REQUIRE_PROTECTIVE_ORDERS=true", text)
         self.assertIn("BFA_MARKET_HEAT_NARRATIVE_ENABLED=true", text)
+        self.assertIn("BFA_MANUAL_POSITION_SYMBOLS=", text)
         self.assertIn("BFA_LIVE_AUTO_HOT_SYMBOLS=false", text)
         self.assertIn("BFA_LIVE_AUTO_HOT_TOP_N=40", text)
         self.assertIn("BFA_FORWARD_PAPER_AUTO_HOT_SYMBOLS=true", text)

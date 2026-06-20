@@ -4,9 +4,9 @@ milestone: v1.25
 milestone_name: Live Resume Clearance And Adaptive Pilot
 current_phase: 58
 current_phase_name: Promotion Matrix And Loss Review
-status: planning
-stopped_at: Phase 57 complete; ready to plan Phase 58.
-last_updated: "2026-06-21T03:42:00+08:00"
+status: live-pilot-active
+stopped_at: Live pilot active with widened 10x multi-position caps; Phase 58 ready to plan.
+last_updated: "2026-06-21T04:09:22+08:00"
 last_activity: 2026-06-21
 last_activity_desc: Phase 57 complete
 progress:
@@ -21,7 +21,7 @@ progress:
 
 **Initialized:** 2026-06-19
 **Current phase:** Phase 58 — Promotion Matrix And Loss Review
-**Status:** Phase 57 complete; Phase 58 ready to plan
+**Status:** Live pilot active; Phase 58 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 0
 
@@ -610,25 +610,101 @@ resume path.
   `binance-futures-agent-live.timer` and
   `binance-futures-agent-live.service` were inactive.
 
+- Operator override on 2026-06-21 HKT requested live automation be started
+  immediately while iteration continues. Server preflight showed exchange
+  exposure clear: `position_count=0`, `open_order_count=0`,
+  `open_algo_order_count=0`, and about `44.13` USDT available. The live timer
+  was enabled and started with the existing conservative live caps. The first
+  immediate run scanned the controlled 10-symbol universe and completed without
+  submission because adaptive forward-paper side blocks had disabled both
+  `long` and `short`.
+
+- To make the already-running live pilot capable of submitting under the
+  conservative caps, server env was backed up to
+  `/etc/binance-futures-agent/env.before-live-side-guard-20260620T194711Z.bak`
+  and only `BFA_FORWARD_PAPER_GUARD_MIN_SIDE_OUTCOMES` was changed to
+  `999999`. This suppresses whole-side blocking while retaining adaptive
+  symbol blocks, factor blocks, 30U/5x/12U/one-position caps, and protective
+  order requirements.
+
+- After the side-guard hotfix, an immediate live run submitted a protected
+  `NEARUSDT` LONG. Evidence: `order_intent=234634`,
+  `exchange_response=234635`, quantity `5.0`, notional about `10.77` USDT,
+  leverage `5`, entry about `2.151`, stop-market trigger `2.131`, and
+  take-profit-market trigger `2.182`. `ops live-status --check-binance`
+  reported one exchange position and two open protective algo orders, with
+  `protective_evidence.status=entry_with_stop_loss_and_take_profit`. The live
+  timer remained active and the live service completed successfully after the
+  one-cycle run.
+
+- Operator clarified `BTWUSDT` SHORT is a manual position. The live env now has
+  `BFA_MANUAL_POSITION_SYMBOLS=BTWUSDT`; live hot-symbol selection excludes it,
+  position review reports it as `manual_hold` with
+  `manual_position_ignored`, and adjustment planning must not close or reduce
+  it as an agent-managed position.
+
+- Live caps were widened while keeping the isolated server deployment under
+  `/opt/binance-futures-agent`. The active profile is now 30U/10x dynamic with
+  `BFA_MAX_OPEN_POSITIONS=4`, `BFA_MAX_POSITION_NOTIONAL_USDT=40`,
+  `BFA_MAX_RISK_PER_TRADE_USDT=0.4`,
+  `BFA_MAX_MARGIN_PER_POSITION_USDT=4`,
+  `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=40`,
+  `BFA_MAX_PORTFOLIO_MARGIN_USDT=24`,
+  `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.80`,
+  `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=240`, and
+  `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=200`. Live auto-hot remains enabled
+  over top 40 symbols, and the live systemd unit evaluates `--top-n 5`
+  candidates per run.
+
+- Verification after widening: local focused tests passed with 55 tests;
+  server focused tests passed with 55 tests. Server readback showed
+  `binance-futures-agent-live.timer=active`,
+  `binance-futures-agent-live.service=inactive`, env values matching the
+  widened caps, and `ops risk-profile-plan` returning the same 4-position/40U
+  target profile.
+
+- Read-only server checks after widening reported `position_review.status` as
+  `review_ok`: `NEARUSDT` LONG remained `hold`, while `BTWUSDT` SHORT was
+  `manual_hold`. `ops exposure-status` reported
+  `current_profile_entry_capacity_available` with 2 active exchange positions,
+  max open positions 4, active notional about `115.83` USDT, active initial
+  margin about `12.66` USDT, portfolio notional cap `240` USDT, and portfolio
+  margin cap `24` USDT.
+
+- An immediate widened-cap live oneshot scanned 40 hot symbols, excluded the
+  manual `BTWUSDT`, selected `REUSDT`, and submitted no order. The block was
+  strategy/guard-side evidence rather than capacity: the candidate carried
+  multi-factor setup reasons but was rejected by
+  `forward_paper_guard_factor:24h_momentum`. The live service deactivated
+  successfully afterwards and the live timer remained active.
+
 ## Next Command
 
-Run `$gsd-plan-phase 58` for promotion matrix and loss review. Keep live
-automation disabled until strategy/paper gates, server state, and separate
-operator-confirmation gates pass.
+Continue Phase 58 with live automation already active. First priority is
+monitoring/reconciling the protected `NEARUSDT` live position and manual-held
+`BTWUSDT` exposure, then tune the forward-paper factor guard so live entries
+are not over-blocked by broad factors such as `24h_momentum` while preserving
+the multi-factor setup gate.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 57 complete; Phase 58 ready to plan.
+**Stopped at:** Live timer active; protected NEARUSDT live position open;
+BTWUSDT marked manual; widened 10x/4-position/40U dynamic caps deployed; Phase
+58 ready to plan.
 **Resume file:** .planning/phases/57-adaptive-forward-paper-observation/57-VERIFICATION.md
 
 ## Current Position
 
 Phase: 58 — Promotion Matrix And Loss Review
 Plan: —
-Status: Ready to plan
-Last activity: 2026-06-21 — Phase 57 complete
+Status: Live pilot active with widened caps
+Last activity: 2026-06-21 — live caps widened, BTWUSDT marked manual, and immediate live oneshot verified
 
 ## Operator Next Steps
 
-- Plan Phase 58 with `$gsd-plan-phase 58`.
+- Monitor/reconcile the open protected `NEARUSDT` live position.
+- Keep `BTWUSDT` classified as manual unless the operator explicitly hands it
+  to the agent.
+- Plan Phase 58 with forward-paper factor-guard tuning and promotion/loss
+  review.

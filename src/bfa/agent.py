@@ -286,7 +286,8 @@ def run_agent_once(
 
 
 def _agent_scan_symbols(config: AppConfig, market_client) -> list[str]:
-    fallback = market_symbols(config)
+    excluded = set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"))
+    fallback = _without_symbols(market_symbols(config), excluded)
     if not _truthy(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS")):
         return fallback
     try:
@@ -302,8 +303,12 @@ def _agent_scan_symbols(config: AppConfig, market_client) -> list[str]:
         )
     except Exception:
         return fallback
-    selected = [str(item["symbol"]) for item in hot_rows]
+    selected = _without_symbols([str(item["symbol"]) for item in hot_rows], excluded)
     return selected or fallback
+
+
+def _without_symbols(symbols: list[str], excluded: set[str]) -> list[str]:
+    return [symbol for symbol in symbols if symbol.upper() not in excluded]
 
 
 def _build_narrative_runner(

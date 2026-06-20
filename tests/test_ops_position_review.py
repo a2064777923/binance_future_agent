@@ -118,6 +118,37 @@ class PositionReviewTests(unittest.TestCase):
         self.assertEqual(item.urgency, "urgent")
         self.assertIn("unprotected_position", item.reasons)
 
+    def test_manual_position_symbols_are_not_adjustment_candidates(self):
+        hold_check = position_hold_check_from_live_status(
+            report(
+                positions=[
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "entryPrice": "0.18819",
+                        "markPrice": "0.187",
+                        "unRealizedProfit": "0.66",
+                    }
+                ],
+                open_algo_orders=[{"symbol": "BTWUSDT", "positionSide": "SHORT"}],
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T03:20:00Z",
+        )
+
+        review = position_review_from_hold_check(
+            hold_check,
+            review_interval_minutes=15,
+            manual_symbols={"BTWUSDT"},
+        )
+
+        item = review.positions[0]
+        self.assertFalse(review.action_required)
+        self.assertEqual(review.status, "review_ok")
+        self.assertEqual(item.recommendation, "manual_hold")
+        self.assertEqual(item.reasons, ["manual_position_ignored"])
+
 
 if __name__ == "__main__":
     unittest.main()

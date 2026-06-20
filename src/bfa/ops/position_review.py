@@ -96,6 +96,7 @@ def build_position_review_report(
     return position_review_from_hold_check(
         hold_check,
         review_interval_minutes=_int_or_default(config.get("BFA_POSITION_REVIEW_INTERVAL_MINUTES"), 15),
+        manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
     )
 
 
@@ -103,8 +104,11 @@ def position_review_from_hold_check(
     hold_check: PositionHoldCheckReport,
     *,
     review_interval_minutes: int = 15,
+    manual_symbols: set[str] | None = None,
 ) -> PositionReviewReport:
-    items = [_review_item(position) for position in hold_check.positions]
+    normalized_manual_symbols = {symbol.upper() for symbol in (manual_symbols or set())}
+    items = [_review_item(position, manual_symbols=normalized_manual_symbols) for position in hold_check.positions]
+    actionable_items = [item for item in items if item.recommendation != "manual_hold"]
     reasons = _dedupe([reason for item in items for reason in item.reasons])
     if hold_check.status == "keep_current_profile":
         reasons.append("exchange_evidence_missing")
@@ -113,10 +117,15 @@ def position_review_from_hold_check(
     if not items and not reasons:
         reasons.append("no_active_position")
 
-    action_required = hold_check.action_required or any(item.urgency in {"high", "urgent"} for item in items)
-    if any(item.urgency == "urgent" for item in items):
+    action_required = (
+        hold_check.status == "keep_current_profile"
+        or hold_check.openai_backoff_active
+        or (not items and hold_check.action_required)
+        or any(item.urgency in {"high", "urgent"} for item in actionable_items)
+    )
+    if any(item.urgency == "urgent" for item in actionable_items):
         status = "urgent_attention"
-    elif any(item.urgency == "high" for item in items):
+    elif any(item.urgency == "high" for item in actionable_items):
         status = "review_required"
     elif items:
         status = "review_ok"
@@ -134,8 +143,29 @@ def position_review_from_hold_check(
     )
 
 
-def _review_item(position: PositionHoldItem) -> PositionReviewItem:
+def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None = None) -> PositionReviewItem:
     metrics = _metrics(position)
+    if position.symbol.upper() in (manual_symbols or set()):
+        return PositionReviewItem(
+            symbol=position.symbol,
+            position_side=position.position_side,
+            position_amt=position.position_amt,
+            recommendation="manual_hold",
+            urgency="normal",
+            reasons=["manual_position_ignored"],
+            entry_price=position.entry_price,
+            mark_price=position.mark_price,
+            unrealized_pnl_usdt=position.unrealized_pnl_usdt,
+            pnl_percent=metrics["pnl_percent"],
+            stop_r_multiple=metrics["stop_r_multiple"],
+            target_progress=metrics["target_progress"],
+            hold_elapsed_fraction=metrics["hold_elapsed_fraction"],
+            elapsed_minutes=position.elapsed_minutes,
+            hold_time_minutes=position.matching_intent.hold_time_minutes if position.matching_intent else None,
+            algo_protection_count=position.algo_protection_count,
+            matching_intent_event_id=position.matching_intent.event_id if position.matching_intent else None,
+        )
+
     reasons = list(position.reasons)
     recommendation = "hold"
     urgency = "normal"
