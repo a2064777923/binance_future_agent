@@ -301,6 +301,18 @@ confirmation-gated partial take-profit or full-close adjustment plans.
   `risk_reasons=["multi_position_disabled","max_open_positions_reached"]` and
   `submitted=false`.
 
+- Post-deploy reconciliation sweep persisted the closed HYPEUSDT outcome for
+  submitted intent `182563`: entry fill at `70.266`, exit fill at `70.56`,
+  gross realized PnL `0.04704` USDT, commission `0.01126608` USDT, net realized
+  PnL `0.03577392` USDT, two fills inserted, and one closed outcome inserted.
+
+- After HYPEUSDT reconciliation, server `ops exposure-status --target-profile
+  30u_10x_multi_dynamic --allow-two-positions` reports
+  `ready_for_profile_switch`. The active `SOLUSDT` LONG is protected, fits the
+  target portfolio caps, and can be carried forward. The profile token remains
+  `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`. No profile apply was
+  run.
+
 ## Next Command
 
 Continue monitoring the deployed Phase 32 live cycle. Do not execute adjustment
@@ -322,5 +334,7 @@ Last activity: 2026-06-20 — active-position adjustment plan/execute deployed
 ## Operator Next Steps
 
 - Monitor the active `SOLUSDT` position through `ops position-adjustment-plan`.
+- Apply `30u_10x_multi_dynamic` only if the operator explicitly confirms the
+  fresh token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
 - Do not run `ops position-adjustment-execute --confirm-token ...` unless the
   operator explicitly approves the fresh token.

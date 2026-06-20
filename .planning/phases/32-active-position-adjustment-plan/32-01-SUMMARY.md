@@ -29,6 +29,9 @@
 - Post-deploy live cycle included `position_review` and
   `position_adjustment_plan` summaries, then exited `entry_capacity_blocked`
   with no submission under the unchanged one-position profile.
+- HYPEUSDT closed-outcome reconciliation was persisted after deployment:
+  net realized PnL `0.03577392` USDT. A follow-up 10x/two-position readiness
+  preview returned `ready_for_profile_switch`; no profile apply was run.
 
 ## Operational Result
 
