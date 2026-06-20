@@ -68,12 +68,49 @@ class PositionAdjustmentPlanItem:
 
 
 @dataclass(frozen=True)
+class PositionLifecycleDiagnostic:
+    symbol: str
+    position_side: str | None
+    source_recommendation: str
+    lifecycle_decision: str
+    urgency: str
+    manual_symbol: bool
+    protection_state: str
+    matching_intent_state: str
+    exchange_filter_state: str
+    reasons: list[str] = field(default_factory=list)
+    failed_preconditions: list[str] = field(default_factory=list)
+    passed_preconditions: list[str] = field(default_factory=list)
+    candidate_action: str | None = None
+    order_plan: PositionAdjustmentOrderPlan | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "position_side": self.position_side,
+            "source_recommendation": self.source_recommendation,
+            "lifecycle_decision": self.lifecycle_decision,
+            "urgency": self.urgency,
+            "manual_symbol": self.manual_symbol,
+            "protection_state": self.protection_state,
+            "matching_intent_state": self.matching_intent_state,
+            "exchange_filter_state": self.exchange_filter_state,
+            "reasons": list(self.reasons),
+            "failed_preconditions": list(self.failed_preconditions),
+            "passed_preconditions": list(self.passed_preconditions),
+            "candidate_action": self.candidate_action,
+            "order_plan": self.order_plan.to_dict() if self.order_plan else None,
+        }
+
+
+@dataclass(frozen=True)
 class PositionAdjustmentPlanReport:
     status: str
     adjustment_allowed: bool
     reasons: list[str] = field(default_factory=list)
     position_review: PositionReviewReport | None = None
     plans: list[PositionAdjustmentPlanItem] = field(default_factory=list)
+    diagnostics: list[PositionLifecycleDiagnostic] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +119,7 @@ class PositionAdjustmentPlanReport:
             "reasons": list(self.reasons),
             "position_review": self.position_review.to_dict() if self.position_review else None,
             "plans": [plan.to_dict() for plan in self.plans],
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
 
@@ -176,14 +214,17 @@ def position_adjustment_plan_from_review(
     require_filters: bool = False,
 ) -> PositionAdjustmentPlanReport:
     reasons: list[str] = []
+    report_blockers: list[str] = []
     plans: list[PositionAdjustmentPlanItem] = []
     hold_check = review.hold_check
     if review.status == "no_active_position":
         reasons.append("no_active_position")
     if "exchange_evidence_missing" in review.reasons:
         reasons.append("exchange_evidence_missing")
+        report_blockers.append("exchange_evidence_missing")
     if hold_check and hold_check.open_order_count:
         reasons.append("normal_open_orders_present")
+        report_blockers.append("normal_open_orders_present")
     if hold_check and hold_check.openai_backoff_active:
         reasons.append("ai_backoff_active")
 
@@ -200,6 +241,13 @@ def position_adjustment_plan_from_review(
             if not plan.adjustment_allowed:
                 reasons.extend(plan.reasons)
 
+    diagnostics = _diagnostics_for_review(
+        review,
+        plans,
+        global_blockers=report_blockers,
+        filters_by_symbol=filters_by_symbol,
+        require_filters=require_filters,
+    )
     if not plans and not reasons:
         reasons.append("no_adjustment_candidate")
     if any(not item.adjustment_allowed for item in plans):
@@ -213,6 +261,7 @@ def position_adjustment_plan_from_review(
             reasons=["position_adjustment_preconditions_met"],
             position_review=review,
             plans=plans,
+            diagnostics=diagnostics,
         )
     if allowed_plans and all(reason in {"ai_backoff_active"} for reason in reasons):
         return PositionAdjustmentPlanReport(
@@ -221,6 +270,7 @@ def position_adjustment_plan_from_review(
             reasons=["position_adjustment_preconditions_met", *reasons],
             position_review=review,
             plans=plans,
+            diagnostics=diagnostics,
         )
     return PositionAdjustmentPlanReport(
         status="adjustment_plan_blocked" if plans else "adjustment_plan_empty",
@@ -228,6 +278,7 @@ def position_adjustment_plan_from_review(
         reasons=_dedupe(reasons),
         position_review=review,
         plans=plans,
+        diagnostics=diagnostics,
     )
 
 
@@ -359,6 +410,162 @@ def confirmation_token(plan_report: PositionAdjustmentPlanReport) -> str:
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
     symbols = "-".join(_dedupe([action.symbol for action in actions]))[:20]
     return f"POSITION-ADJUST-{symbols}-{digest}"
+
+
+def _diagnostics_for_review(
+    review: PositionReviewReport,
+    plans: list[PositionAdjustmentPlanItem],
+    *,
+    global_blockers: list[str],
+    filters_by_symbol: Mapping[str, SymbolExecutionFilters] | None,
+    require_filters: bool,
+) -> list[PositionLifecycleDiagnostic]:
+    plans_by_position = {_position_key(plan.review_item): plan for plan in plans}
+    return [
+        _diagnostic_for_item(
+            item,
+            plan=plans_by_position.get(_position_key(item)),
+            global_blockers=global_blockers,
+            filters=filters_by_symbol.get(item.symbol.upper()) if filters_by_symbol else None,
+            require_filters=require_filters,
+        )
+        for item in review.positions
+    ]
+
+
+def _diagnostic_for_item(
+    item: PositionReviewItem,
+    *,
+    plan: PositionAdjustmentPlanItem | None,
+    global_blockers: list[str],
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
+) -> PositionLifecycleDiagnostic:
+    manual_symbol = item.recommendation == "manual_hold" or "manual_position_ignored" in item.reasons
+    order_plan = plan.order_plan if plan else None
+    failed = _diagnostic_failed_preconditions(item, plan=plan, global_blockers=global_blockers)
+    passed = _diagnostic_passed_preconditions(item, plan=plan)
+    lifecycle_decision = _lifecycle_decision(item, plan=plan, failed_preconditions=failed)
+    if manual_symbol:
+        lifecycle_decision = "manual_hold"
+        failed = _dedupe([*failed, "manual_position_ignored"])
+        order_plan = None
+    return PositionLifecycleDiagnostic(
+        symbol=item.symbol,
+        position_side=item.position_side,
+        source_recommendation=item.recommendation,
+        lifecycle_decision=lifecycle_decision,
+        urgency=item.urgency,
+        manual_symbol=manual_symbol,
+        protection_state="protected" if item.algo_protection_count > 0 else "unprotected",
+        matching_intent_state="present" if item.matching_intent_event_id is not None else "missing",
+        exchange_filter_state=_exchange_filter_state(
+            item,
+            plan=plan,
+            filters=filters,
+            require_filters=require_filters,
+        ),
+        reasons=_dedupe([*item.reasons, *(plan.reasons if plan else [])]),
+        failed_preconditions=failed,
+        passed_preconditions=passed,
+        candidate_action=order_plan.action if order_plan else None,
+        order_plan=order_plan,
+    )
+
+
+def _position_key(item: PositionReviewItem) -> tuple[str, str | None]:
+    return (item.symbol.upper(), item.position_side)
+
+
+def _diagnostic_failed_preconditions(
+    item: PositionReviewItem,
+    *,
+    plan: PositionAdjustmentPlanItem | None,
+    global_blockers: list[str],
+) -> list[str]:
+    failures: list[str] = list(global_blockers)
+    if item.recommendation == "manual_hold":
+        failures.append("manual_position_ignored")
+    elif plan is not None and not plan.adjustment_allowed:
+        failures.extend(plan.reasons)
+    elif plan is None and item.recommendation in {"close_review", "trail_or_reduce"}:
+        failures.append("adjustment_candidate_missing")
+    return _dedupe(failures)
+
+
+def _diagnostic_passed_preconditions(
+    item: PositionReviewItem,
+    *,
+    plan: PositionAdjustmentPlanItem | None,
+) -> list[str]:
+    passed: list[str] = []
+    if item.position_amt != 0:
+        passed.append("non_zero_position")
+    if item.algo_protection_count > 0:
+        passed.append("algo_protection_present")
+    if item.matching_intent_event_id is not None:
+        passed.append("matching_intent_present")
+    if item.recommendation in {"close_review", "trail_or_reduce"}:
+        passed.append("actionable_review_recommendation")
+    if plan and plan.order_plan is not None:
+        passed.append("order_plan_candidate_built")
+        if "quantity_filter_checked" in plan.order_plan.reason_codes:
+            passed.append("exchange_quantity_filters_passed")
+    return _dedupe(passed)
+
+
+def _lifecycle_decision(
+    item: PositionReviewItem,
+    *,
+    plan: PositionAdjustmentPlanItem | None,
+    failed_preconditions: list[str],
+) -> str:
+    if item.recommendation == "manual_hold":
+        return "manual_hold"
+    if item.recommendation == "watch":
+        return "watch"
+    if item.recommendation == "hold":
+        return "hold"
+    if failed_preconditions:
+        return "blocked"
+    if plan and plan.adjustment_allowed and plan.order_plan is not None:
+        if plan.order_plan.action == "full_close":
+            return "close_ready"
+        if plan.order_plan.action == "partial_take_profit":
+            return "reduce"
+    return "blocked"
+
+
+def _exchange_filter_state(
+    item: PositionReviewItem,
+    *,
+    plan: PositionAdjustmentPlanItem | None,
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
+) -> str:
+    if item.recommendation not in {"close_review", "trail_or_reduce"}:
+        return "not_applicable"
+    if plan and "symbol_filters_missing" in plan.reasons:
+        return "missing"
+    if filters is None and require_filters:
+        return "missing"
+    if plan and any(
+        reason
+        in {
+            "quantity_not_positive_after_step",
+            "quantity_below_min",
+            "quantity_above_max",
+            "notional_below_min",
+            "full_close_quantity_not_step_aligned",
+        }
+        for reason in plan.reasons
+    ):
+        return "failed"
+    if plan and plan.order_plan and "quantity_filter_checked" in plan.order_plan.reason_codes:
+        return "checked"
+    if filters is not None:
+        return "checked"
+    return "not_required"
 
 
 def _plan_for_item(

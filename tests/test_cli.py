@@ -1771,6 +1771,12 @@ class CliTests(unittest.TestCase):
         self.assertEqual(order_plan["action"], "partial_take_profit")
         self.assertEqual(order_plan["quantity"], 0.1)
         self.assertEqual(order_plan["position_side"], "LONG")
+        diagnostic = payload["diagnostics"][0]
+        self.assertEqual(diagnostic["symbol"], "BTCUSDT")
+        self.assertEqual(diagnostic["lifecycle_decision"], "reduce")
+        self.assertEqual(diagnostic["candidate_action"], "partial_take_profit")
+        self.assertEqual(diagnostic["exchange_filter_state"], "checked")
+        self.assertEqual(diagnostic["failed_preconditions"], [])
 
     def test_ops_time_exit_execute_requires_token_before_order(self):
         class FakeSignedClient:

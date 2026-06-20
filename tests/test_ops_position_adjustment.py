@@ -94,22 +94,32 @@ class PositionAdjustmentTests(unittest.TestCase):
     def tearDown(self):
         self.connection.close()
 
-    def insert_submitted_intent(self, *, hold_time_minutes=120):
+    def insert_submitted_intent(
+        self,
+        *,
+        symbol="BTCUSDT",
+        side="BUY",
+        quantity=0.2,
+        entry_price=100,
+        stop_price=96,
+        target_price=108,
+        hold_time_minutes=120,
+    ):
         self.store.insert_artifact(
             "order_intents",
             occurred_at="2026-06-20T03:00:00Z",
             source="execution.live",
-            symbol="BTCUSDT",
-            ref_id="order_intent:BTCUSDT:2026-06-20T03:00:00Z",
+            symbol=symbol,
+            ref_id=f"order_intent:{symbol}:2026-06-20T03:00:00Z",
             payload={
                 "status": "submitted",
                 "intent": {
-                    "symbol": "BTCUSDT",
-                    "side": "BUY",
-                    "quantity": 0.2,
-                    "entry_price": 100,
-                    "stop_price": 96,
-                    "target_price": 108,
+                    "symbol": symbol,
+                    "side": side,
+                    "quantity": quantity,
+                    "entry_price": entry_price,
+                    "stop_price": stop_price,
+                    "target_price": target_price,
                     "leverage": 5,
                     "metadata": {"hold_time_minutes": hold_time_minutes},
                 },
@@ -217,6 +227,140 @@ class PositionAdjustmentTests(unittest.TestCase):
 
         self.assertFalse(adjustment.adjustment_allowed)
         self.assertEqual(adjustment.plans[0].reasons, ["watch_only_recheck_later"])
+
+    def test_diagnostics_show_close_ready_and_manual_hold_without_blocking(self):
+        self.insert_submitted_intent(hold_time_minutes=30)
+        hold_check = position_hold_check_from_live_status(
+            report(
+                positions=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "positionAmt": "0.2",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "101",
+                        "unRealizedProfit": "0.2",
+                    },
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "entryPrice": "0.02",
+                        "markPrice": "0.019",
+                        "unRealizedProfit": "0.556",
+                    },
+                ],
+                open_algo_orders=[
+                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
+                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
+                ],
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T04:10:00Z",
+        )
+        review = position_review_from_hold_check(hold_check, manual_symbols={"BTWUSDT"})
+
+        adjustment = position_adjustment_plan_from_review(
+            review,
+            position_mode="hedge",
+            filters_by_symbol={
+                "BTCUSDT": SymbolExecutionFilters(
+                    symbol="BTCUSDT",
+                    step_size=Decimal("0.01"),
+                    min_qty=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                )
+            },
+            require_filters=True,
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_ready")
+        self.assertTrue(adjustment.adjustment_allowed)
+        self.assertEqual(len(adjustment.plans), 1)
+        diagnostics = {item.symbol: item for item in adjustment.diagnostics}
+        self.assertEqual(diagnostics["BTCUSDT"].lifecycle_decision, "close_ready")
+        self.assertEqual(diagnostics["BTCUSDT"].candidate_action, "full_close")
+        self.assertEqual(diagnostics["BTCUSDT"].exchange_filter_state, "checked")
+        self.assertEqual(diagnostics["BTCUSDT"].failed_preconditions, [])
+        self.assertEqual(diagnostics["BTCUSDT"].order_plan.quantity, 0.2)
+        self.assertEqual(diagnostics["BTWUSDT"].lifecycle_decision, "manual_hold")
+        self.assertTrue(diagnostics["BTWUSDT"].manual_symbol)
+        self.assertIsNone(diagnostics["BTWUSDT"].order_plan)
+        self.assertIn("manual_position_ignored", diagnostics["BTWUSDT"].failed_preconditions)
+
+    def test_diagnostics_explain_blocked_close_review_when_filters_are_missing(self):
+        adjustment = position_adjustment_plan_from_review(
+            self.review(mark_price=101, checked_at="2026-06-20T04:10:00Z", hold_time_minutes=30),
+            position_mode="hedge",
+            filters_by_symbol={},
+            require_filters=True,
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_blocked")
+        self.assertFalse(adjustment.adjustment_allowed)
+        diagnostic = adjustment.diagnostics[0]
+        self.assertEqual(diagnostic.lifecycle_decision, "blocked")
+        self.assertEqual(diagnostic.exchange_filter_state, "missing")
+        self.assertIn("symbol_filters_missing", diagnostic.failed_preconditions)
+        self.assertIsNone(diagnostic.order_plan)
+
+    def test_diagnostics_preserve_urgent_unprotected_priority_over_expired_hold(self):
+        self.insert_submitted_intent(symbol="BTCUSDT", hold_time_minutes=120)
+        self.insert_submitted_intent(
+            symbol="ETHUSDT",
+            quantity=0.1,
+            entry_price=100,
+            stop_price=96,
+            target_price=108,
+            hold_time_minutes=30,
+        )
+        hold_check = position_hold_check_from_live_status(
+            report(
+                positions=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "positionAmt": "0.2",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "100.5",
+                        "unRealizedProfit": "0.1",
+                    },
+                    {
+                        "symbol": "ETHUSDT",
+                        "positionAmt": "0.1",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "101",
+                        "unRealizedProfit": "0.1",
+                    },
+                ],
+                open_algo_orders=[
+                    {"symbol": "ETHUSDT", "positionSide": "LONG"},
+                    {"symbol": "ETHUSDT", "positionSide": "LONG"},
+                ],
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T04:10:00Z",
+        )
+        review = position_review_from_hold_check(hold_check)
+
+        adjustment = position_adjustment_plan_from_review(
+            review,
+            position_mode="hedge",
+            filters_by_symbol={
+                "BTCUSDT": SymbolExecutionFilters(symbol="BTCUSDT", step_size=Decimal("0.01")),
+                "ETHUSDT": SymbolExecutionFilters(symbol="ETHUSDT", step_size=Decimal("0.01")),
+            },
+            require_filters=True,
+        )
+
+        diagnostics = {item.symbol: item for item in adjustment.diagnostics}
+        self.assertEqual(diagnostics["BTCUSDT"].urgency, "urgent")
+        self.assertEqual(diagnostics["BTCUSDT"].protection_state, "unprotected")
+        self.assertIn("active_position_without_confirmed_algo_protection", diagnostics["BTCUSDT"].reasons)
+        self.assertEqual(diagnostics["ETHUSDT"].urgency, "high")
+        self.assertEqual(diagnostics["ETHUSDT"].protection_state, "protected")
+        self.assertIn("hold_time_expired", diagnostics["ETHUSDT"].reasons)
 
 
 class PositionAdjustmentExecuteTests(unittest.TestCase):
