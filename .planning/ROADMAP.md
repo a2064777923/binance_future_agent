@@ -8,8 +8,10 @@
 
 - ✅ **v1.0 Dry-Run Binance Futures Agent** — Phases 1-8, shipped 2026-06-19
   ([archive](milestones/v1.0-ROADMAP.md)).
+
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
+
 - ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-42, active.
 
 ## Phases
@@ -73,15 +75,20 @@ separate operator-gated actions.
 
 1. Existing active positions do not force the live runner to early-stop when
    multi-position mode is enabled and capacity remains.
+
 2. The live runner can continue from a retryable first-candidate skip to the
    next top-N hot symbol while still submitting at most one order per cycle.
+
 3. New order intents are rejected when portfolio margin, portfolio margin
    fraction, portfolio notional, same-direction notional, max-position count,
    or duplicate symbol-direction caps would be exceeded.
+
 4. A `30u_10x_multi_dynamic` profile can be previewed with confirmation token
    and portfolio caps.
+
 5. Risk-profile readiness can carry protected active exposure into the target
    profile only when active exposure fits target caps.
+
 6. `ops exposure-status` reports portfolio budget context.
 7. Full local test suite passes.
 
@@ -101,10 +108,13 @@ recommendations.
 
 1. `ops position-review` produces read-only recommendations for active
    positions without placing or modifying orders.
+
 2. Review output includes PnL percent, R-multiple, target progress, hold-time
    progress, protection count, and matching submitted intent.
+
 3. Unprotected, missing-plan, overdue, or near-stop positions produce
    `close_review`; near-target or >=1R positions produce `trail_or_reduce`.
+
 4. Full local test suite passes.
 
 ### Phase 32: Active Position Adjustment Plan
@@ -123,12 +133,16 @@ for live reduce orders.
 
 1. `ops position-adjustment-plan` is read-only and maps `trail_or_reduce` to a
    partial take-profit plan.
+
 2. `ops position-adjustment-plan` maps overdue or unsafe `close_review`
    positions to a full-close plan.
+
 3. `ops position-adjustment-execute` refuses live mutation without the exact
    confirmation token and an inactive live service.
+
 4. The automated live runner includes active-position review and adjustment
    plan summaries in each live cycle result before scanning new entries.
+
 5. Full local test suite passes.
 
 ### Phase 33: Filter-Aware Position Adjustments
@@ -148,6 +162,7 @@ minimum-notional constraints.
 1. Partial take-profit quantities are rounded down to symbol step size.
 2. Partial take-profit plans are blocked when min quantity or min notional would
    fail.
+
 3. Full-close plans require exact step alignment before confirmed execution.
 4. Confirmed adjustment execution requires exchange filters.
 5. Full local test suite passes.
@@ -169,13 +184,17 @@ auditable end-to-end.
 1. Setup scoring includes deterministic factor evidence for momentum,
    liquidity, open interest, taker flow, funding, volatility, narrative quality,
    and pilot tradability.
+
 2. Setup generation outputs side, entry, stop, target, notional, hold time,
    confidence, reasons, and warnings before AI is consulted.
+
 3. AI accepted trade responses must echo the setup side, prices, notional, and
    hold time exactly, or be rejected.
+
 4. New agent cycles persist `trade_setups` before AI evaluation.
 5. `ops trade-trace` reconstructs candidate, setup/legacy AI, risk/order
    intent, and exchange evidence without mutating exchange state.
+
 6. Full local and server test suites pass.
 
 ### Phase 35: Quant Setup Backtest Calibration
@@ -194,10 +213,13 @@ sweeps and hot-symbol matrix reporting.
 1. `quant_setup` is available as a built-in backtest variant.
 2. Setup-driven backtests use completed kline windows to call the same
    deterministic setup logic used by the live runner.
+
 3. Long and short setup-driven trades simulate stop loss, take profit, time
    exit, fees, and slippage.
+
 4. CLI `backtest run`, `backtest sweep`, and matrix reporting accept
    `quant_setup`.
+
 5. Full local test suite passes.
 
 ### Phase 36: Indicator-Based Setup Point Logic
@@ -217,12 +239,16 @@ and trace-visible stop/target rationale.
 1. Live feature extraction and `quant_setup` backtests use a shared indicator
    snapshot for ATR, VWAP, EMA spread, RSI, support, resistance, momentum, and
    volume impulse where kline data is available.
+
 2. Deterministic setup scoring includes trend structure, RSI regime, and
    volume impulse factors in addition to the existing market/narrative factors.
+
 3. Entry, stop, and target output includes a `price_basis` object explaining
    whether stop/target distances came from ATR/volatility or market structure.
+
 4. AI context and `ops trade-trace` expose indicator features and `price_basis`
    without giving AI authority to rewrite deterministic setup prices.
+
 5. Focused and full local test suites pass.
 
 ### Phase 37: Strategy Promotion Gate
@@ -241,14 +267,19 @@ pilot profitability and drawdown checks.
 
 1. Operators can run `ops strategy-promotion-check --matrix-report ...` against
    a backtest matrix JSON file.
+
 2. The gate rejects missing/invalid reports and variants that are not promoted
    by the matrix summary.
+
 3. The gate rejects variants with non-positive total PnL or worst drawdown at
    or above the pilot drawdown cap.
+
 4. The gate checks every interval cell for verdict, trade count, PnL,
    positive-window-rate, and drawdown.
+
 5. The Phase 36 `quant_setup` matrix report is checked and returns
    `keep_live_paused`.
+
 6. Full local test suite passes.
 
 ### Phase 38: Quant Setup Calibration Variants
@@ -267,15 +298,19 @@ without changing live defaults.
 
 1. `build_trade_setup` accepts an optional profile while preserving the
    standard default used by live code.
+
 2. Profiles can gate trades by edge, confidence, risk/reward, indicator sample
    coverage, trend alignment, RSI extremes, stop distance, and notional
    fraction.
+
 3. Built-in backtest variants include `quant_setup_selective` and
    `quant_setup_scalp`.
+
 4. CLI and matrix commands accept the new variants.
 5. Recent matrix testing compares baseline, selective, and scalp variants.
 6. Promotion checks show whether any variant is ready; failed checks keep live
    paused.
+
 7. Full local test suite passes.
 
 ### Phase 39: Interval-Aware Forward Paper Gate
@@ -295,14 +330,18 @@ remains blocked.
 
 1. `ops strategy-promotion-check` supports `--scope selected-intervals` and
    `--intervals ...`.
+
 2. Selected-interval checks only evaluate matching interval cells.
 3. Selected-interval success returns `forward_paper_allowed` and
    `live_resume_allowed=false`.
+
 4. Default all-interval checks preserve previous strict behavior.
 5. The Phase 38 matrix marks `quant_setup_selective` on `5m` as
    `forward_paper_allowed`.
+
 6. The same matrix still returns `keep_live_paused` with default all-interval
    scope.
+
 7. Full local test suite passes.
 
 ### Phase 40: Forward-Paper Evidence Recorder
@@ -320,12 +359,16 @@ quant setup variants without creating live or dry-run order intents.
 
 1. `ops forward-paper-run` fetches public klines and records paper signals for
    quant setup variants.
+
 2. Paper signals and outcomes use dedicated `paper_signals` and
    `paper_outcomes` event-store categories.
+
 3. Existing open paper signals settle using later bars with stop, target,
    time-exit, fees, and slippage.
+
 4. The command never writes `order_intents` and does not require a signed
    Binance client.
+
 5. CLI and focused unit tests cover signal creation and outcome settlement.
 6. Full local test suite passes.
 
@@ -349,6 +392,7 @@ can be collected repeatedly without enabling live automation.
 5. Deployment docs explain paper-only manual start and timer enablement.
 6. Paper scheduling can auto-select a wider hot-symbol universe for paper
    observation without widening the live trading allowlist.
+
 7. Full local test suite passes.
 
 ### Phase 42: Forward-Paper Performance Gate
@@ -368,14 +412,43 @@ paused.
 
 1. `ops forward-paper-performance-check` reads `paper_signals` and
    `paper_outcomes` for a selected variant, interval, and optional start time.
+
 2. The command reports signal/outcome counts, open signals, win rate, net PnL,
    profit factor, worst drawdown, exit reasons, symbol summaries, and latest
    outcomes.
+
 3. Missing signals, insufficient settled outcomes, losing evidence, weak win
    rate, or excessive drawdown all block paper promotion.
+
 4. Promising paper evidence can return `paper_evidence_promising`, but always
    keeps `live_resume_allowed=false`.
+
 5. Full local and server test suites pass after deployment.
+
+### Phase 43: Forward-Paper Loss Attribution And Recalibration
+
+**Goal:** Explain negative forward-paper performance by grouping paper
+outcomes by symbol, side, exit reason, and setup evidence so recalibration can
+target the losing conditions instead of guessing.
+
+**Requirements:** FLA-01, FLA-02, FLA-03, FLA-04
+
+**Depends on:** Phase 42
+
+**Status:** In progress locally.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Operators can run a read-only forward-paper loss attribution command against
+   stored paper signals and outcomes.
+2. The report joins outcomes to their original paper signal setup payloads.
+3. The report ranks underperforming groups by symbol, side, exit reason, setup
+   reasons, warnings, and factor evidence.
+4. The report emits concrete recalibration candidates while keeping
+   `live_resume_allowed=false`.
+5. Full local and server tests pass before using the report operationally.
 
 ## Progress
 
@@ -383,7 +456,7 @@ paused.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-42 | 13/13 | Phase 42 deployed, paper gate keeps live paused | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-43 | 13/14 | Phase 43 in progress, paper loss attribution local | Pending |
 
 ## Requirement Coverage
 
@@ -403,9 +476,9 @@ on the server. The paper timer uses auto-hot symbol selection rather than the
 10-symbol live pilot allowlist. `ops forward-paper-performance-check` is now
 deployed and the latest server gate returns `keep_live_paused` from negative
 5m paper performance: 57 signals, 35 settled outcomes, win rate 0.34285714,
-total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Next work
-should recalibrate the setup and keep collecting out-of-sample paper evidence
-before restoring live automation. Monitor any active position through
+total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Current
+work should attribute those losses by symbol, side, exit reason, and setup
+evidence before changing strategy filters. Monitor any active position through
 filter-aware `ops position-adjustment-plan` and use
 `ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
 adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`

@@ -36,6 +36,7 @@ from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.forward_paper import run_forward_paper
+from bfa.ops.forward_paper_loss_attribution import build_forward_paper_loss_attribution_report
 from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_adjustment import (
@@ -405,6 +406,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="maximum paper equity drawdown; use a negative value to disable this cap",
     )
     forward_paper_performance.add_argument("--latest-limit", type=int, default=10, help="number of recent outcomes to show")
+
+    forward_paper_loss_attribution = ops_subparsers.add_parser(
+        "forward-paper-loss-attribution",
+        help="read-only attribution report for negative forward-paper performance",
+    )
+    forward_paper_loss_attribution.add_argument("--env-file", help="optional env file to load before environment overrides")
+    forward_paper_loss_attribution.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    forward_paper_loss_attribution.add_argument("--variant", default="quant_setup_selective", help="paper variant to evaluate")
+    forward_paper_loss_attribution.add_argument("--interval", default="5m", help="paper interval to evaluate")
+    forward_paper_loss_attribution.add_argument("--since", help="only include paper signals opened at or after this ISO time")
+    forward_paper_loss_attribution.add_argument("--min-group-outcomes", type=int, default=1, help="minimum outcomes per attribution group")
+    forward_paper_loss_attribution.add_argument("--worst-limit", type=int, default=8, help="number of worst rows per grouping")
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -1111,6 +1124,17 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.paper_promotion_allowed else 1
+    if args.ops_command == "forward-paper-loss-attribution":
+        report = build_forward_paper_loss_attribution_report(
+            args.db or config.get("BFA_DB_PATH"),
+            variant=args.variant,
+            interval=args.interval,
+            since=args.since,
+            min_group_outcomes=args.min_group_outcomes,
+            worst_limit=args.worst_limit,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.status == "loss_attribution_ready" else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:

@@ -215,6 +215,20 @@ projects or losing control of downside.
 - [x] **FPG-04**: Passing paper thresholds can allow only paper promotion and
   must keep `live_resume_allowed=false`.
 
+### Forward-Paper Loss Attribution
+
+- [ ] **FLA-01**: Operators can run a read-only forward-paper loss attribution
+  command against stored paper signals and outcomes.
+
+- [ ] **FLA-02**: The attribution report joins settled outcomes back to their
+  originating paper signal setup payloads.
+
+- [ ] **FLA-03**: The report ranks underperforming groups by symbol, side,
+  exit reason, setup reasons, setup warnings, and setup factor evidence.
+
+- [ ] **FLA-04**: The report emits concrete recalibration candidates while
+  preserving `live_resume_allowed=false`.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -278,12 +292,16 @@ projects or losing control of downside.
 | FPG-02 | Phase 42 | Complete and deployed |
 | FPG-03 | Phase 42 | Complete and deployed |
 | FPG-04 | Phase 42 | Complete and deployed |
+| FLA-01 | Phase 43 | In progress |
+| FLA-02 | Phase 43 | In progress |
+| FLA-03 | Phase 43 | In progress |
+| FLA-04 | Phase 43 | In progress |
 
 **Coverage:**
-- v1.22 requirements: 51 total
-- Mapped to phases: 51
+- v1.22 requirements: 55 total
+- Mapped to phases: 55
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 42 forward-paper performance gate*
+*Last updated: 2026-06-20 during Phase 43 forward-paper loss attribution*

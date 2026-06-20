@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 42
+current_phase: 43
 status: active
-stopped_at: Phase 42 deployed; paper performance gate keeps live paused
-last_updated: "2026-06-20T22:47:00+08:00"
+stopped_at: Phase 43 in progress; attributing negative forward-paper evidence
+last_updated: "2026-06-20T22:58:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Deployed forward-paper performance gate and verified negative paper evidence
+last_activity_desc: Started forward-paper loss attribution and recalibration phase
 progress:
-  total_phases: 38
+  total_phases: 39
   completed_phases: 38
-  total_plans: 59
+  total_plans: 60
   completed_plans: 59
-  percent: 100
+  percent: 98
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 42 — Forward-Paper Performance Gate
-**Status:** Phase 42 deployed; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
+**Current phase:** Phase 43 — Forward-Paper Loss Attribution And Recalibration
+**Status:** Phase 43 in progress; paper-only timer active; live timer remains paused while default all-interval strategy promotion and latest paper performance evidence fail
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -514,10 +514,17 @@ gated by all-interval strategy evidence.
   `paper_worst_drawdown_exceeds_cap`. Python sqlite count check showed
   `paper_signals=57`, `paper_outcomes=35`, and `order_intents=18`.
 
+- Phase 43 has been added to turn the negative paper evidence into actionable
+  diagnostics. The target is a read-only attribution report that joins paper
+  outcomes back to their original setup payloads and ranks losing conditions by
+  symbol, side, exit reason, setup reasons/warnings, and factor evidence before
+  any filter or live-resume change.
+
 ## Next Command
 
-Recalibrate the `quant_setup_selective` 5m setup or add stricter filters before
-any live resume. Keep collecting out-of-sample `ops forward-paper-run` evidence
+Implement and verify Phase 43 forward-paper loss attribution. Use it to decide
+which `quant_setup_selective` 5m conditions need stricter filtering before any
+live resume. Keep collecting out-of-sample `ops forward-paper-run` evidence
 from the active paper-only timer, then rerun
 `ops forward-paper-performance-check`. Do not restore the live timer, execute
 adjustment orders, or apply `30u_10x_multi_dynamic` while the default
@@ -526,24 +533,24 @@ negative.
 
 ## Session
 
-**Last session:** 2026-06-20T22:47:00+08:00
-**Stopped at:** Phase 42 deployed; paper performance gate keeps live paused
-**Resume file:** .planning/phases/42-forward-paper-performance-gate/42-01-SUMMARY.md
+**Last session:** 2026-06-20T22:58:00+08:00
+**Stopped at:** Phase 43 in progress; attributing negative paper evidence
+**Resume file:** .planning/phases/43-forward-paper-loss-attribution-and-recalibration/43-01-PLAN.md
 
 ## Current Position
 
-Phase: 42 — Forward-Paper Performance Gate
-Plan: 42-01 local implementation
-Status: Complete and deployed; paper gate negative
-Last activity: 2026-06-20 — performance gate deployed and verified on server
+Phase: 43 — Forward-Paper Loss Attribution And Recalibration
+Plan: 43-01 local implementation
+Status: In progress locally; deployment pending
+Last activity: 2026-06-20 — phase added and loss attribution work started
 
 ## Operator Next Steps
 
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
   `quant_setup_selective` `5m`, while keeping
   `live_resume_allowed=false` until all-interval evidence passes.
-- Use `ops forward-paper-performance-check` after more paper runs to decide
-  whether recalibration improved the negative 5m paper evidence.
+- Use Phase 43 loss attribution to identify which symbols, sides, exit reasons,
+  and setup factors are driving the negative 5m paper evidence.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

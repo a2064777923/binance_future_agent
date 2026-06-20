@@ -2254,6 +2254,51 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "no_paper_evidence")
         self.assertFalse(payload["live_resume_allowed"])
 
+    def test_ops_forward_paper_loss_attribution_reports_negative_groups(self):
+        from tests.test_ops_forward_paper_loss_attribution import outcome_payload, signal_payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            from bfa.event_store.migrations import connect
+
+            connection = connect(db)
+            store = EventStore(connection)
+            signal_id = store.insert_artifact(
+                "paper_signals",
+                occurred_at="2026-06-20T00:00:00Z",
+                source="test",
+                symbol="BICOUSDT",
+                ref_id="paper_signal:test",
+                event_type="paper_signal",
+                payload=signal_payload("BICOUSDT", warnings=["crowding_risk"]),
+            )
+            store.insert_artifact(
+                "paper_outcomes",
+                occurred_at="2026-06-20T00:20:00Z",
+                source="test",
+                symbol="BICOUSDT",
+                ref_id=f"paper_outcome:{signal_id}",
+                event_type="paper_outcome",
+                payload=outcome_payload(signal_id, "BICOUSDT", -0.3),
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "forward-paper-loss-attribution",
+                "--db",
+                str(db),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_forward_paper_loss_attribution_v1")
+        self.assertEqual(payload["status"], "loss_attribution_ready")
+        self.assertFalse(payload["live_resume_allowed"])
+        self.assertEqual(payload["worst_groups"]["symbols"][0]["name"], "BICOUSDT")
+        self.assertTrue(payload["recalibration_candidates"])
+
 
 if __name__ == "__main__":
     unittest.main()
