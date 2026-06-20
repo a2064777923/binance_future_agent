@@ -1,17 +1,23 @@
 import sqlite3
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
+from bfa.execution.filters import SymbolExecutionFilters
 from bfa.ops.live_status import LiveStatusReport, OpenAiBackoffStatus, ProtectiveEvidence
 from bfa.ops.position_adjustment import (
     build_position_adjustment_execute_report,
+    build_position_adjustment_plan_report,
     position_adjustment_plan_from_review,
 )
 from bfa.ops.position_hold_check import position_hold_check_from_live_status
 from bfa.ops.position_review import position_review_from_hold_check
+
+
+EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchange_info.json"
 
 
 def report(*, positions=None, open_orders=None, open_algo_orders=None):
@@ -151,6 +157,44 @@ class PositionAdjustmentTests(unittest.TestCase):
         self.assertEqual(order_plan.position_side, "LONG")
         self.assertFalse(order_plan.reduce_only)
 
+    def test_partial_take_profit_quantity_respects_step_size(self):
+        adjustment = position_adjustment_plan_from_review(
+            self.review(mark_price=107),
+            position_mode="hedge",
+            partial_take_profit_fraction=0.333,
+            filters_by_symbol={
+                "BTCUSDT": SymbolExecutionFilters(
+                    symbol="BTCUSDT",
+                    step_size=Decimal("0.01"),
+                    min_qty=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                )
+            },
+        )
+
+        order_plan = adjustment.plans[0].order_plan
+        self.assertEqual(adjustment.status, "adjustment_plan_ready")
+        self.assertAlmostEqual(order_plan.quantity, 0.06)
+        self.assertIn("quantity_filter_checked", order_plan.reason_codes)
+
+    def test_partial_take_profit_blocks_when_min_notional_would_fail(self):
+        adjustment = position_adjustment_plan_from_review(
+            self.review(mark_price=107),
+            position_mode="hedge",
+            partial_take_profit_fraction=0.1,
+            filters_by_symbol={
+                "BTCUSDT": SymbolExecutionFilters(
+                    symbol="BTCUSDT",
+                    step_size=Decimal("0.01"),
+                    min_qty=Decimal("0.01"),
+                    min_notional=Decimal("50"),
+                )
+            },
+        )
+
+        self.assertFalse(adjustment.adjustment_allowed)
+        self.assertIn("notional_below_min", adjustment.plans[0].reasons)
+
     def test_expired_position_plans_full_close(self):
         adjustment = position_adjustment_plan_from_review(
             self.review(mark_price=101, checked_at="2026-06-20T04:10:00Z", hold_time_minutes=30),
@@ -218,6 +262,11 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
             }
         )
 
+    def exchange_info(self):
+        import json
+
+        return json.loads(EXCHANGE_INFO.read_text(encoding="utf-8"))
+
     def test_requires_confirmation_token_before_partial_reduce(self):
         fake = FakeSignedClient(mark_price="107")
 
@@ -226,11 +275,25 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
             db_path=str(self.db_path),
             now="2026-06-20T04:00:00Z",
             signed_client=fake,
+            exchange_info=self.exchange_info(),
         )
 
         self.assertEqual(report.status, "confirmation_required")
         self.assertTrue(report.expected_confirmation_token.startswith("POSITION-ADJUST-BTCUSDT-"))
         self.assertEqual(fake.orders, [])
+
+    def test_plan_report_blocks_actionable_adjustment_when_filters_missing(self):
+        report = build_position_adjustment_plan_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=FakeSignedClient(mark_price="107"),
+            exchange_info={"symbols": []},
+        )
+
+        self.assertEqual(report.status, "adjustment_plan_blocked")
+        self.assertFalse(report.adjustment_allowed)
+        self.assertIn("symbol_filters_missing", report.reasons)
 
     def test_executes_partial_reduce_with_matching_token(self):
         fake = FakeSignedClient(mark_price="107")
@@ -239,6 +302,7 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
             db_path=str(self.db_path),
             now="2026-06-20T04:00:00Z",
             signed_client=fake,
+            exchange_info=self.exchange_info(),
         )
 
         report = build_position_adjustment_execute_report(
@@ -246,6 +310,7 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
             db_path=str(self.db_path),
             signed_client=fake,
             confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
         )
 
         self.assertEqual(report.status, "position_adjustment_submitted")
@@ -267,6 +332,27 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
 
         self.assertEqual(report.status, "execution_blocked")
         self.assertIn("live_service_active", report.reasons)
+
+    def test_confirmed_execution_requires_symbol_filters(self):
+        fake = FakeSignedClient(mark_price="107")
+        preview = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info={"symbols": []},
+        )
+
+        self.assertEqual(report.status, "execution_blocked")
+        self.assertIn("symbol_filters_missing", report.reasons)
 
 
 if __name__ == "__main__":

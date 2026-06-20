@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-32, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-33, active.
 
 ## Phases
 
@@ -115,7 +115,7 @@ for live reduce orders.
 
 **Requirements:** APR-04
 
-**Status:** In progress locally.
+**Status:** Complete and deployed.
 
 **Plans:** 1 plan
 
@@ -131,13 +131,34 @@ for live reduce orders.
    plan summaries in each live cycle result before scanning new entries.
 5. Full local test suite passes.
 
+### Phase 33: Filter-Aware Position Adjustments
+
+**Goal:** Ensure active-position adjustment plans only expose executable reduce
+orders whose quantities satisfy Binance step-size, minimum-quantity, and
+minimum-notional constraints.
+
+**Requirements:** APR-05
+
+**Status:** Local verification passed; server deployment pending.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. Partial take-profit quantities are rounded down to symbol step size.
+2. Partial take-profit plans are blocked when min quantity or min notional would
+   fail.
+3. Full-close plans require exact step alignment before confirmed execution.
+4. Confirmed adjustment execution requires exchange filters.
+5. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-32 | 2/3 | Phase 32 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-33 | 4/4 | Phase 33 server deploy pending | Pending |
 
 ## Requirement Coverage
 
@@ -147,6 +168,6 @@ for live reduce orders.
 
 ## Next Step
 
-Finish Phase 32 local implementation, run full tests, deploy to the isolated
-server, and preview `ops position-adjustment-plan`. Do not execute adjustment
-orders or apply `30u_10x_multi_dynamic` without an explicit confirmation token.
+Deploy Phase 33 to the isolated server and preview filter-aware
+`ops position-adjustment-plan`. Do not execute adjustment orders or apply
+`30u_10x_multi_dynamic` without an explicit confirmation token.

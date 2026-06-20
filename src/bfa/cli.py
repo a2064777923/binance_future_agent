@@ -979,6 +979,7 @@ def _run_ops(
             check_binance=not args.skip_binance,
             now=args.now,
             signed_client=_build_signed_client(config, signed_client_factory),
+            market_client=_build_client(config, client_factory),
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.adjustment_allowed else 1
@@ -989,6 +990,7 @@ def _run_ops(
             confirm_token=args.confirm_token,
             now=args.now,
             signed_client=_build_signed_client(config, signed_client_factory),
+            market_client=_build_client(config, client_factory),
             service_active=args.service_active,
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)

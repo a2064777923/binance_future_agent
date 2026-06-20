@@ -2,7 +2,7 @@
 
 ## v1.22 Portfolio Risk And Multi-Position (Active: 2026-06-20)
 
-**Phases completed:** 2 phases, 2 plans; Phase 32 local implementation in progress
+**Phases completed:** 4 phases, 4 plans; Phase 33 server deployment pending
 
 **Key accomplishments:**
 
@@ -19,6 +19,8 @@
 - Extended exposure status with portfolio budget context.
 - Added read-only active-position review and local active-position adjustment
   planning for partial take-profit/full-close actions.
+- Added filter-aware adjustment planning so partial reduce quantities are
+  checked against Binance step/min-quantity/min-notional constraints.
 
 **Known deferred items at close:**
 

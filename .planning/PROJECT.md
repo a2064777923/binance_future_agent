@@ -570,9 +570,10 @@ passed; live env remains 5x/12U/one-position while HYPEUSDT is open.
 | High leverage needs portfolio caps | 10x on 30 USDT is possible only when total margin, total notional, and same-direction concentration are bounded. | Phase 30 complete locally |
 | Protected active positions may be carried forward | Profile changes can accept existing exposure only if exchange protection is present, unreconciled intents match active positions, and target caps absorb the exposure. | Phase 30 complete |
 | Manage active positions before new entries | Each live cycle should inspect active positions and expose deterministic adjustment plans before scanning for new trades. | Phase 32 complete locally |
+| Filter reduce orders before confirmation | Tiny-account partial exits must satisfy Binance quantity and notional filters before the system exposes an executable token. | Phase 33 complete locally |
 | Public Lana claims are inspiration, not proof | Screenshots and social posts inform architecture ideas but do not verify profitability. | Phase 30 complete locally |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after Phase 32 active-position adjustment implementation.*
+*Last updated: 2026-06-20 after Phase 33 filter-aware adjustment implementation.*

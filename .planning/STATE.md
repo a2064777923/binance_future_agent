@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 32
+current_phase: 33
 status: active
-stopped_at: Phase 32 active-position adjustment implementation in progress locally
-last_updated: "2026-06-20T19:20:00+08:00"
+stopped_at: Phase 33 local verification passed; server deployment pending
+last_updated: "2026-06-20T19:46:55+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
   total_phases: 30
   completed_phases: 30
-  total_plans: 50
-  completed_plans: 50
+  total_plans: 51
+  completed_plans: 51
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 32 — Active Position Adjustment Plan
-**Status:** Phase 32 local implementation in progress; server deployment pending
+**Current phase:** Phase 33 — Filter-Aware Position Adjustments
+**Status:** Phase 33 local verification passed; server deployment pending
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,8 +31,8 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Convert deterministic active-position review into
-confirmation-gated partial take-profit or full-close adjustment plans.
+**Current focus:** Ensure partial take-profit and full-close adjustment plans
+respect Binance symbol filters before any confirmation token can execute.
 
 ## Decisions
 
@@ -313,27 +313,38 @@ confirmation-gated partial take-profit or full-close adjustment plans.
   `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`. No profile apply was
   run.
 
+- Phase 33 local implementation makes active-position adjustment plans
+  exchange-filter aware. Partial take-profit quantities can be rounded down to
+  Binance step size and blocked when min quantity or min notional would fail;
+  read-only actionable previews fail closed when symbol filters are missing;
+  confirmed adjustment execution requires symbol filters before submitting a
+  live reduce order. Focused local suites passed with 52 tests and the full
+  local suite passed with 293 tests.
+
 ## Next Command
 
-Continue monitoring the deployed Phase 32 live cycle. Do not execute adjustment
-orders or apply `30u_10x_multi_dynamic` without explicit confirmation.
+Deploy Phase 33 to the isolated server and preview filter-aware
+`ops position-adjustment-plan`. Do not execute adjustment orders or apply
+`30u_10x_multi_dynamic` without explicit confirmation.
 
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** Phase 32 local implementation; server deployment pending
-**Resume file:** .planning/phases/32-active-position-adjustment-plan/32-01-SUMMARY.md
+**Stopped at:** Phase 33 local implementation; server deployment pending
+**Resume file:** .planning/phases/33-filter-aware-position-adjustments/33-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 32 — Active Position Adjustment Plan
-Plan: 32-01 local implementation
-Status: Deployed and verified; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — active-position adjustment plan/execute deployed
+Phase: 33 — Filter-Aware Position Adjustments
+Plan: 33-01 local implementation
+Status: Local verification passed; server deployment pending; current live profile remains 5x/12U/one-position
+Last activity: 2026-06-20 — filter-aware adjustment planning added locally
 
 ## Operator Next Steps
 
-- Monitor the active `SOLUSDT` position through `ops position-adjustment-plan`.
+- Deploy Phase 33 and run server verification.
+- Monitor the active `SOLUSDT` position through filter-aware
+  `ops position-adjustment-plan`.
 - Apply `30u_10x_multi_dynamic` only if the operator explicitly confirms the
   fresh token `RISK-PROFILE-30U_10X_MULTI_DYNAMIC-22d7ac80b0e19013`.
 - Do not run `ops position-adjustment-execute --confirm-token ...` unless the

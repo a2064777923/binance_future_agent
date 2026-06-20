@@ -67,6 +67,10 @@ projects or losing control of downside.
   for live positions, including partial take-profit and full-close reduce
   orders derived from deterministic review recommendations.
 
+- [x] **APR-05**: Active-position adjustment plans respect Binance symbol
+  filters before exposing executable reduce orders, including step size,
+  minimum quantity, and minimum notional checks.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -93,12 +97,13 @@ projects or losing control of downside.
 | APR-02 | Phase 31 | Complete locally |
 | APR-03 | Phase 31 | Complete locally |
 | APR-04 | Phase 32 | Complete locally |
+| APR-05 | Phase 33 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 14 total
-- Mapped to phases: 14
+- v1.22 requirements: 15 total
+- Mapped to phases: 15
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 32 active-position adjustment implementation*
+*Last updated: 2026-06-20 after Phase 33 filter-aware adjustment implementation*

@@ -1453,6 +1453,18 @@ class CliTests(unittest.TestCase):
         self.assertIn("near_target", payload["positions"][0]["reasons"])
 
     def test_ops_position_adjustment_plan_outputs_read_only_partial_reduce(self):
+        class FakeMarketClient:
+            def exchange_info(self):
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/exchangeInfo",
+                    params={},
+                    payload=json.loads(
+                        (Path("tests") / "fixtures" / "binance_market" / "exchange_info.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                )
+
         class FakeSignedClient:
             def account(self):
                 return {"availableBalance": "30", "totalWalletBalance": "30"}
@@ -1460,12 +1472,12 @@ class CliTests(unittest.TestCase):
             def position_risk(self):
                 return [
                     {
-                        "symbol": "BNBUSDT",
-                        "positionAmt": "0.02",
+                        "symbol": "BTCUSDT",
+                        "positionAmt": "0.2",
                         "positionSide": "LONG",
                         "entryPrice": "100",
                         "markPrice": "107",
-                        "unRealizedProfit": "0.14",
+                        "unRealizedProfit": "1.4",
                     }
                 ]
 
@@ -1474,8 +1486,8 @@ class CliTests(unittest.TestCase):
 
             def open_algo_orders(self):
                 return [
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
+                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
+                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
                 ]
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1489,14 +1501,14 @@ class CliTests(unittest.TestCase):
                 "order_intents",
                 occurred_at="2026-06-20T03:43:09Z",
                 source="execution.live",
-                symbol="BNBUSDT",
-                ref_id="order_intent:BNBUSDT:2026-06-20T03:43:09Z",
+                symbol="BTCUSDT",
+                ref_id="order_intent:BTCUSDT:2026-06-20T03:43:09Z",
                 payload={
                     "status": "submitted",
                     "intent": {
-                        "symbol": "BNBUSDT",
+                        "symbol": "BTCUSDT",
                         "side": "BUY",
-                        "quantity": 0.02,
+                        "quantity": 0.2,
                         "entry_price": 100,
                         "stop_price": 96,
                         "target_price": 108,
@@ -1522,6 +1534,7 @@ class CliTests(unittest.TestCase):
                     "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
                     "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
                 },
+                client_factory=lambda _config: FakeMarketClient(),
                 signed_client_factory=lambda _config: FakeSignedClient(),
             )
 
@@ -1531,7 +1544,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["status"], "adjustment_plan_ready")
         order_plan = payload["plans"][0]["order_plan"]
         self.assertEqual(order_plan["action"], "partial_take_profit")
-        self.assertEqual(order_plan["quantity"], 0.01)
+        self.assertEqual(order_plan["quantity"], 0.1)
         self.assertEqual(order_plan["position_side"], "LONG")
 
     def test_ops_time_exit_execute_requires_token_before_order(self):

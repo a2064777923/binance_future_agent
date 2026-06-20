@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal, ROUND_DOWN
 import hashlib
-from typing import Any
+from typing import Any, Mapping
 
 from bfa.config import AppConfig, RuntimeMode
 from bfa.event_store.migrations import connect
 from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceFuturesSignedClient, BinanceSignedError
+from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import OrderIntent, RiskDecision
 from bfa.execution.store import persist_exchange_response, persist_order_intent
+from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.ops.position_review import (
     PositionReviewItem,
     PositionReviewReport,
@@ -135,6 +138,9 @@ def build_position_adjustment_plan_report(
     check_binance: bool = True,
     now: str | None = None,
     signed_client: BinanceFuturesSignedClient | None = None,
+    market_client=None,
+    exchange_info: Mapping[str, Any] | None = None,
+    require_filters: bool = True,
 ) -> PositionAdjustmentPlanReport:
     if not _truthy(config.get("BFA_POSITION_ADJUSTMENT_ENABLED", "true")):
         return PositionAdjustmentPlanReport(
@@ -153,6 +159,11 @@ def build_position_adjustment_plan_report(
         review,
         position_mode=config.get("BFA_POSITION_MODE"),
         partial_take_profit_fraction=_float_or_default(config.get("BFA_PARTIAL_TAKE_PROFIT_FRACTION"), 0.5),
+        filters_by_symbol=_filters_by_symbol(
+            _exchange_info_payload(config, market_client=market_client, exchange_info=exchange_info),
+            review,
+        ),
+        require_filters=require_filters,
     )
 
 
@@ -161,6 +172,8 @@ def position_adjustment_plan_from_review(
     *,
     position_mode: str,
     partial_take_profit_fraction: float = 0.5,
+    filters_by_symbol: Mapping[str, SymbolExecutionFilters] | None = None,
+    require_filters: bool = False,
 ) -> PositionAdjustmentPlanReport:
     reasons: list[str] = []
     plans: list[PositionAdjustmentPlanItem] = []
@@ -179,9 +192,13 @@ def position_adjustment_plan_from_review(
             item,
             position_mode=position_mode,
             partial_take_profit_fraction=partial_take_profit_fraction,
+            filters=filters_by_symbol.get(item.symbol.upper()) if filters_by_symbol else None,
+            require_filters=require_filters,
         )
         if plan is not None:
             plans.append(plan)
+            if not plan.adjustment_allowed:
+                reasons.extend(plan.reasons)
 
     if not plans and not reasons:
         reasons.append("no_adjustment_candidate")
@@ -221,6 +238,8 @@ def build_position_adjustment_execute_report(
     confirm_token: str | None = None,
     now: str | None = None,
     signed_client: BinanceFuturesSignedClient | None = None,
+    market_client=None,
+    exchange_info: Mapping[str, Any] | None = None,
     service_active: bool = False,
 ) -> PositionAdjustmentExecuteReport:
     if RuntimeMode(config.get("BFA_MODE")) is not RuntimeMode.LIVE:
@@ -255,6 +274,9 @@ def build_position_adjustment_execute_report(
         check_binance=True,
         now=checked_at,
         signed_client=client,
+        market_client=market_client,
+        exchange_info=exchange_info,
+        require_filters=True,
     )
     if not plan_report.adjustment_allowed:
         return PositionAdjustmentExecuteReport(
@@ -344,6 +366,8 @@ def _plan_for_item(
     *,
     position_mode: str,
     partial_take_profit_fraction: float,
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
 ) -> PositionAdjustmentPlanItem | None:
     if item.position_amt == 0:
         return PositionAdjustmentPlanItem(
@@ -356,9 +380,16 @@ def _plan_for_item(
             item,
             position_mode=position_mode,
             fraction=partial_take_profit_fraction,
+            filters=filters,
+            require_filters=require_filters,
         )
     if item.recommendation == "close_review":
-        return _full_close_plan(item, position_mode=position_mode)
+        return _full_close_plan(
+            item,
+            position_mode=position_mode,
+            filters=filters,
+            require_filters=require_filters,
+        )
     if item.recommendation == "watch":
         return PositionAdjustmentPlanItem(
             review_item=item,
@@ -373,15 +404,30 @@ def _partial_reduce_plan(
     *,
     position_mode: str,
     fraction: float,
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
 ) -> PositionAdjustmentPlanItem:
-    bounded_fraction = min(max(fraction, 0.0), 1.0)
-    quantity = round(abs(item.position_amt) * bounded_fraction, 8)
-    if quantity <= 0:
+    if require_filters and filters is None:
         return PositionAdjustmentPlanItem(
             review_item=item,
             adjustment_allowed=False,
-            reasons=["partial_quantity_not_positive"],
+            reasons=["symbol_filters_missing"],
         )
+    bounded_fraction = min(max(fraction, 0.0), 1.0)
+    desired_quantity = abs(item.position_amt) * bounded_fraction
+    quantity_check = _filtered_reduce_quantity(
+        item,
+        desired_quantity=desired_quantity,
+        filters=filters,
+        check_min_notional=True,
+    )
+    if quantity_check.rejection_reasons:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=quantity_check.rejection_reasons,
+        )
+    quantity = quantity_check.quantity
     remaining = abs(item.position_amt) - quantity
     return PositionAdjustmentPlanItem(
         review_item=item,
@@ -391,14 +437,38 @@ def _partial_reduce_plan(
             item,
             action="partial_take_profit",
             quantity=quantity,
-            reason_codes=["partial_take_profit", *item.reasons],
+            reason_codes=_dedupe(["partial_take_profit", *quantity_check.reason_codes, *item.reasons]),
             expected_remaining=round(remaining if item.position_amt > 0 else -remaining, 8),
             position_mode=position_mode,
         ),
     )
 
 
-def _full_close_plan(item: PositionReviewItem, *, position_mode: str) -> PositionAdjustmentPlanItem:
+def _full_close_plan(
+    item: PositionReviewItem,
+    *,
+    position_mode: str,
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
+) -> PositionAdjustmentPlanItem:
+    if require_filters and filters is None:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=["symbol_filters_missing"],
+        )
+    quantity_check = _filtered_reduce_quantity(
+        item,
+        desired_quantity=abs(item.position_amt),
+        filters=filters,
+        check_min_notional=False,
+    )
+    if quantity_check.rejection_reasons:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=quantity_check.rejection_reasons,
+        )
     return PositionAdjustmentPlanItem(
         review_item=item,
         adjustment_allowed=True,
@@ -406,8 +476,8 @@ def _full_close_plan(item: PositionReviewItem, *, position_mode: str) -> Positio
         order_plan=_market_reduce_plan(
             item,
             action="full_close",
-            quantity=abs(item.position_amt),
-            reason_codes=["position_review_close", *item.reasons],
+            quantity=quantity_check.quantity,
+            reason_codes=_dedupe(["position_review_close", *quantity_check.reason_codes, *item.reasons]),
             expected_remaining=0.0,
             position_mode=position_mode,
         ),
@@ -437,6 +507,85 @@ def _market_reduce_plan(
         source_recommendation=item.recommendation,
         expected_remaining_position_amt=expected_remaining,
     )
+
+
+@dataclass(frozen=True)
+class _FilteredReduceQuantity:
+    quantity: float
+    reason_codes: list[str] = field(default_factory=list)
+    rejection_reasons: list[str] = field(default_factory=list)
+
+
+def _filtered_reduce_quantity(
+    item: PositionReviewItem,
+    *,
+    desired_quantity: float,
+    filters: SymbolExecutionFilters | None,
+    check_min_notional: bool,
+) -> _FilteredReduceQuantity:
+    if filters is None:
+        return _FilteredReduceQuantity(quantity=round(desired_quantity, 8))
+    desired = Decimal(str(desired_quantity))
+    rounded = _round_down(desired, filters.step_size)
+    reasons = ["quantity_filter_checked"]
+    rejections: list[str] = []
+    if rounded <= 0:
+        rejections.append("quantity_not_positive_after_step")
+    if filters.min_qty is not None and rounded < filters.min_qty:
+        rejections.append("quantity_below_min")
+    if filters.max_qty is not None and rounded > filters.max_qty:
+        rejections.append("quantity_above_max")
+    reference_price = Decimal(str(item.mark_price or item.entry_price or 0.0))
+    if check_min_notional and filters.min_notional is not None and reference_price > 0:
+        notional = rounded * reference_price
+        if notional < filters.min_notional:
+            rejections.append("notional_below_min")
+    if not check_min_notional and rounded != desired:
+        rejections.append("full_close_quantity_not_step_aligned")
+    return _FilteredReduceQuantity(
+        quantity=float(rounded),
+        reason_codes=reasons,
+        rejection_reasons=_dedupe(rejections),
+    )
+
+
+def _round_down(value: Decimal, increment: Decimal | None) -> Decimal:
+    if increment is None or increment <= 0:
+        return value
+    units = (value / increment).to_integral_value(rounding=ROUND_DOWN)
+    return units * increment
+
+
+def _exchange_info_payload(
+    config: AppConfig,
+    *,
+    market_client=None,
+    exchange_info: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    if exchange_info is not None:
+        return exchange_info
+    client = market_client
+    if client is None:
+        client = BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
+    try:
+        return client.exchange_info().payload
+    except Exception:
+        return None
+
+
+def _filters_by_symbol(
+    exchange_info: Mapping[str, Any] | None,
+    review: PositionReviewReport,
+) -> dict[str, SymbolExecutionFilters]:
+    if not exchange_info:
+        return {}
+    result: dict[str, SymbolExecutionFilters] = {}
+    for item in review.positions:
+        try:
+            result[item.symbol.upper()] = SymbolExecutionFilters.from_exchange_info(exchange_info, item.symbol)
+        except ValueError:
+            continue
+    return result
 
 
 def _execute_plan_item(
