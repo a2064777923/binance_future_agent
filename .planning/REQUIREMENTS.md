@@ -221,6 +221,10 @@ v1.0 requirements are archived at
   lack persisted outcome artifacts, so closed trades are reconciled before any
   profile increase.
 
+- [x] **RCG-04**: For leverage or risk-cap changes, submitted intents count as
+  reconciled only when they have a final `closed` outcome; `open_or_partial`
+  outcomes remain blocking.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -284,13 +288,14 @@ v1.0 requirements are archived at
 | RCG-01 | Phase 22 | Complete - `ops risk-change-check` reports readiness for leverage/risk-cap changes |
 | RCG-02 | Phase 22 | Complete - live BNBUSDT active protected position blocks an 8x target with `keep_current_profile` |
 | RCG-03 | Phase 22 | Complete - BNBUSDT submitted intent without an outcome blocks profile changes until reconciled |
+| RCG-04 | Phase 23 | Complete - partial/open outcomes do not clear submitted intents for profile changes |
 
 **Coverage:**
 
-- v1.1-v1.14 requirements: 50 total
-- Mapped to phases: 50
+- v1.1-v1.15 requirements: 51 total
+- Mapped to phases: 51
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.14 risk-change readiness gate*
+*Last updated: 2026-06-20 after verifying v1.15 closed-outcome risk-change strictness*

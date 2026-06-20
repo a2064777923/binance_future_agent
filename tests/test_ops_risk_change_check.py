@@ -144,6 +144,39 @@ class RiskChangeCheckTests(unittest.TestCase):
 
         self.assertEqual([item.symbol for item in missing], ["BNBUSDT"])
 
+    def test_unreconciled_submitted_intents_requires_closed_outcome(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-06-20T03:43:09Z",
+            source="execution.live",
+            symbol="BNBUSDT",
+            ref_id="order_intent:BNBUSDT:2026-06-20T03:43:09Z",
+            payload={
+                "status": "submitted",
+                "intent": {"symbol": "BNBUSDT", "side": "BUY", "quantity": 0.01, "leverage": 5},
+            },
+            event_type="order_intent",
+        )
+        submitted_event_id = connection.execute(
+            "SELECT event_id FROM order_intents WHERE symbol = 'BNBUSDT'"
+        ).fetchone()["event_id"]
+        store.insert_artifact(
+            "outcomes",
+            occurred_at="2026-06-20T03:44:00Z",
+            source="binance_usdm",
+            symbol="BNBUSDT",
+            ref_id=f"outcome:{submitted_event_id}:open_or_partial",
+            payload={"status": "open_or_partial"},
+            event_type="outcome",
+        )
+
+        missing = unreconciled_submitted_intents(connection)
+
+        self.assertEqual([item.symbol for item in missing], ["BNBUSDT"])
+
 
 if __name__ == "__main__":
     unittest.main()

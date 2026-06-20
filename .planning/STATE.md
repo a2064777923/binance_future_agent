@@ -1,27 +1,27 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.14
-milestone_name: Risk Change Readiness Gate
-current_phase: Phase 22 - Risk Change Readiness Gate
+milestone: v1.15
+milestone_name: Closed Outcome Risk Change Strictness
+current_phase: Phase 23 - Closed Outcome Risk Change Strictness
 status: completed
-stopped_at: Phase 22 verified; risk-change gate blocks 8x while BNBUSDT is open and unreconciled
-last_updated: "2026-06-20T12:09:00.000+08:00"
+stopped_at: Phase 23 verified; partial outcomes cannot unlock leverage/risk changes
+last_updated: "2026-06-20T12:24:00.000+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Risk-change readiness gate deployed and verified against current BNBUSDT live position
+last_activity_desc: Closed-outcome strictness deployed and verified for risk-change readiness
 progress:
-  total_phases: 14
-  completed_phases: 14
-  total_plans: 14
-  completed_plans: 14
+  total_phases: 15
+  completed_phases: 15
+  total_plans: 15
+  completed_plans: 15
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 22 - Risk Change Readiness Gate
-**Status:** v1.14 complete; `ops risk-change-check` blocks leverage/risk-cap
-profile changes while positions/orders or unreconciled submitted intents remain
+**Current phase:** Phase 23 - Closed Outcome Risk Change Strictness
+**Status:** v1.15 complete; partial/open outcomes must not unlock
+leverage/risk-cap profile changes
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -101,11 +101,11 @@ profile.
 
 ## Current Position
 
-Phase: Phase 22 - Risk Change Readiness Gate
-Plan: 22-01 complete
-Status: `ops risk-change-check` deployed; current BNBUSDT LONG blocks an 8x
-target with `keep_current_profile`
-Last activity: 2026-06-20 - Phase 22 verified
+Phase: Phase 23 - Closed Outcome Risk Change Strictness
+Plan: 23-01 complete
+Status: risk-change gate now requires `closed` outcomes before submitted
+intents are considered reconciled for profile changes
+Last activity: 2026-06-20 - Phase 23 verified
 
 ## Operator Next Steps
 

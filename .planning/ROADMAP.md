@@ -25,6 +25,7 @@
 - ✅ **v1.12 Timer Resume Gate** — Phase 20, completed 2026-06-20.
 - ✅ **v1.13 Closed Trade Outcome Reconciliation** — Phase 21, completed 2026-06-20.
 - ✅ **v1.14 Risk Change Readiness Gate** — Phase 22, completed 2026-06-20.
+- ✅ **v1.15 Closed Outcome Risk Change Strictness** — Phase 23, completed 2026-06-20.
 
 ## Phases
 
@@ -372,6 +373,27 @@ persisted.
 5. Server read-only verification under the current BNBUSDT live position blocks
    the proposed 8x change without modifying exchange or env state.
 
+### Phase 23: Closed Outcome Risk Change Strictness
+
+**Goal:** Ensure partial/open outcome artifacts cannot unlock leverage or
+risk-cap profile changes.
+
+**Requirements:** RCG-04
+
+**Status:** Complete. Partial/open outcome artifacts remain blocking for
+leverage or risk-cap changes; only final `closed` outcomes clear submitted
+intents.
+
+**Success Criteria:**
+
+1. Risk-change readiness considers a submitted intent reconciled only when
+   `outcome:{event_id}:closed` exists.
+2. `outcome:{event_id}:open_or_partial` remains blocking for leverage/risk-cap
+   changes.
+3. Regression tests cover the partial outcome case.
+4. Server read-only verification still blocks the 8x target while BNBUSDT lacks
+   a closed outcome.
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -398,11 +420,12 @@ persisted.
 | 20 | v1.12 | 1/1 | Complete | 2026-06-20 |
 | 21 | v1.13 | 1/1 | Complete | 2026-06-20 |
 | 22 | v1.14 | 1/1 | Complete | 2026-06-20 |
+| 23 | v1.15 | 1/1 | Complete | 2026-06-20 |
 
 ## Requirement Coverage
 
-- v1.1-v1.14 requirements: 50
-- Mapped: 50
+- v1.1-v1.15 requirements: 51
+- Mapped: 51
 - Unmapped: 0
 
 ## Next Step

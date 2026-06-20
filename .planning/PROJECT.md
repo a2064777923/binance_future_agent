@@ -94,6 +94,8 @@ control of downside.
   persists net-of-commission fill/outcome evidence idempotently.
 - Phase 22 adds a read-only readiness gate before any leverage or risk-cap
   profile change.
+- Phase 23 tightens that readiness gate so only final closed outcomes satisfy
+  submitted-trade reconciliation.
 
 ### Active
 
@@ -197,7 +199,7 @@ The user's chosen direction:
 
 ## Current State
 
-Phases 1 through 22 are complete and verified. The project is installable as an
+Phases 1 through 23 are complete and verified. The project is installable as an
 isolated Python package, has a safe environment contract, official Binance USD-M
 public market-data access, narrative/manual/RSS ingestion, normalized JSONL
 evidence output, a local SQLite event store, deterministic replay/report
@@ -212,7 +214,8 @@ explicit configurable margin mode, explicit position mode, account-balance
 preflight, DeepSeek support, and 30U/5x trial runtime caps.
 Phase 20 adds a read-only resume gate for timer reactivation. Phase 21 adds
 closed-trade outcome reconciliation and persisted fill/outcome accounting.
-Phase 22 adds a stricter gate for leverage/risk-cap changes.
+Phase 22 adds a stricter gate for leverage/risk-cap changes. Phase 23 tightens
+that gate to require final closed outcomes.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
@@ -335,6 +338,20 @@ clear and submitted live trades have outcome evidence.
 **Status:** Complete. Current live BNBUSDT position does cause the gate to
 return `keep_current_profile` for an 8x target.
 
+## Current Milestone: v1.15 Closed Outcome Risk Change Strictness
+
+**Goal:** Ensure partial/open outcome artifacts cannot unlock leverage or
+risk-cap profile changes.
+
+**Target features:**
+- Require `outcome:{event_id}:closed` for submitted-intent reconciliation.
+- Keep `open_or_partial` outcomes blocking for risk-change readiness.
+- Preserve read-only checks and unchanged execution behavior.
+
+**Status:** Complete. Partial/open outcome artifacts remain blocking; submitted
+intents require a final `closed` outcome before risk profile changes are
+allowed.
+
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
@@ -362,8 +379,9 @@ return `keep_current_profile` for an 8x target.
 | Gate timer resume with exchange state | Timer resume should be a read-only decision based on live positions, open orders, algo orders, and AI backoff rather than manual JSON interpretation. | Phase 20 complete |
 | Persist closed-trade outcomes | Live strategy changes need net-of-fee realized PnL evidence, not only submitted order records. | Phase 21 complete |
 | Gate risk profile changes | Higher leverage should require clear exchange state and reconciled trade outcomes, not just operator intent. | Phase 22 complete |
+| Require closed outcomes before risk changes | Partial/open accounting should not unlock higher leverage. | Phase 23 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-20 after verifying v1.14 risk-change readiness gate.*
+*Last updated: 2026-06-20 after verifying v1.15 closed-outcome risk-change strictness.*

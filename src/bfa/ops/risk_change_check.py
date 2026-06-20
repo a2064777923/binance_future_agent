@@ -169,7 +169,7 @@ def unreconciled_submitted_intents(connection: sqlite3.Connection) -> list[Submi
         if payload.get("status") != "submitted":
             continue
         event_id = int(row["event_id"])
-        if _has_outcome_for_event(connection, event_id):
+        if _has_closed_outcome_for_event(connection, event_id):
             continue
         intent = payload.get("intent")
         intent_payload = intent if isinstance(intent, Mapping) else {}
@@ -186,15 +186,15 @@ def unreconciled_submitted_intents(connection: sqlite3.Connection) -> list[Submi
     return missing
 
 
-def _has_outcome_for_event(connection: sqlite3.Connection, event_id: int) -> bool:
+def _has_closed_outcome_for_event(connection: sqlite3.Connection, event_id: int) -> bool:
     row = connection.execute(
         """
         SELECT 1
         FROM outcomes
-        WHERE ref_id LIKE ?
+        WHERE ref_id = ?
         LIMIT 1
         """,
-        (f"outcome:{event_id}:%",),
+        (f"outcome:{event_id}:closed",),
     ).fetchone()
     return row is not None
 
