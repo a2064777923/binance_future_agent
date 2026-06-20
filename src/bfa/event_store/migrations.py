@@ -19,6 +19,8 @@ CATEGORY_TABLES = (
     "fills",
     "risk_state",
     "outcomes",
+    "paper_signals",
+    "paper_outcomes",
 )
 
 

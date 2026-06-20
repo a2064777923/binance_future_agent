@@ -168,6 +168,22 @@ projects or losing control of downside.
   `quant_setup_selective` on `5m` as `forward_paper_allowed` while the default
   all-interval check still returns `keep_live_paused`.
 
+### Forward-Paper Evidence Recorder
+
+- [x] **FPE-01**: A read-only forward-paper command can record calibrated
+  quant setup paper signals without creating order intents or touching signed
+  Binance endpoints.
+
+- [x] **FPE-02**: Forward-paper records use dedicated event-store categories
+  for `paper_signals` and `paper_outcomes`.
+
+- [x] **FPE-03**: Open paper signals can be settled into paper outcomes using
+  later public kline bars with stop, target, time-exit, fees, and slippage.
+
+- [x] **FPE-04**: Forward-paper commands support explicit symbol, interval,
+  variant, limit, and deterministic timestamp inputs for repeatable evidence
+  collection.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -219,12 +235,16 @@ projects or losing control of downside.
 | IFP-02 | Phase 39 | Complete locally |
 | IFP-03 | Phase 39 | Complete locally |
 | IFP-04 | Phase 39 | Complete locally |
+| FPE-01 | Phase 40 | Complete locally |
+| FPE-02 | Phase 40 | Complete locally |
+| FPE-03 | Phase 40 | Complete locally |
+| FPE-04 | Phase 40 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 39 total
-- Mapped to phases: 39
+- v1.22 requirements: 43 total
+- Mapped to phases: 43
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 39 interval-aware forward-paper gate*
+*Last updated: 2026-06-20 after Phase 40 forward-paper evidence recorder*

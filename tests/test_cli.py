@@ -2115,6 +2115,60 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["intervals"], ["5m"])
         self.assertEqual(payload["cell_checks"][0]["interval"], "5m")
 
+    def test_ops_forward_paper_run_records_paper_signal_only(self):
+        class FakeClient:
+            def klines(self, symbol, *, interval, limit=30, start_time=None, end_time=None):
+                rows = []
+                price = 100.0
+                for index in range(limit):
+                    close = price * 1.018
+                    rows.append(
+                        test_kline(
+                            1_700_000_000_000 + index * 300_000,
+                            open_price=str(price),
+                            high=str(close * 1.018),
+                            low=str(price * 0.999),
+                            close=str(close),
+                        )
+                    )
+                    price = close
+                return MarketDataResponse(endpoint="/fapi/v1/klines", params={}, payload=rows)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "forward-paper-run",
+                "--db",
+                str(db),
+                "--symbols",
+                "btcusdt",
+                "--interval",
+                "5m",
+                "--variant",
+                "quant_setup",
+                "--limit",
+                "18",
+                "--now",
+                "2026-06-20T00:00:00Z",
+                client_factory=lambda _config: FakeClient(),
+            )
+            connection = sqlite3.connect(db)
+            connection.row_factory = sqlite3.Row
+            try:
+                signal_count = connection.execute("SELECT COUNT(*) AS count FROM paper_signals").fetchone()["count"]
+                intent_count = connection.execute("SELECT COUNT(*) AS count FROM order_intents").fetchone()["count"]
+            finally:
+                connection.close()
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_forward_paper_run_v1")
+        self.assertEqual(payload["persisted"]["paper_signals"], 1)
+        self.assertEqual(signal_count, 1)
+        self.assertEqual(intent_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

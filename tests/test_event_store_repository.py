@@ -49,6 +49,8 @@ class EventStoreRepositoryTests(unittest.TestCase):
             "fills",
             "risk_state",
             "outcomes",
+            "paper_signals",
+            "paper_outcomes",
         ]
 
         for category in categories:
@@ -109,4 +111,3 @@ def _count(connection, table):
 
 if __name__ == "__main__":
     unittest.main()
-

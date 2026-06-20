@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 39
+current_phase: 40
 status: active
-stopped_at: Phase 39 complete locally; 5m selective forward-paper gate allowed but live resume still blocked
-last_updated: "2026-06-20T23:45:00+08:00"
+stopped_at: Phase 40 complete locally; forward-paper recorder implemented but not scheduled on server
+last_updated: "2026-06-21T00:10:00+08:00"
 last_activity: 2026-06-20
 last_activity_desc: Added portfolio caps, candidate queue evaluation, and 30u_10x_multi_dynamic profile readiness locally
 progress:
-  total_phases: 36
-  completed_phases: 36
-  total_plans: 57
-  completed_plans: 57
+  total_phases: 37
+  completed_phases: 37
+  total_plans: 58
+  completed_plans: 58
   percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 39 — Interval-Aware Forward Paper Gate
-**Status:** Phase 39 complete locally; live timer remains paused while default all-interval strategy promotion fails
+**Current phase:** Phase 40 — Forward-Paper Evidence Recorder
+**Status:** Phase 40 complete locally; live timer remains paused while default all-interval strategy promotion fails
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -31,7 +31,7 @@ See: `.planning/PROJECT.md`
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Collect forward-paper evidence for passing intervals while
+**Current focus:** Deploy or schedule forward-paper evidence collection while
 keeping live resume gated by all-interval strategy evidence.
 
 ## Decisions
@@ -445,33 +445,41 @@ keeping live resume gated by all-interval strategy evidence.
   the same variant still returns `keep_live_paused` because `15m` remains
   negative and over drawdown cap.
 
+- Phase 40 local implementation adds read-only `ops forward-paper-run`. It
+  fetches public klines, records calibrated quant setup `paper_signals`, settles
+  existing open paper signals into `paper_outcomes` using later bars, and uses
+  stop, target, time-exit, fees, and slippage. It writes no `order_intents`,
+  does not use signed Binance endpoints, and does not modify live env, timer,
+  positions, or risk profile.
+
 ## Next Command
 
-Collect forward-paper evidence for `quant_setup_selective` on `5m`, or further
-calibrate/disable failed `15m` behavior, then rerun matrix plus both selected
+Deploy or schedule `ops forward-paper-run` for `quant_setup_selective` on `5m`,
+then collect out-of-sample paper outcomes and rerun matrix plus both selected
 and all-interval `ops strategy-promotion-check`. Do not restore the live timer,
 execute adjustment orders, or apply `30u_10x_multi_dynamic` while the default
 all-interval promotion gate returns `keep_live_paused`.
 
 ## Session
 
-**Last session:** 2026-06-20T23:45:00+08:00
-**Stopped at:** Phase 39 complete locally; 5m selective forward-paper gate allowed but live resume still blocked
-**Resume file:** .planning/phases/39-interval-aware-forward-paper-gate/39-01-SUMMARY.md
+**Last session:** 2026-06-21T00:10:00+08:00
+**Stopped at:** Phase 40 complete locally; forward-paper recorder implemented but not scheduled on server
+**Resume file:** .planning/phases/40-forward-paper-evidence-recorder/40-01-SUMMARY.md
 
 ## Current Position
 
-Phase: 39 — Interval-Aware Forward Paper Gate
-Plan: 39-01 local implementation
+Phase: 40 — Forward-Paper Evidence Recorder
+Plan: 40-01 local implementation
 Status: Complete locally; timer paused; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — selected-interval forward-paper gate implemented and latest matrix checked
+Last activity: 2026-06-20 — forward-paper signal/outcome recorder implemented locally
 
 ## Operator Next Steps
 
 - Decide whether to close/review the active `SOLUSDT` position before restoring
   the live timer.
-- Collect forward-paper evidence for `quant_setup_selective` on `5m`, while
-  keeping `live_resume_allowed=false` until all-interval evidence passes.
+- Deploy or schedule `ops forward-paper-run` for `quant_setup_selective` on
+  `5m`, while keeping `live_resume_allowed=false` until all-interval evidence
+  passes.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

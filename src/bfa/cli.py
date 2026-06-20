@@ -35,6 +35,7 @@ from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
 from bfa.ops.exposure_status import build_exposure_status_report
+from bfa.ops.forward_paper import run_forward_paper
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.position_adjustment import (
     build_position_adjustment_execute_report,
@@ -355,6 +356,18 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         help="optional absolute drawdown cap; defaults to matrix cell max_daily_loss_usdt",
     )
+
+    forward_paper = ops_subparsers.add_parser(
+        "forward-paper-run",
+        help="record read-only forward-paper quant setup signals and paper outcomes",
+    )
+    forward_paper.add_argument("--env-file", help="optional env file to load before environment overrides")
+    forward_paper.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    forward_paper.add_argument("--symbols", help="comma-separated symbols; defaults to configured market symbols")
+    forward_paper.add_argument("--interval", default="5m", help="kline interval to observe")
+    forward_paper.add_argument("--variant", default="quant_setup_selective", help="quant_setup backtest variant to observe")
+    forward_paper.add_argument("--limit", type=int, default=36, help="recent kline bars to fetch per symbol")
+    forward_paper.add_argument("--now", help="optional deterministic run timestamp")
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
@@ -991,6 +1004,19 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.promotion_allowed else 1
+    if args.ops_command == "forward-paper-run":
+        symbols = _symbols_arg(args.symbols) if args.symbols else market_symbols(config)
+        report = run_forward_paper(
+            client=_build_client(config, client_factory),
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            symbols=symbols,
+            interval=args.interval,
+            variant=args.variant,
+            limit=args.limit,
+            now=args.now,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.ok else 1
     if args.ops_command == "reconcile-outcomes":
         signed_client = _build_signed_client(config, signed_client_factory)
         if signed_client is None:

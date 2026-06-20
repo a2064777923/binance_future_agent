@@ -10,7 +10,7 @@
   ([archive](milestones/v1.0-ROADMAP.md)).
 - ✅ **v1.21 Live Pilot Risk Controls** — Phases 9-29, shipped 2026-06-20
   ([archive](milestones/v1.21-ROADMAP.md)).
-- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-39, active.
+- ◆ **v1.22 Portfolio Risk And Multi-Position** — Phases 30-40, active.
 
 ## Phases
 
@@ -305,13 +305,37 @@ remains blocked.
    scope.
 7. Full local test suite passes.
 
+### Phase 40: Forward-Paper Evidence Recorder
+
+**Goal:** Record out-of-sample paper signals and paper outcomes for calibrated
+quant setup variants without creating live or dry-run order intents.
+
+**Requirements:** FPE-01, FPE-02, FPE-03, FPE-04
+
+**Status:** Complete locally; server deployment/scheduling remains pending.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. `ops forward-paper-run` fetches public klines and records paper signals for
+   quant setup variants.
+2. Paper signals and outcomes use dedicated `paper_signals` and
+   `paper_outcomes` event-store categories.
+3. Existing open paper signals settle using later bars with stop, target,
+   time-exit, fees, and slippage.
+4. The command never writes `order_intents` and does not require a signed
+   Binance client.
+5. CLI and focused unit tests cover signal creation and outcome settlement.
+6. Full local test suite passes.
+
 ## Progress
 
 | Milestone | Phases | Plans Complete | Status | Shipped |
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-39 | 10/10 | Phase 39 local | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-40 | 11/11 | Phase 40 local | Pending |
 
 ## Requirement Coverage
 
@@ -324,9 +348,12 @@ remains blocked.
 Keep live automation paused while the latest calibrated `quant_setup` matrix
 still fails default all-interval `ops strategy-promotion-check`. The
 `quant_setup_selective` variant is now eligible only for `5m` forward-paper
-observation through `--scope selected-intervals --intervals 5m`; next work
-should collect forward-paper evidence and/or recalibrate failed `15m` behavior
-before restoring live automation. Monitor `SOLUSDT` through filter-aware
-`ops position-adjustment-plan` and use `ops trade-trace --symbol SOLUSDT` for
-decision-chain review. Do not execute adjustment orders, restore the live
-timer, or apply `30u_10x_multi_dynamic` without an explicit confirmation token.
+observation through `--scope selected-intervals --intervals 5m`, and local
+`ops forward-paper-run` can record paper signals/outcomes without order
+intents. Next work should deploy or schedule this forward-paper recorder on the
+server, then collect out-of-sample evidence and/or recalibrate failed `15m`
+behavior before restoring live automation. Monitor `SOLUSDT` through
+filter-aware `ops position-adjustment-plan` and use
+`ops trade-trace --symbol SOLUSDT` for decision-chain review. Do not execute
+adjustment orders, restore the live timer, or apply `30u_10x_multi_dynamic`
+without an explicit confirmation token.
