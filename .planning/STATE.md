@@ -4,10 +4,10 @@ milestone: v1.21
 milestone_name: Live Pilot Risk Controls
 current_phase: Milestone v1.21 archived
 status: completed
-stopped_at: confidence normalization hotfix deployed; HYPEUSDT still blocks 8x/dynamic profile apply
-last_updated: "2026-06-20T14:39:20+08:00"
+stopped_at: HYPEUSDT open/protected and within hold window; 8x/dynamic profile still blocked
+last_updated: "2026-06-20T14:37:00+08:00"
 last_activity: 2026-06-20
-last_activity_desc: Server hotfix 8fa704e deployed and verified
+last_activity_desc: Live HYPEUSDT gate checked read-only
 progress:
   total_phases: 21
   completed_phases: 21
@@ -144,6 +144,17 @@ any profile switch.
   health-check passed after deployment. The live timer was paused during the
   code-only deploy, then restored; the next live cycle submitted no order.
 
+- Latest read-only live check: HYPEUSDT remains open as `0.16` LONG under 5x,
+  with two exchange-visible protective algo orders and no normal open orders.
+  At the check it was about `70.8` minutes into a `120` minute AI hold window,
+  so `ops position-hold-check` returned `within_hold_window` and
+  `ops time-exit-plan` returned `exit_plan_blocked` with
+  `hold_time_not_expired`. `ops reconcile-outcomes --symbol HYPEUSDT` fetched
+  the entry fill only and reported `open_or_partial`; it inserted no fills or
+  outcomes. `ops risk-change-check --target-leverage 8` still returned
+  `keep_current_profile` because an active protected position and unreconciled
+  submitted intent remain.
+
 ## Next Command
 
 Observe HYPEUSDT until it closes or reaches a reviewed time-exit condition. Do
@@ -154,7 +165,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 ## Session
 
 **Last session:** 2026-06-20T01:05:00+08:00
-**Stopped at:** confidence hotfix deployed; HYPEUSDT blocks risk-profile escalation
+**Stopped at:** HYPEUSDT open/protected and within hold window; risk-profile escalation blocked
 **Resume file:** .planning/milestones/v1.21-MILESTONE-AUDIT.md
 
 ## Current Position
@@ -162,7 +173,7 @@ not change live env risk caps while HYPEUSDT remains open. After HYPEUSDT closes
 Phase: Milestone v1.21 complete
 Plan: —
 Status: Awaiting next milestone; current live profile remains 5x/12U/one-position
-Last activity: 2026-06-20 — Server hotfix 8fa704e deployed and verified
+Last activity: 2026-06-20 — Live HYPEUSDT gate checked read-only
 
 ## Operator Next Steps
 
