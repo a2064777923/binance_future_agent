@@ -1,5 +1,51 @@
 # Milestones
 
+## v1.24 Server Readiness And Paper Promotion (Shipped: 2026-06-21)
+
+**Phases completed:** 3 phases, 3 plans, 0 tasks
+
+**Archived artifacts:**
+
+- `.planning/milestones/v1.24-ROADMAP.md`
+- `.planning/milestones/v1.24-REQUIREMENTS.md`
+- `.planning/milestones/v1.24-MILESTONE-AUDIT.md`
+
+**Key accomplishments:**
+
+- Deployed and ran the read-only server readiness evidence path for
+  `ops live-resume-readiness` without restoring live timers, applying risk
+  profiles, editing env files, or placing/canceling Binance orders.
+
+- Collected current guarded `quant_setup_selective_guarded` matrix and server
+  paper evidence, compared it to Phase 50, and kept live resume fail-closed
+  when the evidence weakened and generated no post-change paper signals.
+
+- Added `ops operator-resume-decision`, a read-only packet that converts
+  readiness JSON into one of `keep_live_paused`, `collect_more_paper`,
+  `resolve_exposure`, or `eligible_for_operator_resume`.
+
+- Preserved the separation between manual/unattributed exposure and
+  agent-managed evidence; the current packet reports `ETHUSDT` and `BTWUSDT`
+  as manual/unattributed blockers.
+
+- Added v1.24 milestone audit and Nyquist validation coverage for Phases 53-55.
+
+**Known deferred items at close:**
+
+- Live automation remains paused; the current operator packet returns
+  `resolve_exposure`, not live eligibility.
+
+- Manual/unattributed `ETHUSDT` and `BTWUSDT` exposure must be resolved or
+  classified before any future live resume confirmation flow.
+
+- Guarded paper evidence is still insufficient; Phase 54 generated zero
+  post-change signals for the guarded variant.
+
+- Applying `30u_10x_multi_dynamic` remains outside this milestone and requires
+  a separate confirmation-gated risk-profile path.
+
+---
+
 ## v1.23 Strategy Evidence And Live Resume Readiness (Shipped: 2026-06-21)
 
 **Phases completed:** 5 phases, 5 plans, 0 tasks

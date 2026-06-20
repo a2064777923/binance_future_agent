@@ -609,7 +609,7 @@ any small live automation can be resumed.
 for future live resume, but it did not authorize live timer restore, higher-risk
 profile apply, or order submission.
 
-## Current Milestone: v1.24 Server Readiness And Paper Promotion
+## Shipped Milestone: v1.24 Server Readiness And Paper Promotion
 
 **Goal:** Move the v1.23 readiness work from local proof to server evidence,
 then collect guarded post-change paper evidence before any separately approved
@@ -628,10 +628,10 @@ live resume.
   investigate exchange/manual exposure, or prepare a separate operator-confirmed
   live resume.
 
-**Status:** Complete with milestone audit passed; archive pending. Phases 53-55
-are complete. No server live automation, risk profile, or Binance order state
-has been changed for this milestone. The current operator decision is
-`resolve_exposure`, so live remains paused.
+**Status:** Complete and archived. Phases 53-55 are complete. No server live
+automation, risk profile, or Binance order state was changed for this
+milestone. The archived operator decision is `resolve_exposure`, so live
+remains paused.
 
 ## Key Decisions
 
@@ -705,4 +705,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after completing Phase 55 operator decision packet.*
+*Last updated: 2026-06-21 after archiving v1.24 milestone.*

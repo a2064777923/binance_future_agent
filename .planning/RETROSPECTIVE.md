@@ -227,6 +227,58 @@
 - Faster live progress still needs a hard distinction between paper evidence,
   preview commands, and execution authority.
 
+## Milestone: v1.24 — Server Readiness And Paper Promotion
+
+**Shipped:** 2026-06-21
+**Phases:** 3
+**Plans:** 3
+
+### What Was Built
+
+- Server readiness helper and evidence path for `ops live-resume-readiness`
+  under the isolated deployment.
+- Guarded `quant_setup_selective_guarded` matrix and server paper evidence
+  collection, with a clear post-change timestamp boundary.
+- Read-only `ops operator-resume-decision` packet that converts readiness JSON
+  into one next-action status.
+- Milestone audit and Nyquist validation coverage for Phases 53-55.
+
+### What Worked
+
+- The server stayed fail-closed while evidence was gathered; live timer/service
+  remained inactive and no profile/order mutation was performed.
+- The operator packet made the current state unambiguous:
+  `resolve_exposure`, not "almost ready".
+- Feeding the Phase 54 readiness artifact into the Phase 55 packet gave a cheap
+  end-to-end smoke test without touching Binance again.
+
+### What Was Inefficient
+
+- Phase 54 generated no guarded paper signals, so evidence collection proved
+  safety but did not improve promotion confidence.
+- GSD milestone tooling used UTC dates during archive, requiring a local-date
+  cleanup pass.
+- The validation/audit artifacts had to be added retroactively for Phases 53-55
+  to satisfy the active Nyquist workflow.
+
+### Patterns Established
+
+- A live-resume workflow should end in an operator decision packet, not a raw
+  readiness JSON file.
+- Manual/unattributed exchange exposure has priority over paper evidence when
+  deciding the next operational action.
+- "No signal" is evidence too; it must fail closed instead of being treated as
+  harmless silence.
+
+### Key Lessons
+
+- The bot should not resume live just because the code path is safe; it also
+  needs fresh, positive strategy evidence.
+- Operator-opened positions need explicit classification, otherwise the system
+  cannot distinguish account risk from bot risk.
+- Archive tooling should be checked for timezone drift before final milestone
+  commits.
+
 ## Cross-Milestone Trends
 
 | Trend | Evidence | Next Action |
@@ -235,4 +287,4 @@
 | External credentials are configured out of band | Binance and AI credentials are present on the server without being committed | Continue treating env files and keys as non-repo secrets |
 | Risk increases require evidence, not enthusiasm | HYPEUSDT/manual exposure and negative paper evidence block profile increases or live resume | Reconcile agent-managed positions after close, mark manual ETH/ETHUSDT separately, then rerun readiness gates |
 | Tiny-account futures constraints shape the product | Binance filters, notional-vs-margin, spread, and fees drive sizing | Keep tradability filters and staged backtests before further scaling |
-| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates | Deploy/run `ops live-resume-readiness` read-only on the server before any resume discussion |
+| Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates; v1.24 adds the operator decision packet | Use `ops operator-resume-decision` before any live resume confirmation planning |

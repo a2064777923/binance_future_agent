@@ -3,25 +3,25 @@ gsd_state_version: 1.0
 milestone: v1.24
 milestone_name: Server Readiness And Paper Promotion
 current_phase: v1.24 — Server Readiness And Paper Promotion
-current_phase_name: Milestone Archive
-status: milestone_audit_passed_pending_archive
-stopped_at: v1.24 milestone audit passed; archive pending.
-last_updated: "2026-06-21T02:31:51+08:00"
+status: completed
+stopped_at: v1.24 milestone archived; ready for next milestone planning.
+last_updated: "2026-06-21T02:40:38+08:00"
 last_activity: 2026-06-21
-last_activity_desc: v1.24 milestone audit passed, archive pending
+last_activity_desc: Milestone v1.24 completed and archived
 progress:
   total_phases: 3
   completed_phases: 3
   total_plans: 3
   completed_plans: 3
   percent: 100
+current_phase_name: Milestone Archived
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
 **Current phase:** v1.24 — Server Readiness And Paper Promotion
-**Status:** Milestone audit passed pending archive
+**Status:** v1.24 milestone complete
 **Last planned:** 2026-06-21
 **Plan count:** 3
 
@@ -32,9 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Archive v1.24 after the milestone audit passed. Live
-automation remains paused because the current packet returns
-`resolve_exposure`, not live eligibility.
+**Current focus:** Start the next milestone. Live automation remains paused
+because the archived v1.24 packet returns `resolve_exposure`, not live
+eligibility.
 
 ## Decisions
 
@@ -581,24 +581,24 @@ automation remains paused because the current packet returns
 
 ## Next Command
 
-Run `$gsd-complete-milestone v1.24` to archive v1.24. Keep live automation
+Run `$gsd-new-milestone` to define the next milestone. Keep live automation
 disabled. Do not enable unattended live auto-hot, restore live automation,
-execute adjustment orders, or apply `30u_10x_multi_dynamic` while the operator
-packet remains `resolve_exposure`.
+execute adjustment orders, or apply `30u_10x_multi_dynamic` while the archived
+v1.24 operator packet remains `resolve_exposure`.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
 **Stopped at:** v1.24 requirements and roadmap initialized.
-**Resume file:** .planning/REQUIREMENTS.md
+**Resume file:** .planning/milestones/v1.24-REQUIREMENTS.md
 
 ## Current Position
 
-Phase: v1.24 — Server Readiness And Paper Promotion
-Plan: 3/3 complete
-Status: Milestone audit passed pending archive
-Last activity: 2026-06-21 — v1.24 milestone audit passed, archive pending
+Phase: Milestone v1.24 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-21 — Milestone v1.24 completed and archived
 
 ## Operator Next Steps
 
-- Run `$gsd-complete-milestone v1.24`.
+- Start the next milestone with `$gsd-new-milestone`.
