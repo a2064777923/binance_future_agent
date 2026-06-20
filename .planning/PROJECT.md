@@ -158,8 +158,8 @@ control of downside.
   inactive.
 - Phase 60 deploys and verifies the Phase 59 controls on the isolated server,
   refreshes server operator artifacts, preserves `BTWUSDT` as manual exposure,
-  and widens the active 30U/10x dynamic pilot caps to 6 open positions, 60 USDT
-  max position notional, 360 USDT portfolio notional, and 300 USDT
+  and the active 30U/10x dynamic pilot caps are now widened to 8 open
+  positions, 80 USDT max position notional, 500 USDT portfolio notional, and 400 USDT
   same-direction notional while keeping 0.4 USDT per-trade risk and 1 USDT
   daily loss.
 - v1.26 starts from live evidence where `NEARUSDT` is agent-managed and in
@@ -380,8 +380,8 @@ secret-safe health check passed after deployment.
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
 out of band. The active trial profile is 30 USDT account capital, 10x max
-leverage, 60 USDT max position notional, 0.4 USDT max per-trade risk, 1 USDT max
-daily loss, and 6 open positions under dynamic sizing and portfolio caps.
+leverage, 80 USDT max position notional, 0.4 USDT max per-trade risk, 1 USDT max
+daily loss, and 8 open positions under dynamic sizing and portfolio caps.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`

@@ -128,7 +128,7 @@
 <details open>
 <summary>◆ v1.26 Live Position Management And Pilot Learning (Phases 61-65) — ACTIVE</summary>
 
-- [ ] Phase 61: Close-Review Exit Plan Repair (0/1 plan)
+- [x] Phase 61: Close-Review Exit Plan Repair (1/1 plan) (completed 2026-06-21)
 - [ ] Phase 62: Guarded Position Exit Execution (0/1 plan)
 - [ ] Phase 63: Live Cycle Position Stewardship (0/1 plan)
 - [ ] Phase 64: Live Outcome Ledger And Guard Feedback (0/1 plan)
@@ -145,17 +145,20 @@ review-required but still fail to produce an executable close/reduce plan.
 
 **Requirements:** POS-01, POS-02, POS-04
 
-**Plans:** 0/1 plans complete
-**Status:** Not started
+**Plans:** 1/1 plans complete
+**Status:** Complete
 
 **Success criteria:**
 
 1. `ops time-exit-plan` or a companion diagnostic reports exact failed
    preconditions for each `close_review` position.
+
 2. Agent-managed positions can produce filter-aware close/reduce plan candidates
    when Binance quantity/notional constraints allow.
+
 3. Manual positions such as `BTWUSDT` remain classified as `manual_hold` and
    never become close/reduce candidates.
+
 4. Unprotected or deteriorating positions are surfaced with higher urgency than
    normal hold-time expiry.
 
@@ -174,10 +177,13 @@ cleanup.
 
 1. Operator-confirmed close/reduce execution refuses to run without a fresh
    matching plan token.
+
 2. Execution refuses manual symbols and refuses plans that violate Binance
    filters, current risk caps, daily-loss limits, or live-service safety gates.
+
 3. Post-action checks verify the intended position side is flat or reduced
    before canceling protective algo orders.
+
 4. All execution attempts persist secret-safe artifacts and trace IDs.
 
 ### Phase 63: Live Cycle Position Stewardship
@@ -194,9 +200,11 @@ live cycle, with optional env-gated deterministic auto-management.
 
 1. Every live cycle records lifecycle decisions for active positions before
    candidate scanning or AI calls.
+
 2. Optional auto-management is disabled unless explicit env flags are enabled.
 3. When enabled, auto-management only touches agent-managed positions and stays
    inside current caps and manual-symbol exclusions.
+
 4. New-entry scans still run when capacity remains after stewardship decisions.
 
 ### Phase 64: Live Outcome Ledger And Guard Feedback
@@ -213,8 +221,10 @@ attribution into recommendation-only guard feedback.
 
 1. A single command or scheduled path reconciles recently closed live outcomes
    idempotently with fills, commission, net PnL, and matching intent IDs.
+
 2. Operator can review live performance by symbol, side, setup profile, factors,
    exit reason, and holding behavior.
+
 3. Losing or weak groups generate recommendation-only guard updates.
 4. Guard recommendations cannot raise risk or change live env by themselves.
 
@@ -232,6 +242,7 @@ learning packet from live-cycle, exit, outcome, and guard evidence.
 
 1. Server deployment is scoped to `/opt/binance-futures-agent` and
    `/etc/binance-futures-agent`.
+
 2. Local and server tests pass after deployment.
 3. Live and paper timers are restored after any deployment pause.
 4. Server artifacts include lifecycle decisions, manual exclusions, cap usage,

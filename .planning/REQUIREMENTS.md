@@ -57,7 +57,7 @@ projects or losing control of downside.
   timer running unless a deployment pause is necessary, and restores timers
   after verification.
 - [ ] **RISK-04**: Automatic or operator-confirmed position-management actions
-  remain bounded by current 30U/10x/6-position caps, per-trade and daily-loss
+  remain bounded by current 30U/10x/8-position caps, per-trade and daily-loss
   limits, duplicate-exposure rules, and manual-symbol exclusion.
 
 ## v1.27+ Requirements
@@ -87,10 +87,10 @@ projects or losing control of downside.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| POS-01 | Phase 61 | Pending |
-| POS-02 | Phase 61 | Pending |
+| POS-01 | Phase 61 | Satisfied |
+| POS-02 | Phase 61 | Satisfied |
 | POS-03 | Phase 63 | Pending |
-| POS-04 | Phase 61 | Pending |
+| POS-04 | Phase 61 | Satisfied |
 | EXIT-01 | Phase 62 | Pending |
 | EXIT-02 | Phase 63 | Pending |
 | EXIT-03 | Phase 62 | Pending |

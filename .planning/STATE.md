@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.26
 milestone_name: Live Position Management And Pilot Learning
-current_phase: Phase 61 — Close-Review Exit Plan Repair
-current_phase_name: Close-Review Exit Plan Repair
-status: ready_to_execute
-stopped_at: Phase 61 planning complete; live timer active; BTWUSDT manual;
-last_updated: "2026-06-20T21:40:52.669Z"
+current_phase: 62
+current_phase_name: Guarded Position Exit Execution
+status: ready_to_plan
+stopped_at: Phase 61 complete; live timer active; NEARUSDT close_ready; BTWUSDT manual;
+last_updated: "2026-06-21T05:50:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Milestone v1.26 started
+last_activity_desc: Phase 61 complete; Phase 62 ready to plan
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 0
-  percent: 0
+  completed_plans: 1
+  percent: 20
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 61 — Close-Review Exit Plan Repair
-**Status:** v1.26 planning complete; Phase 61 ready to execute
+**Current phase:** Phase 62 — Guarded Position Exit Execution
+**Status:** Phase 61 complete; Phase 62 ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 1
 
@@ -45,9 +45,9 @@ projects or losing control of downside.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 30 USDT account capital, 10x max leverage, 60 USDT max
+- Active trial profile: 30 USDT account capital, 10x max leverage, 80 USDT max
   position notional, 0.4 USDT max per-trade risk, 1 USDT max daily loss, and
-  6 open positions under dynamic sizing and portfolio caps.
+  8 open positions under dynamic sizing and portfolio caps.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -726,9 +726,10 @@ projects or losing control of downside.
   live service is inactive. The path does not place/cancel orders, create order
   intents, or mutate Binance exchange state.
 
-- Phase 60 is complete. Phase 59 controls and the widened 6-position/60U
-  `30u_10x_multi_dynamic` profile are deployed on the isolated server. Local
-  and server full suites passed with 386 tests each. Server artifacts show
+- Phase 60 is complete. Phase 59 controls were deployed on the isolated server,
+  and the active `30u_10x_multi_dynamic` profile has since been widened to
+  8 positions / 80U effective notional. Local and server full suites passed
+  with 386 tests each during Phase 60. Server artifacts show
   `phase60-operator-decision.status=resolve_exposure`,
   `eligible_for_operator_resume=false`,
   `phase60-live-resume-plan.status=resume_apply_blocked`,
@@ -740,24 +741,25 @@ projects or losing control of downside.
 
 ## Next Command
 
-Start a new milestone for live pilot iteration: active-position handling,
-automatic review/exit policy, strategy improvement, and ongoing evidence
-collection while the live timer remains active under the widened caps.
+Plan Phase 62 with `$gsd-plan-phase 62`: guarded close/reduce execution for
+agent-managed positions using fresh confirmation tokens, live-service guards,
+post-action checks, and manual-symbol exclusions.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 60 complete; live timer active; NEARUSDT needs review;
-BTWUSDT marked manual; 10x/8-position/80U dynamic caps deployed and verified.
-**Resume file:** .planning/phases/60-server-evidence-and-pilot-resume-packet/60-VERIFICATION.md
+**Stopped at:** Phase 61 complete; live timer active; NEARUSDT diagnostics are
+`close_ready`; BTWUSDT remains manual; 10x/8-position/80U dynamic caps deployed
+and verified.
+**Resume file:** .planning/phases/61-close-review-exit-plan-repair/61-VERIFICATION.md
 
 ## Current Position
 
-Phase: 61 — Close-Review Exit Plan Repair
+Phase: 62 — Guarded Position Exit Execution
 Plan: —
-Status: Ready to execute
-Last activity: 2026-06-21 — Phase 61 planning complete
+Status: Ready to plan
+Last activity: 2026-06-21 — Phase 61 complete
 
 ## Operator Next Steps
 
-- Execute Phase 61 with `$gsd-execute-phase 61`.
+- Plan Phase 62 with `$gsd-plan-phase 62`.
