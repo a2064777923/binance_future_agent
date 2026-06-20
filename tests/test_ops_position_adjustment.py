@@ -42,10 +42,20 @@ def report(*, positions=None, open_orders=None, open_algo_orders=None):
 
 
 class FakeSignedClient:
-    def __init__(self, *, mark_price="107", close_sets_position_zero=False):
+    def __init__(
+        self,
+        *,
+        mark_price="107",
+        close_sets_position_zero=False,
+        partial_reduce_sets_expected=True,
+        cross_side_algo_orders=False,
+    ):
         self.mark_price = mark_price
         self.closed = False
         self.close_sets_position_zero = close_sets_position_zero
+        self.partial_reduce_sets_expected = partial_reduce_sets_expected
+        self.cross_side_algo_orders = cross_side_algo_orders
+        self.position_amount = 0.2
         self.orders = []
         self.cancelled_algo_symbols = []
 
@@ -53,7 +63,7 @@ class FakeSignedClient:
         return {"availableBalance": "30", "totalWalletBalance": "30"}
 
     def position_risk(self):
-        amount = "0" if self.closed else "0.2"
+        amount = "0" if self.closed else str(self.position_amount)
         return [
             {
                 "symbol": "BTCUSDT",
@@ -65,19 +75,25 @@ class FakeSignedClient:
             }
         ]
 
-    def open_orders(self):
+    def open_orders(self, symbol=None):
         return []
 
-    def open_algo_orders(self):
-        return [
+    def open_algo_orders(self, symbol=None):
+        orders = [
             {"symbol": "BTCUSDT", "positionSide": "LONG"},
             {"symbol": "BTCUSDT", "positionSide": "LONG"},
         ]
+        if self.cross_side_algo_orders:
+            orders.append({"symbol": "BTCUSDT", "positionSide": "SHORT"})
+        return orders
 
     def new_order(self, **kwargs):
         self.orders.append(kwargs)
         if kwargs.get("quantity") == 0.2 and self.close_sets_position_zero:
             self.closed = True
+            self.position_amount = 0.0
+        elif kwargs.get("quantity") == 0.1 and self.partial_reduce_sets_expected:
+            self.position_amount = 0.1
         return {"orderId": len(self.orders), "symbol": kwargs["symbol"], "side": kwargs["side"]}
 
     def cancel_all_open_algo_orders(self, symbol):
@@ -465,6 +481,140 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
         self.assertEqual(fake.orders[0]["position_side"], "LONG")
         self.assertEqual(fake.cancelled_algo_symbols, [])
         self.assertGreaterEqual(report.executions[0].persisted["order_intent"], 1)
+        self.assertAlmostEqual(report.executions[0].post_order_position_amt, 0.1)
+
+    def test_partial_reduce_defers_cleanup_when_post_amount_does_not_reduce_enough(self):
+        fake = FakeSignedClient(mark_price="107", partial_reduce_sets_expected=False)
+        preview = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted_cleanup_deferred")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(len(fake.orders), 1)
+        self.assertEqual(fake.cancelled_algo_symbols, [])
+        self.assertAlmostEqual(report.executions[0].post_order_position_amt, 0.2)
+        self.assertEqual(
+            report.executions[0].error["message"],
+            "post-adjustment position amount did not reach expected remaining size",
+        )
+
+    def test_full_close_defers_algo_cleanup_when_cross_side_algo_orders_exist(self):
+        fake = FakeSignedClient(mark_price="96", close_sets_position_zero=True, cross_side_algo_orders=True)
+        preview = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted_cleanup_deferred")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(fake.orders[0]["quantity"], 0.2)
+        self.assertEqual(report.executions[0].post_order_position_amt, 0.0)
+        self.assertEqual(fake.cancelled_algo_symbols, [])
+        self.assertEqual(
+            report.executions[0].error["message"],
+            "cross-side algo orders present; symbol-wide cleanup deferred",
+        )
+
+    def test_full_close_cancels_algo_orders_after_flat_side_without_cross_side_orders(self):
+        fake = FakeSignedClient(mark_price="96", close_sets_position_zero=True)
+        preview = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            self.config(),
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(report.executions[0].order_plan.action, "full_close")
+        self.assertEqual(report.executions[0].post_order_position_amt, 0.0)
+        self.assertEqual(fake.cancelled_algo_symbols, ["BTCUSDT"])
+
+    def test_manual_only_position_cannot_execute_adjustment_order(self):
+        class ManualOnlySignedClient:
+            def __init__(self):
+                self.orders = []
+
+            def account(self):
+                return {"availableBalance": "30", "totalWalletBalance": "30"}
+
+            def position_risk(self):
+                return [
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "entryPrice": "0.02",
+                        "markPrice": "0.019",
+                        "unRealizedProfit": "0.556",
+                    }
+                ]
+
+            def open_orders(self, symbol=None):
+                return []
+
+            def open_algo_orders(self, symbol=None):
+                return []
+
+            def new_order(self, **kwargs):
+                self.orders.append(kwargs)
+                return {"orderId": 99}
+
+        fake = ManualOnlySignedClient()
+        config = load_config(
+            env={
+                "BFA_MODE": "live",
+                "BFA_POSITION_MODE": "hedge",
+                "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            }
+        )
+
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "execution_blocked")
+        self.assertIn("position_adjustment_plan_not_ready", report.reasons)
+        self.assertEqual(fake.orders, [])
+        self.assertEqual(report.adjustment_plan.diagnostics[0].lifecycle_decision, "manual_hold")
 
     def test_blocks_when_live_service_is_active(self):
         report = build_position_adjustment_execute_report(

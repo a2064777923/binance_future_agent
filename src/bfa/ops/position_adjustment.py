@@ -362,6 +362,8 @@ def build_position_adjustment_execute_report(
     statuses = [execution.status for execution in executions]
     adjustment_executed = any(status.startswith("position_adjustment_submitted") for status in statuses)
     status = "position_adjustment_submitted" if adjustment_executed else "position_adjustment_failed"
+    if any(status.endswith("_cleanup_deferred") for status in statuses):
+        status = "position_adjustment_submitted_cleanup_deferred"
     if any(status.endswith("_failed") for status in statuses):
         status = "position_adjustment_partial_failure" if adjustment_executed else "position_adjustment_failed"
     return PositionAdjustmentExecuteReport(
@@ -841,23 +843,18 @@ def _execute_plan_item(
                 "code": None,
                 "message": "post-adjustment position check failed",
             }
-        elif order_plan.action == "full_close" and post_amount != 0.0:
+        elif not _post_adjustment_verified(order_plan, post_amount):
             status = "position_adjustment_submitted_cleanup_deferred"
             error = {
                 "endpoint": "/fapi/v2/positionRisk",
                 "code": None,
-                "message": "position still non-zero after full close submission",
+                "message": "post-adjustment position amount did not reach expected remaining size",
             }
         elif order_plan.action == "full_close":
-            try:
-                cancel_response = client.cancel_all_open_algo_orders(order_plan.symbol)
-            except BinanceSignedError as exc:
-                status = "position_adjustment_submitted_cleanup_failed"
-                error = {
-                    "endpoint": exc.endpoint,
-                    "code": exc.binance_code,
-                    "message": exc.binance_message,
-                }
+            cleanup_status, cancel_response, cleanup_error = _cancel_algo_orders_after_full_close(client, order_plan)
+            if cleanup_status is not None:
+                status = cleanup_status
+                error = cleanup_error
 
     persisted: dict[str, int] = {}
     connection = connect(db_path)
@@ -925,6 +922,69 @@ def _execution_intent(
             "source_recommendation": order_plan.source_recommendation,
         },
     )
+
+
+def _post_adjustment_verified(order_plan: PositionAdjustmentOrderPlan, post_amount: float) -> bool:
+    expected = order_plan.expected_remaining_position_amt
+    if expected is None:
+        return True
+    tolerance = 1e-12
+    if abs(expected) <= tolerance:
+        return abs(post_amount) <= tolerance
+    if expected > 0:
+        return -tolerance <= post_amount <= expected + tolerance
+    return expected - tolerance <= post_amount <= tolerance
+
+
+def _cancel_algo_orders_after_full_close(
+    client: BinanceFuturesSignedClient,
+    order_plan: PositionAdjustmentOrderPlan,
+) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
+    try:
+        open_algo_orders = client.open_algo_orders(order_plan.symbol)
+    except BinanceSignedError as exc:
+        return (
+            "position_adjustment_submitted_cleanup_deferred",
+            None,
+            {
+                "endpoint": exc.endpoint,
+                "code": exc.binance_code,
+                "message": exc.binance_message,
+            },
+        )
+    if _has_cross_side_algo_orders(open_algo_orders, position_side=order_plan.position_side):
+        return (
+            "position_adjustment_submitted_cleanup_deferred",
+            None,
+            {
+                "endpoint": "/fapi/v1/openAlgoOrders",
+                "code": None,
+                "message": "cross-side algo orders present; symbol-wide cleanup deferred",
+            },
+        )
+    try:
+        return (None, client.cancel_all_open_algo_orders(order_plan.symbol), None)
+    except BinanceSignedError as exc:
+        return (
+            "position_adjustment_submitted_cleanup_failed",
+            None,
+            {
+                "endpoint": exc.endpoint,
+                "code": exc.binance_code,
+                "message": exc.binance_message,
+            },
+        )
+
+
+def _has_cross_side_algo_orders(open_algo_orders: list[dict[str, Any]], *, position_side: str | None) -> bool:
+    if not position_side:
+        return False
+    expected = position_side.upper()
+    for order in open_algo_orders:
+        order_side = str(order.get("positionSide") or "").upper()
+        if order_side and order_side != "BOTH" and order_side != expected:
+            return True
+    return False
 
 
 def _matching_position_amount(
