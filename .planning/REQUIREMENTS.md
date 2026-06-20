@@ -263,6 +263,55 @@ v1.0 requirements are archived at
 - [x] **TEP-03**: The command does not place orders, cancel orders, change
   leverage, edit env caps, or change timers.
 
+### Operator-Approved Time Exit Execution
+
+- [x] **TEX-01**: Provide an `ops time-exit-execute` command that re-runs signed
+  live exchange evidence and the latest time-exit plan immediately before any
+  close attempt.
+
+- [x] **TEX-02**: The command refuses to place a live close order unless the
+  operator supplies the exact current plan-derived confirmation token.
+
+- [x] **TEX-03**: With a matching token, the command submits only the planned
+  market close order and cleans up remaining symbol algo orders only after the
+  position is confirmed flat.
+
+- [x] **TEX-04**: The command refuses to execute while the live service is
+  active and persists execution/cleanup evidence for audit.
+
+### Dynamic Sizing And Multi-Position Guard
+
+- [x] **DSZ-01**: Runtime config can enable dynamic position sizing without
+  changing live mode, credentials, provider settings, margin mode, or position
+  mode.
+
+- [x] **DSZ-02**: Dynamic sizing computes notional caps from account capital,
+  available balance, leverage, max margin per position, max margin fraction,
+  max risk per trade, stop distance, fixed fallback cap, and exchange minimum
+  executable notional.
+
+- [x] **DSZ-03**: The computed cap is fed into AI risk context and final
+  execution risk validation, while fixed `BFA_MAX_POSITION_NOTIONAL_USDT`
+  remains the default when dynamic sizing is disabled.
+
+- [x] **DSZ-04**: Multi-position support remains disabled by default and, when
+  enabled, is bounded by max open positions plus same-symbol/same-direction
+  duplicate exposure rejection.
+
+### Risk Profile Switch
+
+- [x] **RPS-01**: Provide an `ops risk-profile-plan` command that emits a named
+  profile env diff and confirmation token without writing files or mutating
+  exchange state.
+
+- [x] **RPS-02**: Provide an `ops risk-profile-apply` command that refuses to
+  write env changes unless risk-change readiness allows the target leverage,
+  the live service is inactive, and the exact confirmation token is supplied.
+
+- [x] **RPS-03**: Applying a profile writes only approved non-secret BFA risk
+  keys, preserves credentials/provider/margin/position-mode settings, and
+  creates a timestamped env backup.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -336,13 +385,24 @@ v1.0 requirements are archived at
 | TEP-01 | Phase 26 | Complete - `ops time-exit-plan` emits a close-order plan for overdue protected BNBUSDT |
 | TEP-02 | Phase 26 | Complete - server plan includes `SELL MARKET 0.01`, `positionSide=LONG`, and `reduceOnly=false` |
 | TEP-03 | Phase 26 | Complete - server command only emitted JSON and did not mutate exchange state |
+| TEX-01 | Phase 27 | Complete - `ops time-exit-execute` re-runs signed live evidence and time-exit planning before execution |
+| TEX-02 | Phase 27 | Complete - missing or mismatched confirmation token places no order |
+| TEX-03 | Phase 27 | Complete - matching token path submits the planned close and cleans algo orders in fake-client tests |
+| TEX-04 | Phase 27 | Complete - live-service-active state blocks execution and time-exit evidence is persisted |
+| DSZ-01 | Phase 28 | Complete - dynamic sizing config exists and defaults off in live |
+| DSZ-02 | Phase 28 | Complete - sizing helper covers capital, balance, leverage, margin caps, stop risk, fallback cap, and min-notional pressure |
+| DSZ-03 | Phase 28 | Complete - AI context and final risk validation receive the computed notional cap |
+| DSZ-04 | Phase 28 | Complete - multi-position remains disabled by default and duplicate same-direction exposure is blocked |
+| RPS-01 | Phase 29 | Complete - `ops risk-profile-plan` emits an env diff and token without writing |
+| RPS-02 | Phase 29 | Complete - `ops risk-profile-apply` requires confirmation and risk-change readiness |
+| RPS-03 | Phase 29 | Complete - synthetic apply writes only approved risk keys, preserves secrets/provider settings, and creates a backup |
 
 **Coverage:**
 
-- v1.1-v1.18 requirements: 60 total
-- Mapped to phases: 60
+- v1.1-v1.21 requirements: 71 total
+- Mapped to phases: 71
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after verifying v1.18 time exit plan*
+*Last updated: 2026-06-20 after verifying v1.21 risk-profile switching*
