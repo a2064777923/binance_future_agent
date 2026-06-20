@@ -123,6 +123,9 @@ control of downside.
   The Phase 50 public-data report marks `quant_setup_selective_guarded` as a
   forward-paper candidate but keeps the overall verdict at
   `mixed_candidate_collect_more_data`.
+- Phase 51 adds an explicit `min_profit_factor` gate to forward-paper
+  performance checks while preserving post-change `since` filtering and keeping
+  `live_resume_allowed=false`.
 
 ### Active
 
@@ -599,8 +602,9 @@ any small live automation can be resumed.
 | Baseline before recalibration | Weak setup changes should be driven by one compact current evidence report before profiles or live-readiness gates are changed. | Phase 48 complete |
 | Recalibration stays paper-first | Loss-driven filters should be explicit backtest/paper variants until repeated matrix and forward-paper evidence pass. | Phase 49 complete |
 | Matrix before forward-paper promotion | Backtest evidence must cover multiple hot universes and intervals before any post-change forward-paper gate can be trusted. | Phase 50 complete |
+| Paper promotion needs profit factor | Post-change forward-paper evidence must pass PnL, win-rate, profit-factor, and drawdown gates before readiness reporting can consider it. | Phase 51 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current trial target is 30 USDT. | Phase 19 complete |
 
 ---
-*Last updated: 2026-06-21 after completing Phase 50 multi-window hot-symbol matrix.*
+*Last updated: 2026-06-21 after completing Phase 51 post-change forward-paper gate.*

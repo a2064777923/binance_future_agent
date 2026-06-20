@@ -96,6 +96,7 @@ class ForwardPaperPerformanceTests(unittest.TestCase):
             min_outcomes=5,
             min_win_rate=0.5,
             min_net_pnl_usdt=0.0,
+            min_profit_factor=1.1,
             max_worst_drawdown_usdt=1.5,
         )
 
@@ -107,6 +108,21 @@ class ForwardPaperPerformanceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["win_rate"], 0.6)
         self.assertGreater(payload["summary"]["total_net_pnl_usdt"], 0)
         self.assertEqual(payload["reasons"], ["paper_thresholds_passed"])
+
+    def test_low_profit_factor_blocks_paper_gate(self):
+        db = self.make_db([0.12, 0.1, 0.08, -0.2, -0.05])
+
+        report = build_forward_paper_performance_report(
+            str(db),
+            min_outcomes=5,
+            min_win_rate=0.5,
+            min_net_pnl_usdt=0.0,
+            min_profit_factor=1.5,
+            max_worst_drawdown_usdt=1.5,
+        )
+
+        self.assertEqual(report.status, "keep_live_paused")
+        self.assertIn("paper_profit_factor_below_min", report.reasons)
 
     def test_insufficient_outcomes_keep_live_paused(self):
         db = self.make_db([0.2, 0.1])
@@ -126,6 +142,7 @@ class ForwardPaperPerformanceTests(unittest.TestCase):
             min_outcomes=5,
             min_win_rate=0.5,
             min_net_pnl_usdt=0.0,
+            min_profit_factor=1.1,
             max_worst_drawdown_usdt=0.3,
         )
 

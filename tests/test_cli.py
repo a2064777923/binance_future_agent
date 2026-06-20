@@ -2485,6 +2485,8 @@ class CliTests(unittest.TestCase):
                 str(db),
                 "--min-outcomes",
                 "2",
+                "--min-profit-factor",
+                "1.1",
                 "--no-systemd-check",
                 "--paper-timer-state",
                 "active",

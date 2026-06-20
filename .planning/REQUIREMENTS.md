@@ -49,10 +49,10 @@ projects or losing control of downside.
   positive-window rate, trade count, and worst drawdown for each interval and
   variant.
 
-- [ ] **BFP-03**: Forward-paper performance checks can evaluate post-change
+- [x] **BFP-03**: Forward-paper performance checks can evaluate post-change
   evidence separately from older pre-change outcomes.
 
-- [ ] **BFP-04**: Strategy promotion remains blocked unless repeated backtest
+- [x] **BFP-04**: Strategy promotion remains blocked unless repeated backtest
   and forward-paper evidence pass configured minimum outcomes, positive PnL,
   win-rate, profit-factor, and drawdown gates.
 
@@ -113,8 +113,8 @@ projects or losing control of downside.
 | SRC-04 | Phase 49 | Complete |
 | BFP-01 | Phase 50 | Complete |
 | BFP-02 | Phase 50 | Complete |
-| BFP-03 | Phase 51 | Pending |
-| BFP-04 | Phase 51 | Pending |
+| BFP-03 | Phase 51 | Complete |
+| BFP-04 | Phase 51 | Complete |
 | LRR-01 | Phase 52 | Pending |
 | LRR-02 | Phase 52 | Pending |
 | LRR-03 | Phase 52 | Pending |

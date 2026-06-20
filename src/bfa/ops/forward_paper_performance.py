@@ -49,6 +49,7 @@ def build_forward_paper_performance_report(
     min_outcomes: int = 20,
     min_win_rate: float = 0.5,
     min_net_pnl_usdt: float = 0.0,
+    min_profit_factor: float | None = None,
     max_worst_drawdown_usdt: float | None = 1.5,
     latest_limit: int = 10,
 ) -> ForwardPaperPerformanceReport:
@@ -57,6 +58,7 @@ def build_forward_paper_performance_report(
         "min_outcomes": min_outcomes,
         "min_win_rate": min_win_rate,
         "min_net_pnl_usdt": min_net_pnl_usdt,
+        "min_profit_factor": min_profit_factor,
         "max_worst_drawdown_usdt": max_worst_drawdown_usdt,
     }
     connection = connect(db_path)
@@ -73,6 +75,7 @@ def build_forward_paper_performance_report(
         min_outcomes=min_outcomes,
         min_win_rate=min_win_rate,
         min_net_pnl_usdt=min_net_pnl_usdt,
+        min_profit_factor=min_profit_factor,
         max_worst_drawdown_usdt=max_worst_drawdown_usdt,
     )
     status = _status(reasons)
@@ -187,6 +190,7 @@ def _reasons(
     min_outcomes: int,
     min_win_rate: float,
     min_net_pnl_usdt: float,
+    min_profit_factor: float | None,
     max_worst_drawdown_usdt: float | None,
 ) -> list[str]:
     reasons: list[str] = []
@@ -199,6 +203,9 @@ def _reasons(
         reasons.append("paper_total_net_pnl_not_above_min")
     if float(summary["win_rate"]) < min_win_rate:
         reasons.append("paper_win_rate_below_min")
+    profit_factor = summary.get("profit_factor")
+    if min_profit_factor is not None and not _profit_factor_passes(profit_factor, summary, min_profit_factor):
+        reasons.append("paper_profit_factor_below_min")
     if max_worst_drawdown_usdt is not None and float(summary["worst_drawdown_usdt"]) >= max_worst_drawdown_usdt:
         reasons.append("paper_worst_drawdown_exceeds_cap")
     return reasons
@@ -261,6 +268,12 @@ def _profit_factor(gross_profit: float, gross_loss_abs: float) -> float | None:
     if gross_loss_abs == 0:
         return None
     return round(gross_profit / gross_loss_abs, 8)
+
+
+def _profit_factor_passes(value: Any, summary: dict[str, Any], minimum: float) -> bool:
+    if value is None:
+        return float(summary.get("loss_count", 0)) == 0 and float(summary.get("total_net_pnl_usdt", 0.0)) > 0
+    return float(value) >= minimum
 
 
 def _ratio(numerator: float, denominator: float) -> float:

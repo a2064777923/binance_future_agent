@@ -408,6 +408,7 @@ def _build_parser() -> argparse.ArgumentParser:
     forward_paper_performance.add_argument("--min-outcomes", type=int, default=20, help="minimum settled paper outcomes")
     forward_paper_performance.add_argument("--min-win-rate", type=float, default=0.5, help="minimum paper win rate")
     forward_paper_performance.add_argument("--min-net-pnl-usdt", type=float, default=0.0, help="minimum total net PnL")
+    forward_paper_performance.add_argument("--min-profit-factor", type=float, default=1.1, help="minimum paper profit factor")
     forward_paper_performance.add_argument(
         "--max-worst-drawdown-usdt",
         type=float,
@@ -440,6 +441,7 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy_evidence_baseline.add_argument("--min-outcomes", type=int, default=20, help="minimum settled paper outcomes")
     strategy_evidence_baseline.add_argument("--min-win-rate", type=float, default=0.5, help="minimum paper win rate")
     strategy_evidence_baseline.add_argument("--min-net-pnl-usdt", type=float, default=0.0, help="minimum total net PnL")
+    strategy_evidence_baseline.add_argument("--min-profit-factor", type=float, default=1.1, help="minimum paper profit factor")
     strategy_evidence_baseline.add_argument(
         "--max-worst-drawdown-usdt",
         type=float,
@@ -1195,6 +1197,7 @@ def _run_ops(
             min_outcomes=args.min_outcomes,
             min_win_rate=args.min_win_rate,
             min_net_pnl_usdt=args.min_net_pnl_usdt,
+            min_profit_factor=args.min_profit_factor,
             max_worst_drawdown_usdt=None
             if args.max_worst_drawdown_usdt is not None and args.max_worst_drawdown_usdt < 0
             else args.max_worst_drawdown_usdt,
@@ -1223,6 +1226,7 @@ def _run_ops(
             min_outcomes=args.min_outcomes,
             min_win_rate=args.min_win_rate,
             min_net_pnl_usdt=args.min_net_pnl_usdt,
+            min_profit_factor=args.min_profit_factor,
             max_worst_drawdown_usdt=None
             if args.max_worst_drawdown_usdt is not None and args.max_worst_drawdown_usdt < 0
             else args.max_worst_drawdown_usdt,

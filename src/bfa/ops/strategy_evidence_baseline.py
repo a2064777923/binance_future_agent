@@ -70,6 +70,7 @@ def build_strategy_evidence_baseline_report(
     min_outcomes: int = 20,
     min_win_rate: float = 0.5,
     min_net_pnl_usdt: float = 0.0,
+    min_profit_factor: float | None = None,
     max_worst_drawdown_usdt: float | None = 1.5,
     latest_limit: int = 10,
     min_group_outcomes: int = 1,
@@ -89,6 +90,7 @@ def build_strategy_evidence_baseline_report(
         min_outcomes=min_outcomes,
         min_win_rate=min_win_rate,
         min_net_pnl_usdt=min_net_pnl_usdt,
+        min_profit_factor=min_profit_factor,
         max_worst_drawdown_usdt=max_worst_drawdown_usdt,
         latest_limit=latest_limit,
     )
