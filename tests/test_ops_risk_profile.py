@@ -51,11 +51,11 @@ class RiskProfileTests(unittest.TestCase):
 
         self.assertEqual(plan.target_leverage, 10)
         self.assertEqual(plan.target_values["BFA_MULTI_POSITION_ENABLED"], "true")
-        self.assertEqual(plan.target_values["BFA_MAX_OPEN_POSITIONS"], "4")
-        self.assertEqual(plan.target_values["BFA_MAX_POSITION_NOTIONAL_USDT"], "40")
+        self.assertEqual(plan.target_values["BFA_MAX_OPEN_POSITIONS"], "5")
+        self.assertEqual(plan.target_values["BFA_MAX_POSITION_NOTIONAL_USDT"], "50")
         self.assertEqual(plan.target_values["BFA_MAX_RISK_PER_TRADE_USDT"], "0.4")
-        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_USDT"], "24")
-        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_NOTIONAL_USDT"], "240")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_USDT"], "25")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_NOTIONAL_USDT"], "300")
 
     def test_apply_requires_matching_confirmation_token(self):
         report = apply_risk_profile(

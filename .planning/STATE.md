@@ -6,9 +6,9 @@ current_phase: 59
 current_phase_name: Confirmation-Gated Live Resume Path
 status: live-pilot-active
 stopped_at: Phase 58 complete; live pilot active; Phase 59 ready to plan.
-last_updated: "2026-06-21T04:21:58+08:00"
+last_updated: "2026-06-21T04:29:34+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 58 complete
+last_activity_desc: Manual BTW ignored; live caps widened to 5-position/50U profile
 progress:
   total_phases: 5
   completed_phases: 3
@@ -45,9 +45,9 @@ confirmation-gated and refuses to mutate unless evidence gates are eligible.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 30 USDT account capital, 10x max leverage, 40 USDT max
+- Active trial profile: 30 USDT account capital, 10x max leverage, 50 USDT max
   position notional, 0.4 USDT max per-trade risk, 1 USDT max daily loss, and
-  4 open positions under dynamic sizing and portfolio caps.
+  5 open positions under dynamic sizing and portfolio caps.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -703,6 +703,18 @@ confirmation-gated and refuses to mutate unless evidence gates are eligible.
   `promotion_stage=collect_more_paper`, `promotion_allowed=false`, and
   `live_resume_allowed=false`.
 
+- Operator clarified the current `BTWUSDT` position is manual and must remain
+  ignored by agent management. The live pilot cap profile was widened one step
+  beyond the previous 4-position/40U profile to a 5-position/50U profile:
+  `BFA_MAX_OPEN_POSITIONS=5`, `BFA_MAX_POSITION_NOTIONAL_USDT=50`,
+  `BFA_MAX_MARGIN_PER_POSITION_USDT=5`,
+  `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=50`,
+  `BFA_MAX_PORTFOLIO_MARGIN_USDT=25`,
+  `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.85`,
+  `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=300`, and
+  `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=250`. The per-trade risk cap remains
+  `BFA_MAX_RISK_PER_TRADE_USDT=0.4`.
+
 ## Next Command
 
 Plan Phase 59 with live automation already active. Build the confirmation-gated
@@ -714,7 +726,7 @@ operator packet is eligible. Current Phase 58 evidence still says
 
 **Last session:** 2026-06-21T00:00:00+08:00
 **Stopped at:** Phase 58 complete; live timer active; protected NEARUSDT live
-position open; BTWUSDT marked manual; widened 10x/4-position/40U dynamic caps
+position open; BTWUSDT marked manual; widened 10x/5-position/50U dynamic caps
 deployed; Phase 59 ready to plan.
 **Resume file:** .planning/phases/58-promotion-matrix-and-loss-review/58-VERIFICATION.md
 
