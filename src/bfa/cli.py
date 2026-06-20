@@ -56,6 +56,7 @@ from bfa.ops.operator_resume_decision import (
     build_operator_resume_decision_packet,
     build_operator_resume_decision_packet_from_readiness,
 )
+from bfa.ops.pilot_learning_packet import build_pilot_learning_packet_report
 from bfa.ops.position_adjustment import (
     build_position_adjustment_execute_report,
     build_position_adjustment_plan_report,
@@ -458,6 +459,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--persist-closed",
         action="store_true",
         help="with --reconcile, persist idempotent fills/outcomes for closed trades",
+    )
+
+    pilot_learning_packet = ops_subparsers.add_parser(
+        "pilot-learning-packet",
+        help="read-only pilot learning packet from live lifecycle, cap, exit, outcome, and trace evidence",
+    )
+    pilot_learning_packet.add_argument("--env-file", help="optional env file to load before environment overrides")
+    pilot_learning_packet.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    pilot_learning_packet.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    pilot_learning_packet.add_argument("--latest-traces", type=int, default=5, help="number of recent traces to include")
+    pilot_learning_packet.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
     )
 
     strategy_evidence_baseline = ops_subparsers.add_parser(
@@ -1631,6 +1646,19 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 1 if report.status == "ledger_blocked" else 0
+    if args.ops_command == "pilot-learning-packet":
+        report = build_pilot_learning_packet_report(
+            config,
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            check_binance=not args.skip_binance,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if not args.skip_binance
+            else None,
+            now=args.now,
+            latest_traces=args.latest_traces,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
     if args.ops_command == "strategy-evidence-baseline":
         report = build_strategy_evidence_baseline_report(
             config,

@@ -95,6 +95,7 @@ results when `--persist-closed` is set.
 ```bash
 python -m bfa.cli ops reconcile-outcomes --env-file .env --db runtime/agent.sqlite --persist-closed
 python -m bfa.cli ops risk-change-check --env-file .env --db runtime/agent.sqlite --target-leverage 8
+python -m bfa.cli ops pilot-learning-packet --env-file .env --db runtime/agent.sqlite > runtime/phase65-pilot-learning-packet.json
 ```
 
 Active live positions can also be checked against the AI decision's suggested
@@ -173,6 +174,13 @@ experimental until backtests and live evidence justify it. Profile readiness may
 carry a protected active position into this target profile only when
 exchange-side algo protection is present and the active exposure fits the target
 portfolio caps.
+
+`ops pilot-learning-packet` is read-only. It composes current exposure capacity,
+manual-position exclusions, position lifecycle decisions, time-exit status,
+closed live outcome ledger data, recommendation-only guard feedback, and bounded
+trade traces into one server canary artifact. It does not place orders, cancel
+orders, write env files, change timers, persist outcomes, or apply guard/risk
+changes.
 
 ## Small-Capital Backtesting
 

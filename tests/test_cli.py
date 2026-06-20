@@ -1586,6 +1586,80 @@ class CliTests(unittest.TestCase):
         self.assertTrue(payload["mutation_proof"]["persists_closed_fills_and_outcomes"])
         self.assertFalse(payload["mutation_proof"]["places_orders"])
 
+    def test_ops_pilot_learning_packet_outputs_read_only_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            intent_id = store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-21T05:00:00Z",
+                source="execution.live",
+                symbol="SOLUSDT",
+                ref_id="order_intent:SOLUSDT:2026-06-21T05:00:00Z",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "SOLUSDT",
+                        "side": "BUY",
+                        "quantity": 1.0,
+                        "entry_price": 140,
+                        "leverage": 10,
+                        "decided_at": "2026-06-21T05:00:00Z",
+                    },
+                    "risk": {"accepted": True, "reason_codes": ["risk_accepted"]},
+                },
+                event_type="order_intent",
+            )
+            store.insert_artifact(
+                "outcomes",
+                occurred_at="2026-06-21T05:45:00Z",
+                source="binance_usdm",
+                symbol="SOLUSDT",
+                ref_id=f"outcome:{intent_id}:closed",
+                payload={
+                    "intent": {"event_id": intent_id, "symbol": "SOLUSDT", "side": "BUY"},
+                    "status": "closed",
+                    "trade_count": 2,
+                    "gross_realized_pnl_usdt": 0.2,
+                    "commission_usdt": 0.01,
+                    "net_realized_pnl_usdt": 0.19,
+                    "first_trade_time": "2026-06-21T05:00:00Z",
+                    "last_trade_time": "2026-06-21T05:45:00Z",
+                    "exit_reason": "take_profit",
+                },
+                event_type="outcome",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "pilot-learning-packet",
+                "--db",
+                str(db_path),
+                "--skip-binance",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_RUNTIME_DIR": str(runtime),
+                    "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_pilot_learning_packet_v1")
+        self.assertEqual(payload["manual_symbols"], ["BTWUSDT"])
+        self.assertEqual(payload["live_outcomes"]["summary"]["outcome_count"], 1)
+        self.assertFalse(payload["mutation_proof"]["places_orders"])
+        self.assertFalse(payload["mutation_proof"]["cancels_orders"])
+        self.assertFalse(payload["mutation_proof"]["writes_env_files"])
+
     def test_ops_position_hold_check_reports_expired_live_hold_window(self):
         class FakeSignedClient:
             def account(self):
