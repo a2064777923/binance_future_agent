@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from bfa.config import AppConfig
 from bfa.execution.binance_client import BinanceFuturesSignedClient
+from bfa.ops.exposure_clearance import exposure_clearance_from_payload
 from bfa.ops.live_resume_readiness import LiveResumeReadinessReport, build_live_resume_readiness_report
 from bfa.ops.strategy_promotion import ALL_INTERVALS_SCOPE
 
@@ -78,6 +79,7 @@ def build_operator_resume_decision_packet(
     check_systemd: bool = True,
     server_state_overrides: Mapping[str, str] | None = None,
     require_operator_confirmation: bool = True,
+    exposure_clearance: Mapping[str, Any] | None = None,
 ) -> OperatorResumeDecisionPacket:
     readiness = build_live_resume_readiness_report(
         config,
@@ -111,25 +113,32 @@ def build_operator_resume_decision_packet(
         server_state_overrides=server_state_overrides,
         require_operator_confirmation=require_operator_confirmation,
     )
-    return build_operator_resume_decision_packet_from_readiness(readiness)
+    return build_operator_resume_decision_packet_from_readiness(
+        readiness,
+        exposure_clearance=exposure_clearance,
+    )
 
 
 def build_operator_resume_decision_packet_from_readiness(
     readiness: LiveResumeReadinessReport | Mapping[str, Any],
+    *,
+    exposure_clearance: Mapping[str, Any] | None = None,
 ) -> OperatorResumeDecisionPacket:
     payload = readiness.to_dict() if isinstance(readiness, LiveResumeReadinessReport) else dict(readiness)
+    clearance = exposure_clearance_from_payload(exposure_clearance) if exposure_clearance else {}
     reasons = _mapping(payload.get("reasons"))
     blocker_groups = {
         "strategy": _strings(reasons.get("matrix")),
         "paper": _strings(reasons.get("strategy_evidence")),
         "server": _strings(reasons.get("server_state")),
         "exchange_manual_exposure": _strings(reasons.get("exchange_state")),
+        "exposure_clearance": _clearance_reasons(clearance),
         "risk_profile": _strings(reasons.get("risk_profile")),
         "ai_provider_health": _ai_provider_health_reasons(payload),
         "confirmation": _strings(reasons.get("confirmation")),
     }
     status = _decision_status(blocker_groups)
-    exposure = _exposure_summary(payload)
+    exposure = _exposure_summary(payload, clearance=clearance)
     return OperatorResumeDecisionPacket(
         status=status,
         eligible_for_operator_resume=status == "eligible_for_operator_resume",
@@ -158,7 +167,11 @@ def build_operator_resume_decision_packet_from_readiness(
 
 
 def _decision_status(blocker_groups: Mapping[str, list[str]]) -> str:
-    if blocker_groups.get("exchange_manual_exposure") or blocker_groups.get("risk_profile"):
+    if (
+        blocker_groups.get("exchange_manual_exposure")
+        or blocker_groups.get("exposure_clearance")
+        or blocker_groups.get("risk_profile")
+    ):
         return "resolve_exposure"
     if blocker_groups.get("strategy") or blocker_groups.get("paper"):
         return "collect_more_paper"
@@ -191,7 +204,7 @@ def _summary(status: str) -> str:
     return "Readiness gates are clear except for a separate explicit operator confirmation flow."
 
 
-def _exposure_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _exposure_summary(payload: Mapping[str, Any], *, clearance: Mapping[str, Any]) -> dict[str, Any]:
     review = _mapping(payload.get("exchange_review"))
     return {
         "manual_or_unattributed_symbols": _strings(review.get("manual_or_unattributed_symbols")),
@@ -200,7 +213,20 @@ def _exposure_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
         "position_count": _int_or_zero(review.get("position_count")),
         "open_order_count": _int_or_zero(review.get("open_order_count")),
         "open_algo_order_count": _int_or_zero(review.get("open_algo_order_count")),
+        "clearance": dict(clearance),
     }
+
+
+def _clearance_reasons(clearance: Mapping[str, Any]) -> list[str]:
+    if not clearance:
+        return []
+    reasons: list[str] = []
+    if not bool(clearance.get("clearance_allowed")):
+        status = str(clearance.get("status") or "exposure_clearance_blocked")
+        reasons.append(status)
+    for classification in _strings(clearance.get("blocking_classifications")):
+        reasons.append(f"clearance_{classification}")
+    return _dedupe(reasons)
 
 
 def _ai_provider_health_reasons(payload: Mapping[str, Any]) -> list[str]:
@@ -228,3 +254,11 @@ def _int_or_zero(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value and value not in deduped:
+            deduped.append(value)
+    return deduped

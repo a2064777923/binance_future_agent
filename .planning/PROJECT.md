@@ -142,6 +142,12 @@ control of downside.
   `keep_live_paused`, `collect_more_paper`, `resolve_exposure`, or
   `eligible_for_operator_resume` and requires a separate confirmation flow
   before any live resume.
+- Phase 56 adds read-only exposure clearance and append-only manual loss
+  intake. It classifies active exchange positions as agent-managed, manual,
+  stale-attributed, or unknown; blocks live resume on manual/unknown/stale
+  exposure; lets operator decision consume a clearance artifact; and records
+  manual liquidation/failure incidents as secret-safe local event-store
+  artifacts.
 
 ### Active
 
@@ -209,7 +215,7 @@ control of downside.
 - [x] Produce a single operator-facing resume decision packet that separates
   "collect more paper evidence" from "eligible for separately confirmed live
   resume".
-- [ ] Resolve or explicitly classify manual/unattributed exchange exposure so
+- [x] Resolve or explicitly classify manual/unattributed exchange exposure so
   live-resume readiness no longer mixes operator trades with agent evidence.
 - [ ] Make guarded paper evidence productive again by broadening observation,
   exposing skip reasons, and supporting paper-only exploration when strict
@@ -217,8 +223,9 @@ control of downside.
 - [ ] Re-run current-data matrix and forward-paper promotion gates before any
   live resume, using completed candles, fees, slippage, small-account caps, and
   post-change evidence boundaries.
-- [ ] Capture user/manual liquidation incidents as structured learning input
-  and compare them with deterministic setup and risk guards.
+- [x] Capture user/manual liquidation incidents as structured learning input.
+- [ ] Compare manual liquidation incidents with deterministic setup and risk
+  guards.
 - [ ] Add a separate confirmation-gated live resume path that can only enable
   the target profile/timer after exposure, strategy, paper, server, and
   operator-confirmation gates pass.
@@ -396,6 +403,11 @@ readiness artifact returns `status=resolve_exposure`, not live eligibility,
 with grouped strategy, paper, exchange/manual exposure, risk-profile, and
 confirmation blockers. It is read-only and cannot restore timers, apply
 profiles, create order intents, or place/cancel Binance orders.
+Phase 56 adds local read-only `ops exposure-clearance`, append-only
+`ops manual-loss-record`, and `--exposure-clearance-report` support for
+`ops operator-resume-decision`. Local verification passed, but these tools
+still need server deployment/evidence before the server's current exposure can
+be considered cleared.
 
 ## Current Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 
@@ -743,4 +755,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after starting v1.25 milestone.*
+*Last updated: 2026-06-21 after Phase 56 completion.*

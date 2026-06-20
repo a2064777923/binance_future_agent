@@ -41,11 +41,13 @@ from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
+from bfa.ops.exposure_clearance import build_exposure_clearance_report
 from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.forward_paper import run_forward_paper
 from bfa.ops.forward_paper_loss_attribution import build_forward_paper_loss_attribution_report
 from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
 from bfa.ops.live_status import build_live_status_report
+from bfa.ops.manual_loss import build_manual_loss_incident, record_manual_loss_incident
 from bfa.ops.live_resume_readiness import build_live_resume_readiness_report
 from bfa.ops.operator_resume_decision import (
     build_operator_resume_decision_packet,
@@ -573,6 +575,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     operator_resume_decision.add_argument("--env-file", help="optional env file to load before environment overrides")
     operator_resume_decision.add_argument("--readiness-report", help="existing JSON artifact from ops live-resume-readiness")
+    operator_resume_decision.add_argument(
+        "--exposure-clearance-report",
+        help="existing JSON artifact from ops exposure-clearance",
+    )
     operator_resume_decision.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
     operator_resume_decision.add_argument("--matrix-report", help="JSON report from backtest matrix or matrix-suite")
     operator_resume_decision.add_argument("--variant", default="quant_setup_selective", help="paper/backtest variant to evaluate")
@@ -803,6 +809,60 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="fail closed when the live systemd service is currently active",
     )
+
+    exposure_clearance = ops_subparsers.add_parser(
+        "exposure-clearance",
+        help="read-only clearance packet for active exchange/manual exposure before live resume",
+    )
+    exposure_clearance.add_argument("--env-file", help="optional env file to load before environment overrides")
+    exposure_clearance.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    exposure_clearance.add_argument(
+        "--skip-binance",
+        action="store_true",
+        help="use only local event-store evidence instead of signed Binance reads",
+    )
+    exposure_clearance.add_argument(
+        "--manual-exposure-symbols",
+        help="comma-separated manual exposure symbols to classify outside agent evidence",
+    )
+    exposure_clearance.add_argument(
+        "--target-profile",
+        default="30u_10x_multi_dynamic",
+        help="optional risk profile to preview; use empty string to disable",
+    )
+    exposure_clearance.add_argument(
+        "--allow-two-positions",
+        action="store_true",
+        help="preview target profile with two concurrent positions enabled",
+    )
+
+    manual_loss_record = ops_subparsers.add_parser(
+        "manual-loss-record",
+        help="append a secret-safe manual liquidation or failed-trade incident to the event store",
+    )
+    manual_loss_record.add_argument("--env-file", help="optional env file to load before environment overrides")
+    manual_loss_record.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    manual_loss_record.add_argument("--symbol", required=True, help="symbol, e.g. SOLUSDT")
+    manual_loss_record.add_argument("--side", required=True, choices=("long", "short"), help="manual trade direction")
+    manual_loss_record.add_argument("--leverage", required=True, type=float, help="leverage used on the manual trade")
+    manual_loss_record.add_argument("--entry-price", required=True, type=float, help="manual trade entry price")
+    manual_loss_record.add_argument("--exit-price", type=float, help="exit price when available")
+    manual_loss_record.add_argument("--liquidation-price", type=float, help="liquidation price when applicable")
+    manual_loss_record.add_argument(
+        "--stop-loss-status",
+        default="unknown",
+        choices=("unknown", "none", "configured", "hit", "missed"),
+        help="whether a stop loss existed and what happened",
+    )
+    manual_loss_record.add_argument("--trigger-reason", default="", help="why the manual trade was opened or failed")
+    manual_loss_record.add_argument(
+        "--lesson",
+        action="append",
+        default=[],
+        help="lesson learned; repeat the flag for multiple lessons",
+    )
+    manual_loss_record.add_argument("--notes", help="optional extra notes without secrets")
+    manual_loss_record.add_argument("--occurred-at", help="incident timestamp; defaults to current UTC time")
 
     exposure_status = ops_subparsers.add_parser(
         "exposure-status",
@@ -1478,9 +1538,17 @@ def _run_ops(
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.live_resume_allowed else 1
     if args.ops_command == "operator-resume-decision":
+        clearance_payload = (
+            json.loads(Path(args.exposure_clearance_report).read_text(encoding="utf-8"))
+            if args.exposure_clearance_report
+            else None
+        )
         if args.readiness_report:
             readiness_payload = json.loads(Path(args.readiness_report).read_text(encoding="utf-8"))
-            report = build_operator_resume_decision_packet_from_readiness(readiness_payload)
+            report = build_operator_resume_decision_packet_from_readiness(
+                readiness_payload,
+                exposure_clearance=clearance_payload,
+            )
         else:
             report = build_operator_resume_decision_packet(
                 config,
@@ -1528,6 +1596,7 @@ def _run_ops(
                     "live.service": args.live_service_state,
                 },
                 require_operator_confirmation=not args.no_operator_confirmation_required,
+                exposure_clearance=clearance_payload,
             )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.eligible_for_operator_resume else 1
@@ -1652,6 +1721,47 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.applied else 1
+    if args.ops_command == "exposure-clearance":
+        report = build_exposure_clearance_report(
+            config,
+            db_path=args.db,
+            check_binance=not args.skip_binance,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if not args.skip_binance
+            else None,
+            manual_exposure_symbols=_symbols_arg(args.manual_exposure_symbols)
+            if args.manual_exposure_symbols
+            else [],
+            target_profile=args.target_profile or None,
+            allow_two_positions=args.allow_two_positions,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.clearance_allowed else 1
+    if args.ops_command == "manual-loss-record":
+        try:
+            incident = build_manual_loss_incident(
+                symbol=args.symbol,
+                side=args.side,
+                leverage=args.leverage,
+                entry_price=args.entry_price,
+                exit_price=args.exit_price,
+                liquidation_price=args.liquidation_price,
+                stop_loss_status=args.stop_loss_status,
+                trigger_reason=args.trigger_reason,
+                lessons=args.lesson,
+                notes=args.notes,
+                occurred_at=args.occurred_at,
+            )
+            report = record_manual_loss_incident(
+                config,
+                db_path=args.db,
+                incident=incident,
+            )
+        except ValueError as exc:
+            print(json.dumps({"error": str(exc)}, indent=2, sort_keys=True), file=stdout)
+            return 1
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
     if args.ops_command == "exposure-status":
         report = build_exposure_status_report(
             config,

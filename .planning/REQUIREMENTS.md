@@ -9,14 +9,14 @@ projects or losing control of downside.
 
 ### Exposure Clearance
 
-- [ ] **EXP-01**: Operator can generate a read-only exposure clearance packet
+- [x] **EXP-01**: Operator can generate a read-only exposure clearance packet
   that classifies active Binance positions, normal orders, algo orders, and
   local submitted intents as agent-managed, manual, stale-attributed, or
   unknown.
-- [ ] **EXP-02**: Operator can see the exact reason each manual or unknown
+- [x] **EXP-02**: Operator can see the exact reason each manual or unknown
   exposure blocks live resume, including symbol, side, quantity, protection
   status, matching local evidence, and suggested non-mutating next action.
-- [ ] **EXP-03**: Resume decision logic consumes exposure clearance evidence
+- [x] **EXP-03**: Resume decision logic consumes exposure clearance evidence
   and keeps returning `resolve_exposure` until manual/unknown exposure is
   explicitly cleared, classified, or excluded by operator input.
 
@@ -47,7 +47,7 @@ projects or losing control of downside.
 
 ### Manual Loss Learning
 
-- [ ] **LOSS-01**: Operator can record a manual liquidation or failed trade as
+- [x] **LOSS-01**: Operator can record a manual liquidation or failed trade as
   a structured, secret-safe incident with symbol, side, leverage, entry/exit or
   liquidation price, stop-loss status, trigger reason, and lessons.
 - [ ] **LOSS-02**: Strategy review can compare manual loss incidents against
@@ -104,16 +104,16 @@ projects or losing control of downside.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EXP-01 | Phase 56 | Pending |
-| EXP-02 | Phase 56 | Pending |
-| EXP-03 | Phase 56 | Pending |
+| EXP-01 | Phase 56 | Complete |
+| EXP-02 | Phase 56 | Complete |
+| EXP-03 | Phase 56 | Complete |
 | STRAT-01 | Phase 58 | Pending |
 | STRAT-02 | Phase 57 | Pending |
 | STRAT-03 | Phase 57 | Pending |
 | STRAT-04 | Phase 58 | Pending |
 | DATA-01 | Phase 57 | Pending |
 | DATA-02 | Phase 57 | Pending |
-| LOSS-01 | Phase 56 | Pending |
+| LOSS-01 | Phase 56 | Complete |
 | LOSS-02 | Phase 58 | Pending |
 | LIVE-01 | Phase 59 | Pending |
 | LIVE-02 | Phase 59 | Pending |

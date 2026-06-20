@@ -82,6 +82,40 @@ class OperatorResumeDecisionTests(unittest.TestCase):
         self.assertFalse(payload["confirmation_flow"]["this_packet_performs_resume"])
         self.assertFalse(payload["read_only"]["applies_risk_profiles"])
 
+    def test_exposure_clearance_artifact_blocks_otherwise_eligible_packet(self):
+        packet = build_operator_resume_decision_packet_from_readiness(
+            readiness_payload(
+                readiness_status="live_resume_blocked",
+                readiness_live_resume_allowed=False,
+                reasons={
+                    "matrix": [],
+                    "strategy_evidence": [],
+                    "server_state": [],
+                    "exchange_state": [],
+                    "risk_profile": [],
+                    "confirmation": ["operator_confirmation_required"],
+                },
+            ),
+            exposure_clearance={
+                "schema": "bfa_exposure_clearance_v1",
+                "status": "resolve_exposure",
+                "clearance_allowed": False,
+                "positions": [
+                    {
+                        "symbol": "ETHUSDT",
+                        "classification": "manual",
+                        "blocks_live_resume": True,
+                    }
+                ],
+            },
+        )
+
+        payload = packet.to_dict()
+        self.assertEqual(packet.status, "resolve_exposure")
+        self.assertFalse(packet.eligible_for_operator_resume)
+        self.assertEqual(payload["exposure"]["clearance"]["blocking_symbols"], ["ETHUSDT"])
+        self.assertIn("clearance_manual", payload["blocker_groups"]["exposure_clearance"])
+
 
 def readiness_payload(
     *,

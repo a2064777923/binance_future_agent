@@ -2555,6 +2555,97 @@ class CliTests(unittest.TestCase):
         self.assertEqual(payload["exposure"]["manual_or_unattributed_symbols"], ["ETHUSDT"])
         self.assertFalse(payload["read_only"]["places_orders"])
 
+    def test_ops_exposure_clearance_reports_manual_blocker(self):
+        class FakeSignedClient:
+            def account(self):
+                return {"availableBalance": "30", "totalWalletBalance": "30"}
+
+            def position_risk(self):
+                return [
+                    {
+                        "symbol": "ETHUSDT",
+                        "positionAmt": "0.01",
+                        "positionSide": "LONG",
+                        "entryPrice": "3500",
+                        "markPrice": "3490",
+                    }
+                ]
+
+            def open_orders(self):
+                return []
+
+            def open_algo_orders(self):
+                return [{"symbol": "ETHUSDT", "positionSide": "LONG", "algoId": 1}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "exposure-clearance",
+                "--manual-exposure-symbols",
+                "ETHUSDT",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 1)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_exposure_clearance_v1")
+        self.assertEqual(payload["status"], "resolve_exposure")
+        self.assertEqual(payload["positions"][0]["classification"], "manual")
+        self.assertFalse(payload["read_only"]["mutates_exchange_state"])
+
+    def test_ops_manual_loss_record_persists_incident(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            db = root / "agent.sqlite"
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "manual-loss-record",
+                "--db",
+                str(db),
+                "--symbol",
+                "SOLUSDT",
+                "--side",
+                "long",
+                "--leverage",
+                "20",
+                "--entry-price",
+                "100",
+                "--liquidation-price",
+                "95",
+                "--stop-loss-status",
+                "none",
+                "--trigger-reason",
+                "manual chase",
+                "--lesson",
+                "no stop",
+                "--occurred-at",
+                "2026-06-21T01:00:00Z",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_DB_PATH": str(db),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                },
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_manual_loss_record_v1")
+        self.assertTrue(payload["recorded"])
+        self.assertEqual(payload["incident"]["symbol"], "SOLUSDT")
+        self.assertFalse(payload["read_only_exchange"]["places_orders"])
+
 
 if __name__ == "__main__":
     unittest.main()
