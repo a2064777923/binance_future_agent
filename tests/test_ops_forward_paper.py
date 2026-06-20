@@ -7,6 +7,7 @@ from pathlib import Path
 from bfa.event_store.store import EventStore
 from bfa.market.models import MarketDataResponse
 from bfa.ops.forward_paper import run_forward_paper
+from bfa.strategy.paper_guard import ForwardPaperGuardConfig
 
 
 FIVE_MINUTES_MS = 300_000
@@ -141,6 +142,87 @@ class ForwardPaperTests(unittest.TestCase):
         self.assertEqual(payload["signal_event_id"], signal_id)
         self.assertIn(payload["exit_reason"], {"take_profit", "time_exit", "stop_loss"})
         self.assertGreater(payload["net_pnl_usdt"], 0)
+
+    def test_forward_paper_guard_skips_blocked_symbols(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "paper.sqlite"
+            connection = sqlite3.connect(db)
+            connection.row_factory = sqlite3.Row
+            store = EventStore(connection)
+            for index in range(3):
+                signal_id = store.insert_artifact(
+                    "paper_signals",
+                    occurred_at=f"2026-06-20T00:0{index}:00Z",
+                    source="test",
+                    symbol="BTCUSDT",
+                    ref_id=f"paper_signal:btc:{index}",
+                    event_type="paper_signal",
+                    payload={
+                        "schema": "bfa_paper_signal_v1",
+                        "symbol": "BTCUSDT",
+                        "interval": "5m",
+                        "variant": "quant_setup",
+                        "opened_at": f"2026-06-20T00:0{index}:00Z",
+                        "expiry_time": "2026-06-20T00:20:00Z",
+                        "side": "long",
+                        "entry_price": 100.0,
+                        "stop_price": 98.0,
+                        "target_price": 104.0,
+                        "notional_usdt": 12.0,
+                        "hold_bars": 4,
+                        "status": "open",
+                        "setup": {"factor_scores": []},
+                    },
+                )
+                store.insert_artifact(
+                    "paper_outcomes",
+                    occurred_at=f"2026-06-20T01:0{index}:00Z",
+                    source="test",
+                    symbol="BTCUSDT",
+                    ref_id=f"paper_outcome:btc:{index}",
+                    event_type="paper_outcome",
+                    payload={
+                        "schema": "bfa_paper_outcome_v1",
+                        "signal_event_id": signal_id,
+                        "symbol": "BTCUSDT",
+                        "interval": "5m",
+                        "variant": "quant_setup",
+                        "opened_at": f"2026-06-20T00:0{index}:00Z",
+                        "closed_at": f"2026-06-20T01:0{index}:00Z",
+                        "side": "long",
+                        "entry_price": 100.0,
+                        "exit_price": 98.0,
+                        "quantity": 0.12,
+                        "notional_usdt": 12.0,
+                        "gross_pnl_usdt": -0.3,
+                        "fees_usdt": 0.0,
+                        "slippage_usdt": 0.0,
+                        "net_pnl_usdt": -0.3,
+                        "exit_reason": "stop_loss",
+                    },
+                )
+            connection.close()
+
+            report = run_forward_paper(
+                client=FakeClient(trend_rows(24)),
+                db_path=str(db),
+                symbols=["BTCUSDT"],
+                interval="5m",
+                variant="quant_setup",
+                limit=18,
+                paper_guard_config=ForwardPaperGuardConfig(
+                    variant="quant_setup",
+                    min_total_outcomes=3,
+                    min_symbol_outcomes=3,
+                    symbol_min_loss_usdt=0.5,
+                    symbol_max_win_rate=0.1,
+                ),
+            )
+
+        self.assertEqual(report.generated_signals, 0)
+        self.assertEqual(report.skipped_signals, 1)
+        self.assertEqual(report.guarded_symbols, ["BTCUSDT"])
+        self.assertEqual(report.paper_guard["status"], "active")
 
 
 if __name__ == "__main__":

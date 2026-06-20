@@ -32,6 +32,8 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn("BFA_LIVE_AUTO_HOT_TOP_N=40", text)
         self.assertIn("BFA_FORWARD_PAPER_AUTO_HOT_SYMBOLS=true", text)
         self.assertIn("BFA_FORWARD_PAPER_TOP_N=40", text)
+        self.assertIn("BFA_FORWARD_PAPER_GUARD_ENABLED=true", text)
+        self.assertIn("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES=30", text)
         self.assertIn("OPENAI_BASE_URL=https://api.openai.com/v1", text)
         self.assertIn("OPENAI_TIMEOUT_SECONDS=5", text)
         self.assertIn("OPENAI_MAX_OUTPUT_TOKENS=400", text)

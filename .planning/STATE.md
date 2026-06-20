@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v1.22
 milestone_name: Portfolio Risk And Multi-Position
-current_phase: 46
+current_phase: 47
 status: active
-stopped_at: Phase 46 complete; live auto-hot dry-run evidence collected
+stopped_at: Phase 47 complete locally; server code-only deployment pending
 last_updated: "2026-06-21T00:00:00+08:00"
-last_activity: 2026-06-20
-last_activity_desc: Collected one-shot dry-run evidence for live auto-hot scanning
+last_activity: 2026-06-21
+last_activity_desc: Added adaptive forward-paper candidate guard and local verification
 progress:
   total_phases: 42
   completed_phases: 40
@@ -19,10 +19,10 @@ progress:
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 46 — Live Auto-Hot Dry-Run Evidence
-**Status:** Phase 46 complete; paper-only timer active; live auto-hot disabled
-in server env; live service/timer remain inactive while default all-interval
-strategy promotion and latest paper performance evidence fail
+**Current phase:** Phase 47 — Forward-Paper Adaptive Candidate Guard
+**Status:** Phase 47 complete locally; paper-only timer active; live auto-hot
+disabled in server env; live service/timer remain inactive while strategy and
+paper evidence remain negative
 **Last planned:** 2026-06-20
 **Plan count:** 1
 
@@ -542,37 +542,47 @@ gated by all-interval strategy evidence.
   matrix evidence reduced drawdown but kept total PnL negative, so the paper
   timer remains on the original `quant_setup_selective` variant.
 
+- Phase 47 local implementation adds an adaptive forward-paper guard. It reads
+  local `paper_signals` and `paper_outcomes`, returns `insufficient_evidence`
+  when settled outcomes are below threshold, and otherwise can block losing
+  symbols, sides, and factor reasons when group outcome count, net loss, and
+  win-rate thresholds are all met. `agent run-once` now rejects guarded symbols
+  before AI/execution and passes guard side/factor blocks into deterministic
+  setup profiles. `ops forward-paper-run` now skips guarded symbols before new
+  paper signal creation and reports guard status plus guarded symbols. Local
+  focused tests passed and the full local suite passed with `339` tests. No
+  live env, timer, risk profile, or exchange mutation was performed.
+
 ## Next Command
 
-Continue forward-paper evidence collection and strategy calibration. Live
-auto-hot has now been proven as a one-shot dry-run scanner, but it remains
-disabled in unattended server env. Do not enable unattended live auto-hot,
-restore live automation, execute adjustment orders, or apply
-`30u_10x_multi_dynamic` while the default all-interval promotion gate returns
-`keep_live_paused` and paper performance is negative.
+Deploy Phase 47 as a code-only update, with the paper timer paused during
+deployment and restored afterwards. Keep live automation disabled. Do not
+enable unattended live auto-hot, restore live automation, execute adjustment
+orders, or apply `30u_10x_multi_dynamic` while the default all-interval
+promotion gate returns `keep_live_paused` and paper performance is negative.
 
 ## Session
 
-**Last session:** 2026-06-20T23:23:00+08:00
-**Stopped at:** Phase 46 complete; live auto-hot dry-run evidence collected.
-**Resume file:** .planning/phases/46-live-auto-hot-dry-run-evidence/46-01-PLAN.md
+**Last session:** 2026-06-21T00:00:00+08:00
+**Stopped at:** Phase 47 complete locally; server deployment pending.
+**Resume file:** .planning/phases/47-forward-paper-adaptive-candidate-guard/47-01-PLAN.md
 
 ## Current Position
 
-Phase: 46 — Live Auto-Hot Dry-Run Evidence
-Plan: 46-01 evidence run
-Status: Complete; live auto-hot remains disabled in server env
-Last activity: 2026-06-20 — one-shot dry-run selected 12 scan symbols, kept
-candidate evaluation bounded, and submitted no order
+Phase: 47 — Forward-Paper Adaptive Candidate Guard
+Plan: 47-01 adaptive guard
+Status: Complete locally; server code-only deployment pending verification
+Last activity: 2026-06-21 — local full suite passed with 339 tests
 
 ## Operator Next Steps
 
+- Deploy the adaptive guard code-only update to `/opt/binance-futures-agent`
+  and verify server focused/full tests plus health-check.
 - Keep the paper timer collecting repeated `ops forward-paper-run` evidence on
-  `quant_setup_selective` `5m`, while keeping
-  `live_resume_allowed=false` until all-interval evidence passes.
-- Plan a next phase that lets live evaluate a wider auto-hot candidate pool
-  without widening actual order authority beyond risk, liquidity, tradability,
-  setup-quality, and evidence gates.
+  `quant_setup_selective` `5m`, now with the adaptive guard active once enough
+  local paper outcomes meet guard thresholds.
+- Keep `live_resume_allowed=false` until all-interval evidence and paper
+  performance pass.
 - Rerun recent hot-symbol matrix sweeps and require default all-interval
   `ops strategy-promotion-check` to pass before using any setup live.
 - Monitor the active `SOLUSDT` position through filter-aware

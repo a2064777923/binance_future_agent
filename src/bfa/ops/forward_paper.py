@@ -13,6 +13,7 @@ from bfa.backtest.models import BacktestBar, BacktestConfig, built_in_variants
 from bfa.event_store.migrations import connect
 from bfa.event_store.store import EventStore
 from bfa.strategy.indicators import KlinePoint, compute_indicator_snapshot
+from bfa.strategy.paper_guard import ForwardPaperGuard, build_forward_paper_guard, merge_guard_profile
 from bfa.strategy.setup import TradeSetup, build_trade_setup
 
 
@@ -106,6 +107,8 @@ class ForwardPaperRunReport:
     reasons: list[str] = field(default_factory=list)
     paper_signals: list[dict[str, Any]] = field(default_factory=list)
     paper_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    paper_guard: dict[str, Any] | None = None
+    guarded_symbols: list[str] = field(default_factory=list)
     persisted: dict[str, int] = field(default_factory=dict)
 
     @property
@@ -125,6 +128,8 @@ class ForwardPaperRunReport:
             "reasons": list(self.reasons),
             "paper_signals": list(self.paper_signals),
             "paper_outcomes": list(self.paper_outcomes),
+            "paper_guard": self.paper_guard,
+            "guarded_symbols": list(self.guarded_symbols),
             "persisted": dict(self.persisted),
         }
 
@@ -138,6 +143,7 @@ def run_forward_paper(
     variant: str = "quant_setup_selective",
     limit: int = 36,
     now: str | None = None,
+    paper_guard_config=None,
 ) -> ForwardPaperRunReport:
     selected_symbols = _symbols(symbols)
     if not selected_symbols:
@@ -152,6 +158,11 @@ def run_forward_paper(
     connection = connect(db_path)
     try:
         store = EventStore(connection)
+        paper_guard = (
+            build_forward_paper_guard(connection, paper_guard_config)
+            if paper_guard_config is not None
+            else None
+        )
         bars_by_symbol = _fetch_bars(client, selected_symbols, interval=interval, limit=limit)
         outcomes, outcome_event_ids = _settle_open_signals(
             connection,
@@ -170,6 +181,7 @@ def run_forward_paper(
             variant=variant,
             config=config,
             now=now,
+            paper_guard=paper_guard,
         )
     finally:
         connection.close()
@@ -184,6 +196,8 @@ def run_forward_paper(
         settled_outcomes=len(outcomes),
         paper_signals=[signal.to_dict() for signal in signals],
         paper_outcomes=[outcome.to_dict() for outcome in outcomes],
+        paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+        guarded_symbols=sorted(paper_guard.symbol_blocks) if paper_guard is not None and paper_guard.active else [],
         persisted={
             "paper_signals": len(signal_event_ids),
             "paper_outcomes": len(outcome_event_ids),
@@ -249,15 +263,27 @@ def _generate_new_signals(
     variant: str,
     config: BacktestConfig,
     now: str | None,
+    paper_guard: ForwardPaperGuard | None,
 ) -> tuple[list[PaperSignal], list[int], int]:
     signals: list[PaperSignal] = []
     event_ids: list[int] = []
     skipped = 0
     for symbol, bars in sorted(bars_by_symbol.items()):
+        if paper_guard is not None and paper_guard.blocks_symbol(symbol):
+            skipped += 1
+            continue
         if _has_open_signal(connection, symbol=symbol, interval=interval, variant=variant):
             skipped += 1
             continue
-        signal = _build_paper_signal(symbol, bars, interval=interval, variant=variant, config=config, now=now)
+        signal = _build_paper_signal(
+            symbol,
+            bars,
+            interval=interval,
+            variant=variant,
+            config=config,
+            now=now,
+            paper_guard=paper_guard,
+        )
         if signal is None:
             skipped += 1
             continue
@@ -283,6 +309,7 @@ def _build_paper_signal(
     variant: str,
     config: BacktestConfig,
     now: str | None,
+    paper_guard: ForwardPaperGuard | None,
 ) -> PaperSignal | None:
     if len(bars) <= config.lookback_bars:
         return None
@@ -292,7 +319,7 @@ def _build_paper_signal(
     setup = build_trade_setup(
         _candidate_from_bars(symbol, lookback, config),
         risk_limits=_risk_limits_from_backtest_config(config),
-        profile=config.setup_profile,
+        profile=merge_guard_profile(config.setup_profile, paper_guard),
     )
     if setup.decision != "trade":
         return None

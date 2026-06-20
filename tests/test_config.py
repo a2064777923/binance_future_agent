@@ -52,6 +52,20 @@ def base_env(**overrides):
         "BFA_FORWARD_PAPER_TOP_N": "40",
         "BFA_FORWARD_PAPER_MIN_QUOTE_VOLUME_USDT": "10000000",
         "BFA_FORWARD_PAPER_MIN_ABS_PRICE_CHANGE_PERCENT": "0.5",
+        "BFA_FORWARD_PAPER_GUARD_ENABLED": "true",
+        "BFA_FORWARD_PAPER_GUARD_VARIANT": "quant_setup_selective",
+        "BFA_FORWARD_PAPER_GUARD_INTERVAL": "5m",
+        "BFA_FORWARD_PAPER_GUARD_SINCE": "",
+        "BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES": "30",
+        "BFA_FORWARD_PAPER_GUARD_MIN_SYMBOL_OUTCOMES": "3",
+        "BFA_FORWARD_PAPER_GUARD_SYMBOL_MIN_LOSS_USDT": "0.5",
+        "BFA_FORWARD_PAPER_GUARD_SYMBOL_MAX_WIN_RATE": "0.3",
+        "BFA_FORWARD_PAPER_GUARD_MIN_SIDE_OUTCOMES": "20",
+        "BFA_FORWARD_PAPER_GUARD_SIDE_MIN_LOSS_USDT": "2",
+        "BFA_FORWARD_PAPER_GUARD_SIDE_MAX_WIN_RATE": "0.3",
+        "BFA_FORWARD_PAPER_GUARD_MIN_FACTOR_OUTCOMES": "30",
+        "BFA_FORWARD_PAPER_GUARD_FACTOR_MIN_LOSS_USDT": "3",
+        "BFA_FORWARD_PAPER_GUARD_FACTOR_MAX_WIN_RATE": "0.25",
         "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "true",
         "BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT": "5000000",
         "BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT": "0.3",
@@ -91,6 +105,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS"), "false")
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "40")
+        self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_ENABLED"), "true")
+        self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES"), "30")
 
     def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
@@ -228,6 +244,8 @@ class ConfigTests(unittest.TestCase):
                 BFA_MAX_LEVERAGE="-3",
                 BFA_MAX_OPEN_POSITIONS="0",
                 BFA_LIVE_AUTO_HOT_TOP_N="0",
+                BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES="0",
+                BFA_FORWARD_PAPER_GUARD_SYMBOL_MIN_LOSS_USDT="0",
                 BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT="0",
                 BFA_MARKET_HEAT_MAX_RECORDS="0",
             )
@@ -239,6 +257,8 @@ class ConfigTests(unittest.TestCase):
         self.assertIn("BFA_MAX_LEVERAGE must be a positive number", result.errors)
         self.assertIn("BFA_MAX_OPEN_POSITIONS must be a positive integer", result.errors)
         self.assertIn("BFA_LIVE_AUTO_HOT_TOP_N must be a positive integer", result.errors)
+        self.assertIn("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES must be a positive integer", result.errors)
+        self.assertIn("BFA_FORWARD_PAPER_GUARD_SYMBOL_MIN_LOSS_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT must be a positive number", result.errors)
         self.assertIn("BFA_MARKET_HEAT_MAX_RECORDS must be a positive integer", result.errors)
 

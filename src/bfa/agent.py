@@ -32,6 +32,7 @@ from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.position_adjustment import build_position_adjustment_plan_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.paper_guard import build_forward_paper_guard, guard_config_from_app, merge_guard_profile
 from bfa.strategy.setup import build_trade_setup, persist_trade_setup
 from bfa.strategy.store import persist_candidates
 
@@ -56,6 +57,7 @@ class AgentRunResult:
     persisted: dict[str, int] = field(default_factory=dict)
     position_review: dict[str, Any] | None = None
     position_adjustment_plan: dict[str, Any] | None = None
+    paper_guard: dict[str, Any] | None = None
 
     @property
     def ok(self) -> bool:
@@ -93,6 +95,7 @@ class AgentRunResult:
             "persisted": dict(self.persisted),
             "position_review": self.position_review,
             "position_adjustment_plan": self.position_adjustment_plan,
+            "paper_guard": self.paper_guard,
         }
 
 
@@ -182,6 +185,7 @@ def run_agent_once(
     connection = connect(db_path or config.get("BFA_DB_PATH"))
     try:
         store = EventStore(connection)
+        paper_guard = build_forward_paper_guard(connection, guard_config_from_app(config))
         market_snapshots = collector.collect_rest_snapshots()
         market_event_ids = [store.insert_market_snapshot(snapshot) for snapshot in market_snapshots]
         narrative_records = narrative_runner.collect()
@@ -216,6 +220,7 @@ def run_agent_once(
                 generated_at=started_at,
                 top_n=top_n,
                 max_position_notional_usdt=base_sizing.max_position_notional_usdt,
+                paper_guard=paper_guard,
             ),
         )
         persisted_candidate_count = len(persist_candidates(store, candidates.candidates))
@@ -231,6 +236,7 @@ def run_agent_once(
                 scan_symbols=scan_symbols,
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                paper_guard=paper_guard.to_dict(),
                 persisted={"candidates": persisted_candidate_count},
             )
 
@@ -250,6 +256,7 @@ def run_agent_once(
                 validation_errors=["unable to read live position risk"],
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                paper_guard=paper_guard.to_dict(),
                 persisted={"candidates": persisted_candidate_count},
             )
 
@@ -272,6 +279,7 @@ def run_agent_once(
             scan_symbols=scan_symbols,
             persisted_candidate_count=persisted_candidate_count,
             position_adjustment_plan=position_adjustment_plan,
+            paper_guard=paper_guard,
         )
     finally:
         connection.close()
@@ -360,6 +368,7 @@ def _evaluate_candidate_queue(
     scan_symbols: list[str],
     persisted_candidate_count: int,
     position_adjustment_plan,
+    paper_guard,
 ) -> AgentRunResult:
     evaluated_symbols: list[str] = []
     ai_decisions_persisted = 0
@@ -376,7 +385,11 @@ def _evaluate_candidate_queue(
             enabled=dynamic_sizing_enabled(config),
         )
         risk_limits = RiskLimits.from_config(config, sizing_result=candidate_sizing)
-        setup = build_trade_setup(candidate, risk_limits=risk_limits)
+        setup = build_trade_setup(
+            candidate,
+            risk_limits=risk_limits,
+            profile=merge_guard_profile(None, paper_guard),
+        )
         persist_trade_setup(
             store,
             setup=setup,
@@ -421,6 +434,7 @@ def _evaluate_candidate_queue(
                         risk_reasons=_dedupe(skipped_risk_reasons),
                         position_review=_position_review_summary(position_adjustment_plan),
                         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                        paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
                         persisted={
                             "candidates": persisted_candidate_count,
                             "trade_setups": trade_setups_persisted,
@@ -463,6 +477,7 @@ def _evaluate_candidate_queue(
                 risk_reasons=_dedupe(skipped_risk_reasons),
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
                 persisted={
                     "candidates": persisted_candidate_count,
                     "trade_setups": trade_setups_persisted,
@@ -522,6 +537,7 @@ def _evaluate_candidate_queue(
             risk_reasons=_dedupe([*skipped_risk_reasons, *execution.risk.reason_codes]),
             position_review=_position_review_summary(position_adjustment_plan),
             position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+            paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
             persisted={
                 "candidates": persisted_candidate_count,
                 "trade_setups": trade_setups_persisted,
@@ -548,6 +564,7 @@ def _evaluate_candidate_queue(
         risk_reasons=_dedupe([*skipped_risk_reasons, *last_risk_reasons]),
         position_review=_position_review_summary(position_adjustment_plan),
         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+        paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
         persisted={
             "candidates": persisted_candidate_count,
             "trade_setups": trade_setups_persisted,

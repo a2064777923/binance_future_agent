@@ -272,6 +272,28 @@ projects or losing control of downside.
 - [x] **LAD-03**: The evidence confirms server env remains
   `BFA_LIVE_AUTO_HOT_SYMBOLS=false` after the one-shot dry-run command.
 
+### Adaptive Forward-Paper Candidate Guard
+
+- [x] **FPG-05**: Forward-paper evidence can be converted into a deterministic
+  guard that no-ops when settled outcome evidence is below a configured minimum.
+
+- [x] **FLA-05**: Loss attribution can drive symbol, side, and factor-reason
+  blocks only when group outcome count, net loss, and win-rate thresholds are
+  all met.
+
+- [x] **ACG-01**: Agent candidate generation rejects symbols blocked by recent
+  forward-paper evidence before AI or execution is consulted.
+
+- [x] **ACG-02**: Deterministic setup generation can reject guarded sides or
+  factor reasons through setup profile data.
+
+- [x] **ACG-03**: Forward-paper runs skip guarded symbols before generating new
+  paper signals and report guard status plus guarded symbols.
+
+- [x] **ACG-04**: Adaptive guard configuration is exposed through safe defaults
+  and deploy examples without enabling live automation or changing risk
+  profiles.
+
 ## Out of Scope
 
 | Feature | Reason |
@@ -350,12 +372,18 @@ projects or losing control of downside.
 | LAD-01 | Phase 46 | Complete and deployed |
 | LAD-02 | Phase 46 | Complete and deployed |
 | LAD-03 | Phase 46 | Complete and deployed |
+| FPG-05 | Phase 47 | Complete locally |
+| FLA-05 | Phase 47 | Complete locally |
+| ACG-01 | Phase 47 | Complete locally |
+| ACG-02 | Phase 47 | Complete locally |
+| ACG-03 | Phase 47 | Complete locally |
+| ACG-04 | Phase 47 | Complete locally |
 
 **Coverage:**
-- v1.22 requirements: 66 total
-- Mapped to phases: 66
+- v1.22 requirements: 72 total
+- Mapped to phases: 72
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-20*
-*Last updated: 2026-06-20 after Phase 44 guarded setup deployment*
+*Last updated: 2026-06-21 after Phase 47 adaptive paper guard*

@@ -765,6 +765,101 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.selected_symbol, "BTCUSDT")
         self.assertIn(("ticker_24hr", None), market_client.calls)
 
+    def test_run_once_forward_paper_guard_rejects_blocked_symbol_before_ai(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            from bfa.event_store.store import EventStore
+
+            store = EventStore(connection)
+            for index in range(3):
+                signal_id = store.insert_artifact(
+                    "paper_signals",
+                    occurred_at=f"2026-06-20T00:0{index}:00Z",
+                    source="test",
+                    symbol="BTCUSDT",
+                    ref_id=f"paper_signal:btc:{index}",
+                    event_type="paper_signal",
+                    payload={
+                        "schema": "bfa_paper_signal_v1",
+                        "symbol": "BTCUSDT",
+                        "interval": "5m",
+                        "variant": "quant_setup_selective",
+                        "opened_at": f"2026-06-20T00:0{index}:00Z",
+                        "expiry_time": "2026-06-20T00:20:00Z",
+                        "side": "long",
+                        "entry_price": 100.0,
+                        "stop_price": 98.0,
+                        "target_price": 104.0,
+                        "notional_usdt": 12.0,
+                        "hold_bars": 4,
+                        "status": "open",
+                        "setup": {"factor_scores": []},
+                    },
+                )
+                store.insert_artifact(
+                    "paper_outcomes",
+                    occurred_at=f"2026-06-20T01:0{index}:00Z",
+                    source="test",
+                    symbol="BTCUSDT",
+                    ref_id=f"paper_outcome:btc:{index}",
+                    event_type="paper_outcome",
+                    payload={
+                        "schema": "bfa_paper_outcome_v1",
+                        "signal_event_id": signal_id,
+                        "symbol": "BTCUSDT",
+                        "interval": "5m",
+                        "variant": "quant_setup_selective",
+                        "opened_at": f"2026-06-20T00:0{index}:00Z",
+                        "closed_at": f"2026-06-20T01:0{index}:00Z",
+                        "side": "long",
+                        "entry_price": 100.0,
+                        "exit_price": 98.0,
+                        "quantity": 0.12,
+                        "notional_usdt": 12.0,
+                        "gross_pnl_usdt": -0.3,
+                        "fees_usdt": 0.0,
+                        "slippage_usdt": 0.0,
+                        "net_pnl_usdt": -0.3,
+                        "exit_reason": "stop_loss",
+                    },
+                )
+            connection.close()
+            ai_client = FakeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                    "BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES": "3",
+                    "BFA_FORWARD_PAPER_GUARD_MIN_SYMBOL_OUTCOMES": "3",
+                    "BFA_FORWARD_PAPER_GUARD_SYMBOL_MIN_LOSS_USDT": "0.5",
+                    "BFA_FORWARD_PAPER_GUARD_SYMBOL_MAX_WIN_RATE": "0.1",
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+            )
+
+        self.assertEqual(result.status, "no_candidate")
+        self.assertEqual(result.candidate_count, 0)
+        self.assertEqual(result.rejected_count, 1)
+        self.assertEqual(ai_client.calls, 0)
+        self.assertEqual(result.paper_guard["status"], "active")
+        self.assertIn("BTCUSDT", result.paper_guard["symbol_blocks"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -52,6 +52,7 @@ from bfa.ops.strategy_promotion import build_strategy_promotion_check_report
 from bfa.ops.time_exit_execute import build_time_exit_execute_report
 from bfa.ops.trade_trace import build_trade_trace_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.paper_guard import guard_config_from_app
 from bfa.strategy.setup import build_trade_setup
 from bfa.strategy.store import persist_candidates
 
@@ -1105,6 +1106,7 @@ def _run_ops(
             variant=args.variant,
             limit=args.limit,
             now=args.now,
+            paper_guard_config=guard_config_from_app(config),
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.ok else 1

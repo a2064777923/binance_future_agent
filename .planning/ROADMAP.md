@@ -521,7 +521,7 @@ server env.
 |-----------|--------|----------------|--------|---------|
 | v1.0 Dry-Run Binance Futures Agent | 1-8 | 28/28 | Complete | 2026-06-19 |
 | v1.21 Live Pilot Risk Controls | 9-29 | 21/21 | Complete | 2026-06-20 |
-| v1.22 Portfolio Risk And Multi-Position | 30-46 | 17/17 | Phase 46 complete; live auto-hot remains disabled | Pending |
+| v1.22 Portfolio Risk And Multi-Position | 30-47 | 18/18 | Phase 47 complete locally; adaptive paper guard ready for server verification | Pending |
 
 ## Requirement Coverage
 
@@ -532,26 +532,17 @@ server env.
 ## Next Step
 
 Keep live automation paused while the latest calibrated `quant_setup` matrix
-still fails default all-interval `ops strategy-promotion-check`. The
-`quant_setup_selective` variant is now eligible only for `5m` forward-paper
-observation through `--scope selected-intervals --intervals 5m`, and local
-`ops forward-paper-run` can record paper signals/outcomes without order
-intents, and deployment assets now include an active paper-only systemd timer
-on the server. The paper timer uses auto-hot symbol selection rather than the
-10-symbol live pilot allowlist. `ops forward-paper-performance-check` is now
-deployed and the latest server gate returns `keep_live_paused` from negative
-5m paper performance: 57 signals, 35 settled outcomes, win rate 0.34285714,
-total net PnL -1.46500894 USDT, and worst drawdown 1.60719683 USDT. Phase 43
-attribution is deployed and shows the clearest recalibration targets are
-short-side setups, stop-loss-heavy entries, and worst symbols such as
-`BICOUSDT`, `BEATUSDT`, and `SLXUSDT`. Phase 44 created and deployed the
-`quant_setup_selective_guarded` variant from that evidence. Server matrix
-evidence reduced drawdown but kept total PnL negative, so the paper timer stays
-on `quant_setup_selective` and the guarded variant is not promoted. Next work
-should improve selection/calibration beyond a static side/symbol guard,
-including live auto-hot candidate breadth under strict risk gates. Do not
-execute adjustment orders, restore the live timer, or apply
-`30u_10x_multi_dynamic` without an explicit confirmation token.
+and forward-paper evidence remain negative. The paper timer uses auto-hot
+symbol selection rather than the 10-symbol live pilot allowlist. Latest server
+forward-paper evidence grew to 157 signals and 132 settled outcomes with win
+rate `0.31818182`, total net PnL `-4.54251922` USDT, profit factor
+`0.60054605`, and worst drawdown `5.02186198` USDT. Phase 47 now converts
+that paper loss evidence into an adaptive candidate/setup guard: with enough
+settled outcomes it can block repeatedly losing symbols and reject losing
+side/factor conditions before agent or paper runs keep sampling them; without
+enough evidence it is a no-op. Do not execute adjustment orders, restore the
+live timer, enable unattended live auto-hot, or apply `30u_10x_multi_dynamic`
+without an explicit confirmation token and passing strategy evidence.
 
 ### Phase 46: Live Auto-Hot Dry-Run Evidence
 
@@ -569,8 +560,48 @@ automation.
 
 1. A one-shot server command runs with `BFA_MODE=dry_run` and
    `BFA_LIVE_AUTO_HOT_SYMBOLS=true`.
+
 2. The command output records `scan_symbols`, `candidate_count`,
    `evaluated_symbols`, `submitted=false`, and dry-run mode.
+
 3. Server `/etc/binance-futures-agent/env` remains live-auto-hot disabled after
    the command.
+
 4. Paper timer remains active and live service/timer remain inactive.
+
+### Phase 47: Forward-Paper Adaptive Candidate Guard
+
+**Goal:** Convert repeated negative forward-paper outcomes into a deterministic
+adaptive guard that can quarantine recent losing symbols and suppress losing
+side/factor conditions before agent or paper runs keep sampling them.
+
+**Requirements:** FPG-05, FLA-05, ACG-01, ACG-02, ACG-03, ACG-04
+**Depends on:** Phase 46
+**Status:** Complete locally; server code-only deployment pending verification.
+
+**Plans:** 1 plan
+
+**Success Criteria:**
+
+1. The guard reads local `paper_signals` and `paper_outcomes` evidence and
+   returns `insufficient_evidence` without changing behavior when there are too
+   few settled outcomes.
+
+2. The guard can block symbols, sides, and factor reasons only when group
+   outcome count, net loss, and win-rate thresholds are all met.
+
+3. `agent run-once` candidate generation rejects blocked symbols before AI or
+   execution, while setup evaluation rejects guarded side/factor conditions.
+
+4. `ops forward-paper-run` skips blocked symbols before generating new paper
+   signals and reports guard status plus guarded symbols without writing order
+   intents.
+
+5. Config defaults and deploy examples expose the guard safely without enabling
+   live automation or changing risk profiles.
+
+6. Focused and full local tests pass before server deployment.
+
+Plans:
+
+- [x] 47-01 Adaptive Forward-Paper Guard

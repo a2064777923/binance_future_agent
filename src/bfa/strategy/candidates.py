@@ -17,6 +17,7 @@ class StrategyConfig:
     max_kline_range_percent: float = 20.0
     require_market_confirmation: bool = True
     max_position_notional_usdt: float | None = None
+    paper_guard: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,8 @@ def _reject_reasons(
         and item.min_executable_notional > config.max_position_notional_usdt
     ):
         reasons.append("min_executable_notional_exceeds_cap")
+    if config.paper_guard is not None and config.paper_guard.blocks_symbol(item.symbol):
+        reasons.extend(config.paper_guard.symbol_reasons(item.symbol))
     return reasons
 
 

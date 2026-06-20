@@ -128,6 +128,7 @@ class TradeSetupProfile:
     target_distance_multiplier: float = 1.0
     disabled_sides: tuple[str, ...] = ()
     excluded_symbols: tuple[str, ...] = ()
+    blocked_factor_reasons: tuple[str, ...] = ()
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -228,6 +229,7 @@ def build_trade_setup(
         decision = "pass"
         reasons = _dedupe([*reasons, "risk_reward_below_profile_min"])
     profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
+    profile_rejections.extend(_factor_guard_rejections(factor_scores, setup_profile))
     if profile_rejections:
         decision = "pass"
         reasons = _dedupe([*reasons, *profile_rejections])
@@ -757,6 +759,8 @@ def _setup_profile(profile: TradeSetupProfile | Mapping[str, Any] | None) -> Tra
             values["disabled_sides"] = tuple(str(item).lower() for item in _sequence(values["disabled_sides"]))
         if "excluded_symbols" in values:
             values["excluded_symbols"] = tuple(str(item).upper() for item in _sequence(values["excluded_symbols"]))
+        if "blocked_factor_reasons" in values:
+            values["blocked_factor_reasons"] = tuple(str(item) for item in _sequence(values["blocked_factor_reasons"]))
         return TradeSetupProfile(**values)
     return STANDARD_SETUP_PROFILE
 
@@ -775,6 +779,18 @@ def _high_crowding(features: Mapping[str, Any], side: str) -> bool:
     if side == "long":
         return funding > 0.0008 and taker > 1.8
     return funding < -0.0008 and taker < 0.55
+
+
+def _factor_guard_rejections(factors: list[FactorScore], profile: TradeSetupProfile) -> list[str]:
+    blocked = {item.lower() for item in profile.blocked_factor_reasons}
+    if not blocked:
+        return []
+    reasons: list[str] = []
+    for factor in factors:
+        for reason in factor.reasons:
+            if reason.lower() in blocked:
+                reasons.append(f"forward_paper_guard_factor:{reason}")
+    return _dedupe(reasons)
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
