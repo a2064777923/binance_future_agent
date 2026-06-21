@@ -50,16 +50,19 @@ class RiskProfileTests(unittest.TestCase):
         )
 
         self.assertEqual(plan.target_leverage, 10)
+        self.assertEqual(plan.target_values["BFA_ACCOUNT_CAPITAL_USDT"], "45")
         self.assertEqual(plan.target_values["BFA_MULTI_POSITION_ENABLED"], "true")
-        self.assertEqual(plan.target_values["BFA_MAX_OPEN_POSITIONS"], "10")
-        self.assertEqual(plan.target_values["BFA_MAX_POSITION_NOTIONAL_USDT"], "100")
-        self.assertEqual(plan.target_values["BFA_MAX_RISK_PER_TRADE_USDT"], "0.4")
-        self.assertEqual(plan.target_values["BFA_MAX_MARGIN_PER_POSITION_USDT"], "10")
-        self.assertEqual(plan.target_values["BFA_MAX_MARGIN_FRACTION"], "0.33")
-        self.assertEqual(plan.target_values["BFA_MAX_EFFECTIVE_NOTIONAL_USDT"], "100")
-        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_USDT"], "40")
-        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_NOTIONAL_USDT"], "650")
-        self.assertEqual(plan.target_values["BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT"], "520")
+        self.assertEqual(plan.target_values["BFA_MAX_OPEN_POSITIONS"], "45")
+        self.assertEqual(plan.target_values["BFA_MAX_POSITION_NOTIONAL_USDT"], "400")
+        self.assertEqual(plan.target_values["BFA_MAX_RISK_PER_TRADE_USDT"], "0.7")
+        self.assertEqual(plan.target_values["BFA_MAX_DAILY_LOSS_USDT"], "2")
+        self.assertEqual(plan.target_values["BFA_MAX_MARGIN_PER_POSITION_USDT"], "40")
+        self.assertEqual(plan.target_values["BFA_MAX_MARGIN_FRACTION"], "0.90")
+        self.assertEqual(plan.target_values["BFA_MAX_EFFECTIVE_NOTIONAL_USDT"], "400")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_USDT"], "120")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_FRACTION"], "2.50")
+        self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_NOTIONAL_USDT"], "3600")
+        self.assertEqual(plan.target_values["BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT"], "2700")
 
     def test_apply_requires_matching_confirmation_token(self):
         report = apply_risk_profile(

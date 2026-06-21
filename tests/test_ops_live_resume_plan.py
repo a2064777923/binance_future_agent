@@ -27,9 +27,10 @@ class LiveResumePlanTests(unittest.TestCase):
         self.assertFalse(payload["read_only"]["changes_systemd_state"])
         self.assertFalse(payload["read_only"]["mutates_exchange_state"])
         self.assertEqual(payload["risk_boundaries"]["max_leverage"], 10.0)
-        self.assertEqual(payload["risk_boundaries"]["max_open_positions"], 10)
-        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 100.0)
-        self.assertEqual(payload["risk_boundaries"]["max_portfolio_notional_usdt"], 650.0)
+        self.assertEqual(payload["risk_boundaries"]["account_capital_usdt"], 45.0)
+        self.assertEqual(payload["risk_boundaries"]["max_open_positions"], 45)
+        self.assertEqual(payload["risk_boundaries"]["max_position_notional_usdt"], 400.0)
+        self.assertEqual(payload["risk_boundaries"]["max_portfolio_notional_usdt"], 3600.0)
 
     def test_eligible_preview_builds_confirmation_token_and_systemd_plan(self):
         report = build_live_resume_plan(
@@ -184,20 +185,20 @@ def _config():
     return load_config(
         {
             "BFA_MODE": "live",
-            "BFA_ACCOUNT_CAPITAL_USDT": "30",
+            "BFA_ACCOUNT_CAPITAL_USDT": "45",
             "BFA_MAX_LEVERAGE": "10",
-            "BFA_MAX_POSITION_NOTIONAL_USDT": "100",
-            "BFA_MAX_RISK_PER_TRADE_USDT": "0.4",
-            "BFA_MAX_DAILY_LOSS_USDT": "1",
-            "BFA_MAX_OPEN_POSITIONS": "10",
+            "BFA_MAX_POSITION_NOTIONAL_USDT": "400",
+            "BFA_MAX_RISK_PER_TRADE_USDT": "0.7",
+            "BFA_MAX_DAILY_LOSS_USDT": "2",
+            "BFA_MAX_OPEN_POSITIONS": "45",
             "BFA_DYNAMIC_POSITION_SIZING_ENABLED": "true",
-            "BFA_MAX_MARGIN_PER_POSITION_USDT": "10",
-            "BFA_MAX_MARGIN_FRACTION": "0.33",
-            "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "100",
-            "BFA_MAX_PORTFOLIO_MARGIN_USDT": "40",
-            "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.95",
-            "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "650",
-            "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "520",
+            "BFA_MAX_MARGIN_PER_POSITION_USDT": "40",
+            "BFA_MAX_MARGIN_FRACTION": "0.90",
+            "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "400",
+            "BFA_MAX_PORTFOLIO_MARGIN_USDT": "120",
+            "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "2.50",
+            "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "3600",
+            "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "2700",
             "BFA_MULTI_POSITION_ENABLED": "true",
             "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
             "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
