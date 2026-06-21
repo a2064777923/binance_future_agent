@@ -84,6 +84,54 @@ class StrategyCandidateTests(unittest.TestCase):
 
         self.assertEqual(first, second)
 
+    def test_spike_reversal_can_be_disabled_for_candidate_features(self):
+        packet = {
+            "records": [
+                {
+                    "id": 1,
+                    "event_type": "narrative",
+                    "occurred_at": "2026-06-19T09:00:00Z",
+                    "source": "manual",
+                    "symbol": "SOLUSDT",
+                    "payload": {"symbol_mentions": ["SOLUSDT"], "engagement": {"likes": 1}},
+                },
+                {
+                    "id": 2,
+                    "event_type": "market_snapshot",
+                    "occurred_at": "2026-06-19T09:01:00Z",
+                    "symbol": "SOLUSDT",
+                    "ref_id": "ticker_24h:SOLUSDT",
+                    "payload": {
+                        "event_type": "ticker_24h",
+                        "symbol": "SOLUSDT",
+                        "payload": {"price_change_percent": "4", "quote_volume": "5000000"},
+                    },
+                },
+                {
+                    "id": 3,
+                    "event_type": "market_snapshot",
+                    "occurred_at": "2026-06-19T09:02:00Z",
+                    "symbol": "SOLUSDT",
+                    "ref_id": "kline:SOLUSDT:1",
+                    "payload": {
+                        "event_type": "kline",
+                        "symbol": "SOLUSDT",
+                        "payload": {"open": "100", "high": "104", "low": "99.8", "close": "100.2"},
+                    },
+                },
+            ]
+        }
+        config = StrategyConfig(
+            allowed_symbols=["SOLUSDT"],
+            generated_at="2026-06-19T09:30:00Z",
+            min_quote_volume=1000000,
+            spike_reversal_enabled=False,
+        )
+
+        result = generate_candidates(packet, config)
+
+        self.assertEqual(result.candidates[0].features["spike_reversal_signal"], None)
+
 
 if __name__ == "__main__":
     unittest.main()

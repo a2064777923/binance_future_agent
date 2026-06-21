@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 import hashlib
 from typing import Any, Mapping
 
@@ -32,6 +32,9 @@ class PositionAdjustmentOrderPlan:
     quantity: float
     position_side: str | None = None
     reduce_only: bool | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
+    cancel_algo_orders: list[dict[str, Any]] = field(default_factory=list)
     reason_codes: list[str] = field(default_factory=list)
     source_recommendation: str | None = None
     expected_remaining_position_amt: float | None = None
@@ -45,6 +48,9 @@ class PositionAdjustmentOrderPlan:
             "quantity": self.quantity,
             "position_side": self.position_side,
             "reduce_only": self.reduce_only,
+            "stop_price": self.stop_price,
+            "target_price": self.target_price,
+            "cancel_algo_orders": [dict(order) for order in self.cancel_algo_orders],
             "reason_codes": list(self.reason_codes),
             "source_recommendation": self.source_recommendation,
             "expected_remaining_position_amt": self.expected_remaining_position_amt,
@@ -169,6 +175,64 @@ class PositionAdjustmentExecuteReport:
         }
 
 
+def execute_position_adjustment_plan_report(
+    config: AppConfig,
+    plan_report: PositionAdjustmentPlanReport,
+    *,
+    db_path: str,
+    checked_at: str,
+    signed_client: BinanceFuturesSignedClient,
+    allowed_actions: tuple[str, ...] = ("trail_protective_orders",),
+    max_actions: int = 1,
+) -> PositionAdjustmentExecuteReport:
+    if RuntimeMode(config.get("BFA_MODE")) is not RuntimeMode.LIVE:
+        return PositionAdjustmentExecuteReport(
+            status="execution_blocked",
+            adjustment_executed=False,
+            reasons=["live_mode_required"],
+            adjustment_plan=plan_report,
+        )
+    selected_items = [
+        item
+        for item in plan_report.plans
+        if item.adjustment_allowed
+        and item.order_plan is not None
+        and item.order_plan.action in set(allowed_actions)
+    ][: max(max_actions, 0)]
+    if not selected_items:
+        return PositionAdjustmentExecuteReport(
+            status="execution_blocked",
+            adjustment_executed=False,
+            reasons=["no_allowed_auto_management_actions"],
+            adjustment_plan=plan_report,
+        )
+    executions = [
+        _execute_plan_item(
+            signed_client,
+            config=config,
+            db_path=db_path,
+            checked_at=checked_at,
+            item=item,
+        )
+        for item in selected_items
+    ]
+    statuses = [execution.status for execution in executions]
+    adjustment_executed = any(status.startswith("position_adjustment_submitted") for status in statuses)
+    status = "position_adjustment_submitted" if adjustment_executed else "position_adjustment_failed"
+    if any(status.endswith("_cleanup_deferred") for status in statuses):
+        status = "position_adjustment_submitted_cleanup_deferred"
+    if any(status.endswith("_failed") for status in statuses):
+        status = "position_adjustment_partial_failure" if adjustment_executed else "position_adjustment_failed"
+    return PositionAdjustmentExecuteReport(
+        status=status,
+        adjustment_executed=adjustment_executed,
+        reasons=_dedupe(statuses or [status]),
+        confirmation_required=False,
+        adjustment_plan=plan_report,
+        executions=executions,
+    )
+
+
 def build_position_adjustment_plan_report(
     config: AppConfig,
     *,
@@ -197,6 +261,14 @@ def build_position_adjustment_plan_report(
         review,
         position_mode=config.get("BFA_POSITION_MODE"),
         partial_take_profit_fraction=_float_or_default(config.get("BFA_PARTIAL_TAKE_PROFIT_FRACTION"), 0.5),
+        trailing_protection_enabled=_truthy(config.get("BFA_TRAILING_PROTECTION_ENABLED")),
+        trailing_activate_r=_float_or_default(config.get("BFA_TRAILING_PROTECTION_ACTIVATE_R"), 0.8),
+        trailing_lock_r=_float_or_default(config.get("BFA_TRAILING_PROTECTION_LOCK_R"), 0.25),
+        trailing_giveback_r=_float_or_default(config.get("BFA_TRAILING_PROTECTION_GIVEBACK_R"), 0.55),
+        trailing_target_extension_r=_float_or_default(
+            config.get("BFA_TRAILING_PROTECTION_TARGET_EXTENSION_R"),
+            0.75,
+        ),
         filters_by_symbol=_filters_by_symbol(
             _exchange_info_payload(config, market_client=market_client, exchange_info=exchange_info),
             review,
@@ -210,6 +282,11 @@ def position_adjustment_plan_from_review(
     *,
     position_mode: str,
     partial_take_profit_fraction: float = 0.5,
+    trailing_protection_enabled: bool = False,
+    trailing_activate_r: float = 0.8,
+    trailing_lock_r: float = 0.25,
+    trailing_giveback_r: float = 0.55,
+    trailing_target_extension_r: float = 0.75,
     filters_by_symbol: Mapping[str, SymbolExecutionFilters] | None = None,
     require_filters: bool = False,
 ) -> PositionAdjustmentPlanReport:
@@ -233,6 +310,11 @@ def position_adjustment_plan_from_review(
             item,
             position_mode=position_mode,
             partial_take_profit_fraction=partial_take_profit_fraction,
+            trailing_protection_enabled=trailing_protection_enabled,
+            trailing_activate_r=trailing_activate_r,
+            trailing_lock_r=trailing_lock_r,
+            trailing_giveback_r=trailing_giveback_r,
+            trailing_target_extension_r=trailing_target_extension_r,
             filters=filters_by_symbol.get(item.symbol.upper()) if filters_by_symbol else None,
             require_filters=require_filters,
         )
@@ -397,6 +479,8 @@ def confirmation_token(plan_report: PositionAdjustmentPlanReport) -> str:
                         _number(action.quantity),
                         str(action.position_side or ""),
                         str(action.reduce_only),
+                        _number(action.stop_price or 0.0),
+                        _number(action.target_price or 0.0),
                         ",".join(action.reason_codes),
                         str(item.review_item.matching_intent_event_id or ""),
                         _number(item.review_item.position_amt),
@@ -535,6 +619,8 @@ def _lifecycle_decision(
             return "close_ready"
         if plan.order_plan.action == "partial_take_profit":
             return "reduce"
+        if plan.order_plan.action == "trail_protective_orders":
+            return "trail_ready"
     return "blocked"
 
 
@@ -565,6 +651,8 @@ def _exchange_filter_state(
         return "failed"
     if plan and plan.order_plan and "quantity_filter_checked" in plan.order_plan.reason_codes:
         return "checked"
+    if plan and plan.order_plan and "price_filter_checked" in plan.order_plan.reason_codes:
+        return "checked"
     if filters is not None:
         return "checked"
     return "not_required"
@@ -575,6 +663,11 @@ def _plan_for_item(
     *,
     position_mode: str,
     partial_take_profit_fraction: float,
+    trailing_protection_enabled: bool,
+    trailing_activate_r: float,
+    trailing_lock_r: float,
+    trailing_giveback_r: float,
+    trailing_target_extension_r: float,
     filters: SymbolExecutionFilters | None,
     require_filters: bool,
 ) -> PositionAdjustmentPlanItem | None:
@@ -585,6 +678,17 @@ def _plan_for_item(
             reasons=["zero_position_amount"],
         )
     if item.recommendation == "trail_or_reduce":
+        if trailing_protection_enabled:
+            return _trailing_protection_plan(
+                item,
+                position_mode=position_mode,
+                activate_r=trailing_activate_r,
+                lock_r=trailing_lock_r,
+                giveback_r=trailing_giveback_r,
+                target_extension_r=trailing_target_extension_r,
+                filters=filters,
+                require_filters=require_filters,
+            )
         return _partial_reduce_plan(
             item,
             position_mode=position_mode,
@@ -606,6 +710,194 @@ def _plan_for_item(
             reasons=["watch_only_recheck_later"],
         )
     return None
+
+
+def _trailing_protection_plan(
+    item: PositionReviewItem,
+    *,
+    position_mode: str,
+    activate_r: float,
+    lock_r: float,
+    giveback_r: float,
+    target_extension_r: float,
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
+) -> PositionAdjustmentPlanItem:
+    if require_filters and filters is None:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=["symbol_filters_missing"],
+        )
+    trail = _trail_prices(
+        item,
+        activate_r=activate_r,
+        lock_r=lock_r,
+        giveback_r=giveback_r,
+        target_extension_r=target_extension_r,
+        filters=filters,
+    )
+    if trail["rejections"]:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=list(trail["rejections"]),
+        )
+    hedge_mode = position_mode.strip().lower() == "hedge"
+    return PositionAdjustmentPlanItem(
+        review_item=item,
+        adjustment_allowed=True,
+        reasons=["trailing_protection_candidate"],
+        order_plan=PositionAdjustmentOrderPlan(
+            symbol=item.symbol,
+            action="trail_protective_orders",
+            side="SELL" if item.position_amt > 0 else "BUY",
+            order_type="ALGO_REPLACE",
+            quantity=abs(item.position_amt),
+            position_side=item.position_side if hedge_mode else None,
+            reduce_only=None,
+            stop_price=trail["stop_price"],
+            target_price=trail["target_price"],
+            cancel_algo_orders=[dict(order) for order in item.algo_orders],
+            reason_codes=_dedupe(
+                [
+                    "trailing_protection",
+                    *trail["reason_codes"],
+                    *item.reasons,
+                ]
+            ),
+            source_recommendation=item.recommendation,
+            expected_remaining_position_amt=item.position_amt,
+        ),
+    )
+
+
+def _trail_prices(
+    item: PositionReviewItem,
+    *,
+    activate_r: float,
+    lock_r: float,
+    giveback_r: float,
+    target_extension_r: float,
+    filters: SymbolExecutionFilters | None,
+) -> dict[str, Any]:
+    entry = _positive_float(item.entry_price)
+    mark = _positive_float(item.mark_price)
+    original_stop = _positive_float(item.stop_price)
+    original_target = _positive_float(item.target_price)
+    side = _position_direction(item)
+    current_stop, current_target = _current_protective_prices(item, side=side)
+    stop = current_stop or original_stop
+    target = current_target or original_target
+    rejections: list[str] = []
+    reason_codes: list[str] = []
+    if side is None:
+        rejections.append("position_side_unknown")
+    if entry is None:
+        rejections.append("missing_entry_price")
+    if mark is None:
+        rejections.append("missing_mark_price")
+    if stop is None:
+        rejections.append("missing_stop_price")
+    if target is None:
+        rejections.append("missing_target_price")
+    if item.algo_protection_count < 2:
+        rejections.append("protective_orders_incomplete")
+    if rejections:
+        return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
+
+    assert side is not None
+    assert entry is not None
+    assert mark is not None
+    assert stop is not None
+    assert target is not None
+    risk_distance = abs(entry - (original_stop or stop))
+    if risk_distance <= 0:
+        rejections.append("invalid_original_stop_distance")
+        return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
+    signed_move = mark - entry if side == "LONG" else entry - mark
+    current_r = signed_move / risk_distance
+    if current_r < max(activate_r, 0.0):
+        rejections.append("trailing_activation_r_not_reached")
+    if current_r <= 0:
+        rejections.append("position_not_in_profit")
+    if rejections:
+        return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
+
+    lock_r = max(lock_r, 0.0)
+    giveback_r = max(giveback_r, 0.0)
+    target_extension_r = max(target_extension_r, 0.0)
+    if side == "LONG":
+        candidate_stop = max(stop, entry + lock_r * risk_distance, mark - giveback_r * risk_distance)
+        candidate_target = max(target, mark + target_extension_r * risk_distance)
+    else:
+        candidate_stop = min(stop, entry - lock_r * risk_distance, mark + giveback_r * risk_distance)
+        candidate_target = min(target, mark - target_extension_r * risk_distance)
+
+    candidate_stop = _round_price(
+        candidate_stop,
+        filters.tick_size if filters is not None else None,
+        up=side == "SHORT",
+    )
+    candidate_target = _round_price(
+        candidate_target,
+        filters.tick_size if filters is not None else None,
+        up=side == "LONG",
+    )
+    if filters is not None:
+        reason_codes.append("price_filter_checked")
+    if side == "LONG":
+        if candidate_stop <= stop:
+            rejections.append("trailing_stop_not_improved")
+        if not (candidate_stop < mark < candidate_target):
+            rejections.append("invalid_long_trailing_geometry")
+    else:
+        if candidate_stop >= stop:
+            rejections.append("trailing_stop_not_improved")
+        if not (candidate_target < mark < candidate_stop):
+            rejections.append("invalid_short_trailing_geometry")
+    if rejections:
+        return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
+    reason_codes.extend(
+        [
+            f"trailing_current_r:{round(current_r, 4)}",
+            f"trailing_lock_r:{round(lock_r, 4)}",
+            f"trailing_giveback_r:{round(giveback_r, 4)}",
+            f"target_extension_r:{round(target_extension_r, 4)}",
+        ]
+    )
+    return {
+        "stop_price": float(candidate_stop),
+        "target_price": float(candidate_target),
+        "reason_codes": reason_codes,
+        "rejections": [],
+    }
+
+
+def _position_direction(item: PositionReviewItem) -> str | None:
+    side = str(item.position_side or "").upper()
+    if side in {"LONG", "SHORT"}:
+        return side
+    if item.position_amt > 0:
+        return "LONG"
+    if item.position_amt < 0:
+        return "SHORT"
+    return None
+
+
+def _current_protective_prices(item: PositionReviewItem, *, side: str | None) -> tuple[float | None, float | None]:
+    stop_price = None
+    target_price = None
+    for order in item.algo_orders:
+        order_type = str(order.get("type") or order.get("orderType") or "").upper()
+        trigger = _positive_float(order.get("triggerPrice") or order.get("stopPrice"))
+        if trigger is None:
+            continue
+        if "TAKE_PROFIT" in order_type:
+            target_price = trigger
+        elif "STOP" in order_type:
+            stop_price = trigger
+    return stop_price, target_price
 
 
 def _partial_reduce_plan(
@@ -813,15 +1105,18 @@ def _execute_plan_item(
     error: dict[str, Any] | None = None
     status = "position_adjustment_submitted"
     try:
-        response = client.new_order(
-            symbol=order_plan.symbol,
-            side=order_plan.side,
-            order_type=order_plan.order_type,
-            quantity=order_plan.quantity,
-            reduce_only=bool(order_plan.reduce_only),
-            position_side=order_plan.position_side,
-            new_client_order_id=_client_order_id(order_plan.symbol, checked_at, action=order_plan.action),
-        )
+        if order_plan.action == "trail_protective_orders":
+            response = _replace_protective_orders(client, order_plan=order_plan, checked_at=checked_at)
+        else:
+            response = client.new_order(
+                symbol=order_plan.symbol,
+                side=order_plan.side,
+                order_type=order_plan.order_type,
+                quantity=order_plan.quantity,
+                reduce_only=bool(order_plan.reduce_only),
+                position_side=order_plan.position_side,
+                new_client_order_id=_client_order_id(order_plan.symbol, checked_at, action=order_plan.action),
+            )
     except BinanceSignedError as exc:
         status = "position_adjustment_failed"
         error = {
@@ -849,6 +1144,13 @@ def _execute_plan_item(
                 "endpoint": "/fapi/v2/positionRisk",
                 "code": None,
                 "message": "post-adjustment position amount did not reach expected remaining size",
+            }
+        elif order_plan.action == "trail_protective_orders" and _protective_replace_needs_attention(response):
+            status = "position_adjustment_submitted_cleanup_deferred"
+            error = {
+                "endpoint": "/fapi/v1/algoOrder",
+                "code": None,
+                "message": "protective order replacement needs follow-up",
             }
         elif order_plan.action == "full_close":
             cleanup_status, cancel_response, cleanup_error = _cancel_algo_orders_after_full_close(client, order_plan)
@@ -895,6 +1197,100 @@ def _execute_plan_item(
     )
 
 
+def _replace_protective_orders(
+    client: BinanceFuturesSignedClient,
+    *,
+    order_plan: PositionAdjustmentOrderPlan,
+    checked_at: str,
+) -> dict[str, Any]:
+    if order_plan.stop_price is None or order_plan.target_price is None:
+        raise ValueError("trail protective order plan requires stop and target prices")
+    stop_response = client.new_algo_order(
+        symbol=order_plan.symbol,
+        side=order_plan.side,
+        order_type="STOP_MARKET",
+        stop_price=order_plan.stop_price,
+        close_position=True,
+        position_side=order_plan.position_side,
+        client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="trail-sl"),
+    )
+    try:
+        target_response = client.new_algo_order(
+            symbol=order_plan.symbol,
+            side=order_plan.side,
+            order_type="TAKE_PROFIT_MARKET",
+            stop_price=order_plan.target_price,
+            close_position=True,
+            position_side=order_plan.position_side,
+            client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="trail-tp"),
+        )
+    except BinanceSignedError as exc:
+        return {
+            "stop_loss_order": stop_response,
+            "take_profit_error": _signed_error_payload(exc),
+            "cancel_replaced_algo_orders": [],
+        }
+    cancel_responses = _cancel_replaced_algo_orders(client, order_plan)
+    return {
+        "stop_loss_order": stop_response,
+        "take_profit_order": target_response,
+        "cancel_replaced_algo_orders": cancel_responses,
+    }
+
+
+def _cancel_replaced_algo_orders(
+    client: BinanceFuturesSignedClient,
+    order_plan: PositionAdjustmentOrderPlan,
+) -> list[dict[str, Any]]:
+    responses: list[dict[str, Any]] = []
+    for order in order_plan.cancel_algo_orders:
+        if not _same_side_algo_order(order, order_plan=order_plan):
+            continue
+        algo_id = order.get("algoId")
+        client_algo_id = order.get("clientAlgoId") or order.get("clientAlgoID")
+        if algo_id is None and not client_algo_id:
+            responses.append({"skipped": True, "reason": "missing_algo_identifier", "order": dict(order)})
+            continue
+        try:
+            responses.append(
+                client.cancel_algo_order(
+                    symbol=order_plan.symbol,
+                    algo_id=algo_id,
+                    client_algo_id=str(client_algo_id) if client_algo_id else None,
+                )
+            )
+        except BinanceSignedError as exc:
+            responses.append({"error": _signed_error_payload(exc), "order": dict(order)})
+    return responses
+
+
+def _protective_replace_needs_attention(response: Mapping[str, Any]) -> bool:
+    if "take_profit_error" in response:
+        return True
+    for item in response.get("cancel_replaced_algo_orders") or []:
+        if isinstance(item, Mapping) and ("error" in item or item.get("skipped")):
+            return True
+    return False
+
+
+def _signed_error_payload(exc: BinanceSignedError) -> dict[str, Any]:
+    return {
+        "endpoint": exc.endpoint,
+        "code": exc.binance_code,
+        "message": exc.binance_message,
+    }
+
+
+def _same_side_algo_order(order: Mapping[str, Any], *, order_plan: PositionAdjustmentOrderPlan) -> bool:
+    symbol = str(order.get("symbol") or "").upper()
+    if symbol and symbol != order_plan.symbol.upper():
+        return False
+    position_side = str(order.get("positionSide") or "").upper()
+    if order_plan.position_side and position_side and position_side != order_plan.position_side.upper():
+        return False
+    return True
+
+
 def _execution_intent(
     config: AppConfig,
     *,
@@ -907,8 +1303,8 @@ def _execution_intent(
         quantity=order_plan.quantity,
         notional_usdt=0.0,
         entry_price=0.0,
-        stop_price=0.0,
-        target_price=0.0,
+        stop_price=order_plan.stop_price or 0.0,
+        target_price=order_plan.target_price or 0.0,
         leverage=int(float(config.get("BFA_MAX_LEVERAGE"))),
         mode=config.get("BFA_MODE"),
         decided_at=checked_at,
@@ -1012,8 +1408,17 @@ def _matching_position_amount(
 
 def _client_order_id(symbol: str, checked_at: str, *, action: str) -> str:
     cleaned_time = "".join(ch for ch in checked_at if ch.isdigit())
-    prefix = "bfa-adj-part" if action == "partial_take_profit" else "bfa-adj-close"
+    prefixes = {
+        "partial_take_profit": "bfa-adj-part",
+        "trail_protective_orders": "bfa-adj-trail",
+    }
+    prefix = prefixes.get(action, "bfa-adj-close")
     return f"{prefix}-{symbol.lower()}-{cleaned_time}"[:36]
+
+
+def _client_algo_id(symbol: str, checked_at: str, *, action: str) -> str:
+    cleaned_time = "".join(ch for ch in checked_at if ch.isdigit())
+    return f"bfa-{action}-{symbol.lower()}-{cleaned_time}"[:36]
 
 
 def _truthy(value: str) -> bool:
@@ -1033,11 +1438,25 @@ def _number(value: float) -> str:
     return format(float(value), "f").rstrip("0").rstrip(".")
 
 
+def _positive_float(value: Any) -> float | None:
+    parsed = _float_or_default(value, 0.0)
+    return parsed if parsed > 0 else None
+
+
 def _float_or_default(value: Any, default: float) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _round_price(value: float, increment: Decimal | None, *, up: bool) -> Decimal:
+    decimal_value = Decimal(str(value))
+    if increment is None or increment <= 0:
+        return decimal_value
+    rounding = ROUND_UP if up else ROUND_DOWN
+    units = (decimal_value / increment).to_integral_value(rounding=rounding)
+    return units * increment
 
 
 def _dedupe(values: list[str]) -> list[str]:

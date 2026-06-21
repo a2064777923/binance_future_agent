@@ -6,6 +6,7 @@ from pathlib import Path
 
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
+from bfa.execution.binance_client import BinanceSignedError
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.ops.live_status import LiveStatusReport, OpenAiBackoffStatus, ProtectiveEvidence
 from bfa.ops.position_adjustment import (
@@ -49,14 +50,20 @@ class FakeSignedClient:
         close_sets_position_zero=False,
         partial_reduce_sets_expected=True,
         cross_side_algo_orders=False,
+        fail_take_profit_algo=False,
+        fail_cancel_algo=False,
     ):
         self.mark_price = mark_price
         self.closed = False
         self.close_sets_position_zero = close_sets_position_zero
         self.partial_reduce_sets_expected = partial_reduce_sets_expected
         self.cross_side_algo_orders = cross_side_algo_orders
+        self.fail_take_profit_algo = fail_take_profit_algo
+        self.fail_cancel_algo = fail_cancel_algo
         self.position_amount = 0.2
         self.orders = []
+        self.algo_orders = []
+        self.cancelled_algo_orders = []
         self.cancelled_algo_symbols = []
 
     def account(self):
@@ -80,8 +87,22 @@ class FakeSignedClient:
 
     def open_algo_orders(self, symbol=None):
         orders = [
-            {"symbol": "BTCUSDT", "positionSide": "LONG"},
-            {"symbol": "BTCUSDT", "positionSide": "LONG"},
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "LONG",
+                "type": "STOP_MARKET",
+                "triggerPrice": "96",
+                "algoId": 11,
+                "clientAlgoId": "old-sl",
+            },
+            {
+                "symbol": "BTCUSDT",
+                "positionSide": "LONG",
+                "type": "TAKE_PROFIT_MARKET",
+                "triggerPrice": "108",
+                "algoId": 12,
+                "clientAlgoId": "old-tp",
+            },
         ]
         if self.cross_side_algo_orders:
             orders.append({"symbol": "BTCUSDT", "positionSide": "SHORT"})
@@ -95,6 +116,32 @@ class FakeSignedClient:
         elif kwargs.get("quantity") == 0.1 and self.partial_reduce_sets_expected:
             self.position_amount = 0.1
         return {"orderId": len(self.orders), "symbol": kwargs["symbol"], "side": kwargs["side"]}
+
+    def new_algo_order(self, **kwargs):
+        self.algo_orders.append(kwargs)
+        if self.fail_take_profit_algo and kwargs.get("order_type") == "TAKE_PROFIT_MARKET":
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/algoOrder",
+                params={},
+                status_code=400,
+                binance_code=-2019,
+                binance_message="synthetic take profit failure",
+                headers={},
+            )
+        return {"algoId": 100 + len(self.algo_orders), **kwargs}
+
+    def cancel_algo_order(self, **kwargs):
+        self.cancelled_algo_orders.append(kwargs)
+        if self.fail_cancel_algo:
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/algoOrder",
+                params={},
+                status_code=400,
+                binance_code=-2011,
+                binance_message="synthetic cancel failure",
+                headers={},
+            )
+        return {"status": "CANCELED", **kwargs}
 
     def cancel_all_open_algo_orders(self, symbol):
         self.cancelled_algo_symbols.append(symbol)
@@ -182,6 +229,47 @@ class PositionAdjustmentTests(unittest.TestCase):
         self.assertEqual(order_plan.quantity, 0.1)
         self.assertEqual(order_plan.position_side, "LONG")
         self.assertFalse(order_plan.reduce_only)
+
+    def test_profitable_position_can_plan_trailing_protective_orders(self):
+        adjustment = position_adjustment_plan_from_review(
+            self.review(mark_price=107),
+            position_mode="hedge",
+            trailing_protection_enabled=True,
+            filters_by_symbol={
+                "BTCUSDT": SymbolExecutionFilters(
+                    symbol="BTCUSDT",
+                    tick_size=Decimal("0.1"),
+                    step_size=Decimal("0.01"),
+                    min_qty=Decimal("0.01"),
+                    min_notional=Decimal("5"),
+                )
+            },
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_ready")
+        self.assertTrue(adjustment.adjustment_allowed)
+        order_plan = adjustment.plans[0].order_plan
+        self.assertEqual(order_plan.action, "trail_protective_orders")
+        self.assertEqual(order_plan.side, "SELL")
+        self.assertEqual(order_plan.position_side, "LONG")
+        self.assertGreater(order_plan.stop_price, 100)
+        self.assertGreater(order_plan.target_price, 108)
+        self.assertEqual(len(order_plan.cancel_algo_orders), 2)
+        self.assertIn("price_filter_checked", order_plan.reason_codes)
+        self.assertEqual(adjustment.diagnostics[0].lifecycle_decision, "trail_ready")
+
+    def test_trailing_protection_blocks_before_profit_activation(self):
+        adjustment = position_adjustment_plan_from_review(
+            self.review(mark_price=104),
+            position_mode="hedge",
+            trailing_protection_enabled=True,
+            trailing_activate_r=1.2,
+            filters_by_symbol={"BTCUSDT": SymbolExecutionFilters(symbol="BTCUSDT", tick_size=Decimal("0.1"))},
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_blocked")
+        self.assertFalse(adjustment.adjustment_allowed)
+        self.assertIn("trailing_activation_r_not_reached", adjustment.plans[0].reasons)
 
     def test_partial_take_profit_quantity_respects_step_size(self):
         adjustment = position_adjustment_plan_from_review(
@@ -482,6 +570,113 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
         self.assertEqual(fake.cancelled_algo_symbols, [])
         self.assertGreaterEqual(report.executions[0].persisted["order_intent"], 1)
         self.assertAlmostEqual(report.executions[0].post_order_position_amt, 0.1)
+
+    def test_executes_trailing_protective_order_replacement_with_matching_token(self):
+        fake = FakeSignedClient(mark_price="107")
+        config = load_config(
+            env={
+                "BFA_MODE": "live",
+                "BFA_POSITION_MODE": "hedge",
+                "BFA_TRAILING_PROTECTION_ENABLED": "true",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            }
+        )
+        preview = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(fake.orders, [])
+        self.assertEqual([order["order_type"] for order in fake.algo_orders], ["STOP_MARKET", "TAKE_PROFIT_MARKET"])
+        self.assertEqual(fake.algo_orders[0]["side"], "SELL")
+        self.assertGreater(fake.algo_orders[0]["stop_price"], 100)
+        self.assertGreater(fake.algo_orders[1]["stop_price"], 108)
+        self.assertEqual(len(fake.cancelled_algo_orders), 2)
+        self.assertEqual(report.executions[0].order_plan.action, "trail_protective_orders")
+        self.assertAlmostEqual(report.executions[0].post_order_position_amt, 0.2)
+
+    def test_trailing_replacement_defers_cleanup_when_take_profit_order_fails_after_stop(self):
+        fake = FakeSignedClient(mark_price="107", fail_take_profit_algo=True)
+        config = load_config(
+            env={
+                "BFA_MODE": "live",
+                "BFA_POSITION_MODE": "hedge",
+                "BFA_TRAILING_PROTECTION_ENABLED": "true",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            }
+        )
+        preview = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted_cleanup_deferred")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(len(fake.algo_orders), 2)
+        self.assertEqual(fake.algo_orders[0]["order_type"], "STOP_MARKET")
+        self.assertEqual(report.executions[0].error["message"], "protective order replacement needs follow-up")
+        self.assertIn("take_profit_error", report.executions[0].order_response)
+
+    def test_trailing_replacement_defers_cleanup_when_old_algo_cancel_fails(self):
+        fake = FakeSignedClient(mark_price="107", fail_cancel_algo=True)
+        config = load_config(
+            env={
+                "BFA_MODE": "live",
+                "BFA_POSITION_MODE": "hedge",
+                "BFA_TRAILING_PROTECTION_ENABLED": "true",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            }
+        )
+        preview = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted_cleanup_deferred")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(len(fake.algo_orders), 2)
+        self.assertEqual(len(fake.cancelled_algo_orders), 2)
+        self.assertEqual(report.executions[0].error["message"], "protective order replacement needs follow-up")
+        cancel_results = report.executions[0].order_response["cancel_replaced_algo_orders"]
+        self.assertTrue(all("error" in item for item in cancel_results))
 
     def test_partial_reduce_defers_cleanup_when_post_amount_does_not_reduce_enough(self):
         fake = FakeSignedClient(mark_price="107", partial_reduce_sets_expected=False)

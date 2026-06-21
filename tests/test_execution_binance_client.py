@@ -125,6 +125,27 @@ class BinanceSignedClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.cancel_order(symbol="BTCUSDT")
 
+    def test_cancel_algo_order_uses_delete_algo_order_endpoint(self):
+        transport = FakeSignedTransport(response=(200, {"status": "CANCELED"}, {}))
+        client = self.client(transport)
+
+        response = client.cancel_algo_order(symbol="BTCUSDT", client_algo_id="bfa-test-sl")
+
+        call = transport.calls[0]
+        parsed = urlparse(call["url"])
+        query = parse_qs(parsed.query)
+        self.assertEqual(response["status"], "CANCELED")
+        self.assertEqual(call["method"], "DELETE")
+        self.assertEqual(parsed.path, "/fapi/v1/algoOrder")
+        self.assertEqual(query["clientAlgoId"], ["bfa-test-sl"])
+        self.assertIn("signature", query)
+
+    def test_cancel_algo_order_requires_order_identifier(self):
+        client = self.client(FakeSignedTransport())
+
+        with self.assertRaises(ValueError):
+            client.cancel_algo_order(symbol="BTCUSDT")
+
     def test_cancel_all_open_algo_orders_uses_delete_algo_endpoint(self):
         transport = FakeSignedTransport(response=(200, {"code": 200, "msg": "success"}, {}))
         client = self.client(transport)

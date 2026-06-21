@@ -51,6 +51,11 @@ class AiSchemaTests(unittest.TestCase):
                     "mention_count": 2,
                     "quote_volume": 5_000_000,
                     "open_interest_change_percent": 7.5,
+                    "spike_reversal_signal": "short",
+                    "spike_wick_percent": 3.3,
+                    "spike_reversal_entry_price": 100.2,
+                    "spike_reversal_stop_price": 103.65,
+                    "spike_reversal_target_price": 98.1,
                     "ignored_extra": "drop-me",
                 },
             },
@@ -63,6 +68,8 @@ class AiSchemaTests(unittest.TestCase):
         self.assertEqual(payload["candidate"]["symbol"], "BTCUSDT")
         self.assertEqual(payload["risk_limits"]["max_position_notional_usdt"], 20)
         self.assertEqual(payload["candidate"]["features"]["open_interest_change_percent"], 7.5)
+        self.assertEqual(payload["candidate"]["features"]["spike_reversal_signal"], "short")
+        self.assertEqual(payload["candidate"]["features"]["spike_reversal_stop_price"], 103.65)
         self.assertAlmostEqual(payload["risk_limits"]["max_position_margin_usdt"], 20 / 3)
         self.assertNotIn("OPENAI_API_KEY", payload["candidate"])
         self.assertNotIn("ignored_extra", payload["candidate"]["features"])

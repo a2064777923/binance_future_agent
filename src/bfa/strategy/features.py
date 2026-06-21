@@ -36,6 +36,12 @@ class SymbolFeatures:
     kline_micro_momentum_percent: float | None = None
     kline_close_position_percent: float | None = None
     kline_quote_volume_change_percent: float | None = None
+    spike_reversal_signal: str | None = None
+    spike_wick_percent: float | None = None
+    spike_wick_to_body_ratio: float | None = None
+    spike_reversal_entry_price: float | None = None
+    spike_reversal_stop_price: float | None = None
+    spike_reversal_target_price: float | None = None
     support_price: float | None = None
     resistance_price: float | None = None
     vwap: float | None = None
@@ -79,6 +85,12 @@ class SymbolFeatures:
             "kline_micro_momentum_percent": self.kline_micro_momentum_percent,
             "kline_close_position_percent": self.kline_close_position_percent,
             "kline_quote_volume_change_percent": self.kline_quote_volume_change_percent,
+            "spike_reversal_signal": self.spike_reversal_signal,
+            "spike_wick_percent": self.spike_wick_percent,
+            "spike_wick_to_body_ratio": self.spike_wick_to_body_ratio,
+            "spike_reversal_entry_price": self.spike_reversal_entry_price,
+            "spike_reversal_stop_price": self.spike_reversal_stop_price,
+            "spike_reversal_target_price": self.spike_reversal_target_price,
             "support_price": self.support_price,
             "resistance_price": self.resistance_price,
             "vwap": self.vwap,
@@ -98,7 +110,13 @@ class SymbolFeatures:
         }
 
 
-def extract_features(replay_packet: Mapping[str, Any]) -> dict[str, SymbolFeatures]:
+def extract_features(
+    replay_packet: Mapping[str, Any],
+    *,
+    spike_reversal_enabled: bool = True,
+    spike_min_wick_percent: float = 0.8,
+    spike_min_wick_to_body_ratio: float = 1.8,
+) -> dict[str, SymbolFeatures]:
     features: dict[str, SymbolFeatures] = {}
     for record in replay_packet.get("records", []):
         if not isinstance(record, Mapping):
@@ -108,7 +126,14 @@ def extract_features(replay_packet: Mapping[str, Any]) -> dict[str, SymbolFeatur
         if event_type == "narrative":
             _apply_narrative(features, record, payload)
         elif event_type == "market_snapshot":
-            _apply_market(features, record, payload)
+            _apply_market(
+                features,
+                record,
+                payload,
+                spike_reversal_enabled=spike_reversal_enabled,
+                spike_min_wick_percent=spike_min_wick_percent,
+                spike_min_wick_to_body_ratio=spike_min_wick_to_body_ratio,
+            )
     for item in features.values():
         _set_min_executable_notional(item)
         _add_missing_feature_notes(item)
@@ -140,6 +165,10 @@ def _apply_market(
     features: dict[str, SymbolFeatures],
     record: Mapping[str, Any],
     payload: Mapping[str, Any],
+    *,
+    spike_reversal_enabled: bool,
+    spike_min_wick_percent: float,
+    spike_min_wick_to_body_ratio: float,
 ) -> None:
     symbol = str(record.get("symbol") or payload.get("symbol") or "").upper()
     if not symbol:
@@ -166,7 +195,13 @@ def _apply_market(
     elif "funding_rate" in snapshot_type:
         item.funding_rate = _number(snapshot_payload.get("funding_rate"))
     elif "kline" in snapshot_type:
-        _apply_kline(item, snapshot_payload)
+        _apply_kline(
+            item,
+            snapshot_payload,
+            spike_reversal_enabled=spike_reversal_enabled,
+            spike_min_wick_percent=spike_min_wick_percent,
+            spike_min_wick_to_body_ratio=spike_min_wick_to_body_ratio,
+        )
     elif "exchange_symbol" in snapshot_type:
         _apply_execution_filters(item, snapshot_payload)
 
@@ -192,7 +227,14 @@ def _apply_taker_flow(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
         item.taker_buy_sell_ratio_change = ratio - previous
 
 
-def _apply_kline(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
+def _apply_kline(
+    item: SymbolFeatures,
+    payload: Mapping[str, Any],
+    *,
+    spike_reversal_enabled: bool,
+    spike_min_wick_percent: float,
+    spike_min_wick_to_body_ratio: float,
+) -> None:
     open_price = _number(payload.get("open"))
     high = _number(payload.get("high"))
     low = _number(payload.get("low"))
@@ -253,8 +295,67 @@ def _apply_kline(item: SymbolFeatures, payload: Mapping[str, Any]) -> None:
         points.append(point)
         setattr(item, "_kline_points", points)
         _apply_indicator_snapshot(item, points)
+        if spike_reversal_enabled:
+            _apply_spike_reversal_signal(
+                item,
+                point,
+                points,
+                min_wick_percent=spike_min_wick_percent,
+                min_wick_to_body_ratio=spike_min_wick_to_body_ratio,
+            )
 
     item.reference_price = close
+
+
+def _apply_spike_reversal_signal(
+    item: SymbolFeatures,
+    point: KlinePoint,
+    points: list[KlinePoint],
+    *,
+    min_wick_percent: float,
+    min_wick_to_body_ratio: float,
+) -> None:
+    reference = point.close
+    if reference <= 0:
+        return
+    body = abs(point.close - point.open)
+    body = max(body, reference * 0.0005)
+    upper_wick = max(point.high - max(point.open, point.close), 0.0)
+    lower_wick = max(min(point.open, point.close) - point.low, 0.0)
+    mean_range_percent = item.kline_range_mean_percent
+    current_range_percent = item.kline_range_percent
+    volatility_expanded = (
+        mean_range_percent is not None
+        and current_range_percent is not None
+        and current_range_percent >= max(mean_range_percent * 1.35, mean_range_percent + 0.25)
+    )
+    upper_percent = upper_wick / reference * 100.0
+    lower_percent = lower_wick / reference * 100.0
+    upper_ratio = upper_wick / body
+    lower_ratio = lower_wick / body
+    if (
+        upper_percent >= min_wick_percent
+        and upper_ratio >= min_wick_to_body_ratio
+        and (volatility_expanded or len(points) < 4)
+    ):
+        item.spike_reversal_signal = "short"
+        item.spike_wick_percent = upper_percent
+        item.spike_wick_to_body_ratio = upper_ratio
+        item.spike_reversal_entry_price = reference
+        item.spike_reversal_stop_price = point.high * 1.0015
+        item.spike_reversal_target_price = max(point.low, reference - upper_wick * 0.65)
+        return
+    if (
+        lower_percent >= min_wick_percent
+        and lower_ratio >= min_wick_to_body_ratio
+        and (volatility_expanded or len(points) < 4)
+    ):
+        item.spike_reversal_signal = "long"
+        item.spike_wick_percent = lower_percent
+        item.spike_wick_to_body_ratio = lower_ratio
+        item.spike_reversal_entry_price = reference
+        item.spike_reversal_stop_price = point.low * 0.9985
+        item.spike_reversal_target_price = min(point.high, reference + lower_wick * 0.65)
 
 
 def _apply_indicator_snapshot(item: SymbolFeatures, points: list[KlinePoint]) -> None:

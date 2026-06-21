@@ -344,6 +344,7 @@ def _factor_scores(payload: Mapping[str, Any], features: Mapping[str, Any]) -> l
         _taker_flow_factor(features),
         _funding_factor(features),
         _volatility_factor(features),
+        _spike_reversal_factor(features),
         _narrative_factor(payload, features),
         _tradability_factor(features),
     ]
@@ -503,6 +504,25 @@ def _volatility_factor(features: Mapping[str, Any]) -> FactorScore:
     if volatility <= 8.0:
         return FactorScore("volatility", volatility, 2.0, 0.9, direction="both", reasons=["volatility_elevated"])
     return FactorScore("volatility", volatility, -12.0, 0.9, direction="both", reasons=["volatility_excessive"])
+
+
+def _spike_reversal_factor(features: Mapping[str, Any]) -> FactorScore:
+    signal = str(features.get("spike_reversal_signal") or "").lower()
+    wick = _float(features.get("spike_wick_percent"))
+    ratio = _float(features.get("spike_wick_to_body_ratio"))
+    if signal not in {"long", "short"}:
+        return FactorScore("spike_reversal", None, 0.0, 0.8, reasons=["no_spike_reversal_signal"])
+    strength = 8.0
+    if wick is not None:
+        strength += min(wick * 2.0, 8.0)
+    if ratio is not None:
+        strength += min(ratio, 6.0)
+    reasons = [f"spike_reversal_{signal}"]
+    if wick is not None:
+        reasons.append(f"spike_wick_percent:{round(wick, 4)}")
+    if ratio is not None:
+        reasons.append(f"spike_wick_to_body_ratio:{round(ratio, 4)}")
+    return FactorScore("spike_reversal", wick, _clip(strength, 0.0, 22.0), 0.8, direction=signal, reasons=reasons)
 
 
 def _narrative_factor(payload: Mapping[str, Any], features: Mapping[str, Any]) -> FactorScore:
@@ -823,7 +843,22 @@ def _price_basis(
             "min_notional": _float(features.get("min_notional")),
             "min_executable_notional": _float(features.get("min_executable_notional")),
         },
+        "spike_reversal_reference": _spike_reversal_reference(features),
         "missing_inputs": _missing_geometry_inputs(features),
+    }
+
+
+def _spike_reversal_reference(features: Mapping[str, Any]) -> dict[str, Any] | None:
+    signal = str(features.get("spike_reversal_signal") or "").lower()
+    if signal not in {"long", "short"}:
+        return None
+    return {
+        "signal": signal,
+        "wick_percent": _float(features.get("spike_wick_percent")),
+        "wick_to_body_ratio": _float(features.get("spike_wick_to_body_ratio")),
+        "entry_price": _positive_float(features.get("spike_reversal_entry_price")),
+        "stop_price": _positive_float(features.get("spike_reversal_stop_price")),
+        "target_price": _positive_float(features.get("spike_reversal_target_price")),
     }
 
 
@@ -1008,6 +1043,7 @@ def _factor_group(name: str) -> str:
         "taker_flow": "flow",
         "funding": "positioning",
         "volatility": "volatility_range",
+        "spike_reversal": "volatility_range",
         "liquidity": "liquidity_tradability",
         "tradability": "liquidity_tradability",
         "narrative": "narrative_heat",

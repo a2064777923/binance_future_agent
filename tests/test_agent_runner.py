@@ -7,6 +7,7 @@ from pathlib import Path
 from bfa.agent import run_agent_once
 from bfa.ai.client import OpenAIAPIError, OpenAIResponse
 from bfa.config import load_config
+from bfa.event_store.store import EventStore
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
 
@@ -249,6 +250,7 @@ class FakeSignedClient:
         self._open_orders = [] if open_orders is None else open_orders
         self._open_algo_orders = [] if open_algo_orders is None else open_algo_orders
         self.calls = []
+        self.cancelled_algo_orders = []
 
     def position_risk(self):
         return list(self.positions)
@@ -280,6 +282,11 @@ class FakeSignedClient:
     def new_algo_order(self, **kwargs):
         self.calls.append(("new_algo_order", kwargs))
         return {"algoId": len(self.calls), **kwargs}
+
+    def cancel_algo_order(self, **kwargs):
+        self.calls.append(("cancel_algo_order", kwargs))
+        self.cancelled_algo_orders.append(kwargs)
+        return {"status": "CANCELED", **kwargs}
 
 
 class TwoSymbolMarketClient:
@@ -726,6 +733,125 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertIsNone(diagnostics["BTWUSDT"]["order_plan"])
         self.assertIn("manual_position_ignored", diagnostics["BTWUSDT"]["failed_preconditions"])
         self.assertEqual(result.position_adjustment_plan["diagnostics"][1]["symbol"], "BTWUSDT")
+
+    def test_live_run_once_auto_management_trails_profitable_position_before_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                store = EventStore(connection)
+                store.insert_artifact(
+                    "order_intents",
+                    occurred_at="2026-06-20T09:00:00Z",
+                    source="execution.live",
+                    symbol="BTCUSDT",
+                    ref_id="order_intent:BTCUSDT:2026-06-20T09:00:00Z",
+                    payload={
+                        "status": "submitted",
+                        "intent": {
+                            "symbol": "BTCUSDT",
+                            "side": "BUY",
+                            "quantity": 0.2,
+                            "entry_price": 100,
+                            "stop_price": 96,
+                            "target_price": 108,
+                            "leverage": 10,
+                            "metadata": {"hold_time_minutes": 100000},
+                        },
+                    },
+                    event_type="order_intent",
+                )
+            finally:
+                connection.close()
+
+            signed_client = FakeSignedClient(
+                positions=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "positionAmt": "0.2",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "107",
+                        "unRealizedProfit": "1.4",
+                        "notional": "21.4",
+                        "initialMargin": "2.14",
+                        "leverage": "10",
+                    }
+                ],
+                open_algo_orders=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "positionSide": "LONG",
+                        "type": "STOP_MARKET",
+                        "triggerPrice": "96",
+                        "algoId": 11,
+                    },
+                    {
+                        "symbol": "BTCUSDT",
+                        "positionSide": "LONG",
+                        "type": "TAKE_PROFIT_MARKET",
+                        "triggerPrice": "108",
+                        "algoId": 12,
+                    },
+                ],
+            )
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "ETHUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "3",
+                    "BFA_MULTI_POSITION_ENABLED": "true",
+                    "BFA_POSITION_AUTO_MANAGEMENT_ENABLED": "true",
+                    "BFA_TRAILING_PROTECTION_ENABLED": "true",
+                    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "500",
+                    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "400",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+                signed_client=signed_client,
+            )
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                lifecycle = connection.execute(
+                    """
+                    SELECT r.payload_json
+                    FROM risk_state
+                    AS r
+                    JOIN events AS e ON e.id = r.event_id
+                    WHERE e.event_type = 'position_lifecycle_decision'
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+
+        payload = json.loads(lifecycle["payload_json"])
+        self.assertTrue(payload["auto_management"]["executed"])
+        self.assertEqual(payload["auto_management"]["status"], "position_adjustment_submitted")
+        self.assertIn("trail_protective_orders", payload["auto_management"]["allowed_actions"])
+        self.assertEqual(payload["diagnostics"][0]["lifecycle_decision"], "trail_ready")
+        self.assertEqual(len([call for call in signed_client.calls if call[0] == "new_algo_order"]), 2)
+        self.assertEqual(len([call for call in signed_client.calls if call[0] == "cancel_algo_order"]), 2)
+        first_new_algo = next(index for index, call in enumerate(signed_client.calls) if call[0] == "new_algo_order")
+        first_cancel_algo = next(index for index, call in enumerate(signed_client.calls) if call[0] == "cancel_algo_order")
+        self.assertLess(first_new_algo, first_cancel_algo)
+        self.assertEqual(result.position_adjustment_plan["plans"][0]["action"], "trail_protective_orders")
 
     def test_live_run_once_continues_when_multi_position_capacity_exists(self):
         with tempfile.TemporaryDirectory() as tmp:

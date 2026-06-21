@@ -36,7 +36,7 @@ from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
-from bfa.ops.position_adjustment import build_position_adjustment_plan_report
+from bfa.ops.position_adjustment import build_position_adjustment_plan_report, execute_position_adjustment_plan_report
 from bfa.strategy.candidates import StrategyConfig, generate_candidates
 from bfa.strategy.paper_guard import build_forward_paper_guard, guard_config_from_app, merge_guard_profile
 from bfa.strategy.setup import build_trade_setup, persist_trade_setup
@@ -162,11 +162,6 @@ def run_agent_once(
         if mode is RuntimeMode.LIVE
         else None
     )
-    position_adjustment_plan = (
-        _live_position_adjustment_plan(config, db_path=db_path, signed_client=signed_client)
-        if mode is RuntimeMode.LIVE and preflight_risk_state is not None
-        else None
-    )
     if mode is RuntimeMode.LIVE and preflight_risk_state is None:
         return AgentRunResult(
             status="position_risk_failed",
@@ -175,18 +170,33 @@ def run_agent_once(
             validation_errors=["unable to read live position risk"],
             source_health=_pre_collection_source_health(config, reason="position_risk_failed"),
         )
+    market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
+    position_adjustment_plan = (
+        _live_position_adjustment_plan(config, db_path=db_path, signed_client=signed_client, market_client=market)
+        if mode is RuntimeMode.LIVE and preflight_risk_state is not None
+        else None
+    )
     connection = None
     try:
         store = None
         position_lifecycle_event_id = None
+        position_auto_management_execution = None
         if mode is RuntimeMode.LIVE:
             connection = connect(db_path or config.get("BFA_DB_PATH"))
             store = EventStore(connection)
+            position_auto_management_execution = _execute_live_position_auto_management(
+                config,
+                db_path=db_path,
+                signed_client=signed_client,
+                started_at=started_at,
+                adjustment_plan=position_adjustment_plan,
+            )
             position_lifecycle_event_id = _persist_position_lifecycle(
                 store,
                 config=config,
                 started_at=started_at,
                 adjustment_plan=position_adjustment_plan,
+                auto_management_execution=position_auto_management_execution,
             )
 
         preflight_reasons = _live_entry_capacity_blockers(config, preflight_risk_state)
@@ -202,7 +212,6 @@ def run_agent_once(
                 source_health=_pre_collection_source_health(config, reason="entry_capacity_blocked"),
             )
 
-        market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
         scan_symbols, source_health = _agent_scan_symbols_with_health(config, market)
         collector = collector or MarketDataCollector(
             client=market,
@@ -269,6 +278,9 @@ def run_agent_once(
                 top_n=top_n,
                 max_position_notional_usdt=base_sizing.max_position_notional_usdt,
                 paper_guard=paper_guard,
+                spike_reversal_enabled=_truthy(config.get("BFA_SPIKE_REVERSAL_SIGNAL_ENABLED")),
+                spike_min_wick_percent=float(config.get("BFA_SPIKE_REVERSAL_MIN_WICK_PERCENT")),
+                spike_min_wick_to_body_ratio=float(config.get("BFA_SPIKE_REVERSAL_MIN_WICK_TO_BODY_RATIO")),
             ),
         )
         persisted_candidate_count = len(persist_candidates(store, candidates.candidates))
@@ -1137,7 +1149,7 @@ def _quant_fallback_run(
     )
 
 
-def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, signed_client):
+def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, signed_client, market_client=None):
     if signed_client is None:
         return None
     try:
@@ -1146,6 +1158,39 @@ def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, si
             db_path=db_path,
             check_binance=True,
             signed_client=signed_client,
+            market_client=market_client,
+        )
+    except Exception:
+        return None
+
+
+def _execute_live_position_auto_management(
+    config: AppConfig,
+    *,
+    db_path: str | None,
+    signed_client,
+    started_at: str,
+    adjustment_plan,
+):
+    if signed_client is None or adjustment_plan is None:
+        return None
+    if not _truthy(config.get("BFA_POSITION_AUTO_MANAGEMENT_ENABLED")):
+        return None
+    if not adjustment_plan.adjustment_allowed:
+        return None
+    max_actions = _positive_int_or_default(
+        config.get("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE"),
+        1,
+    )
+    try:
+        return execute_position_adjustment_plan_report(
+            config,
+            adjustment_plan,
+            db_path=db_path or config.get("BFA_DB_PATH"),
+            checked_at=started_at,
+            signed_client=signed_client,
+            allowed_actions=("trail_protective_orders",),
+            max_actions=max_actions,
         )
     except Exception:
         return None
@@ -1204,11 +1249,13 @@ def _persist_position_lifecycle(
     config: AppConfig,
     started_at: str,
     adjustment_plan,
+    auto_management_execution=None,
 ) -> int:
     payload = _position_lifecycle_payload(
         config,
         started_at=started_at,
         adjustment_plan=adjustment_plan,
+        auto_management_execution=auto_management_execution,
     )
     return store.insert_artifact(
         "risk_state",
@@ -1226,6 +1273,7 @@ def _position_lifecycle_payload(
     *,
     started_at: str,
     adjustment_plan,
+    auto_management_execution=None,
 ) -> dict[str, Any]:
     diagnostics = [item.to_dict() for item in adjustment_plan.diagnostics] if adjustment_plan is not None else []
     eligible_actions = [
@@ -1233,10 +1281,32 @@ def _position_lifecycle_payload(
         for diagnostic in diagnostics
         if diagnostic.get("order_plan") is not None and not diagnostic.get("manual_symbol")
     ]
+    auto_allowed_actions = {"trail_protective_orders"}
+    auto_eligible_actions = [
+        diagnostic
+        for diagnostic in eligible_actions
+        if (diagnostic.get("order_plan") or {}).get("action") in auto_allowed_actions
+    ]
     auto_management_enabled = _truthy(config.get("BFA_POSITION_AUTO_MANAGEMENT_ENABLED"))
     max_actions = _positive_int_or_default(
         config.get("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE"),
         1,
+    )
+    auto_execution_payload = auto_management_execution.to_dict() if auto_management_execution is not None else None
+    auto_executed = bool(auto_management_execution and auto_management_execution.adjustment_executed)
+    auto_status = (
+        auto_management_execution.status
+        if auto_management_execution is not None
+        else "enabled_no_allowed_action"
+        if auto_management_enabled
+        else "disabled"
+    )
+    auto_reasons = (
+        list(auto_management_execution.reasons)
+        if auto_management_execution is not None
+        else ["auto_management_waiting_for_trailing_action"]
+        if auto_management_enabled
+        else ["auto_management_disabled"]
     )
     return {
         "schema": "bfa_position_lifecycle_decision_v1",
@@ -1250,22 +1320,21 @@ def _position_lifecycle_payload(
             "enabled": auto_management_enabled,
             "max_actions_per_cycle": max_actions,
             "eligible_action_count": len(eligible_actions),
-            "selected_action_count": min(len(eligible_actions), max_actions) if auto_management_enabled else 0,
-            "executed": False,
-            "status": "enabled_preview_only" if auto_management_enabled else "disabled",
-            "reasons": (
-                ["auto_management_execution_deferred"]
-                if auto_management_enabled
-                else ["auto_management_disabled"]
-            ),
+            "auto_eligible_action_count": len(auto_eligible_actions),
+            "selected_action_count": min(len(auto_eligible_actions), max_actions) if auto_management_enabled else 0,
+            "allowed_actions": sorted(auto_allowed_actions),
+            "executed": auto_executed,
+            "status": auto_status,
+            "reasons": auto_reasons,
+            "execution": auto_execution_payload,
         },
         "position_review": _position_review_summary(adjustment_plan),
         "position_adjustment_plan": _position_adjustment_summary(adjustment_plan),
         "diagnostics": diagnostics,
         "read_only_exchange": {
-            "places_orders": False,
-            "cancels_orders": False,
-            "mutates_exchange_state": False,
+            "places_orders": auto_executed,
+            "cancels_orders": auto_executed,
+            "mutates_exchange_state": auto_executed,
             "changes_systemd_state": False,
             "writes_env_files": False,
         },

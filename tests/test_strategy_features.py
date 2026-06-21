@@ -75,6 +75,86 @@ class StrategyFeatureTests(unittest.TestCase):
         self.assertEqual(sol.open_interest, 1125.0)
         self.assertAlmostEqual(sol.open_interest_change_percent, 12.5)
 
+    def test_detects_upper_wick_spike_reversal_reference(self):
+        features = extract_features(
+            {
+                "records": [
+                    {
+                        "id": 1,
+                        "event_type": "market_snapshot",
+                        "occurred_at": "2026-06-19T09:00:00Z",
+                        "symbol": "SOLUSDT",
+                        "ref_id": "kline:SOLUSDT:1",
+                        "payload": {
+                            "event_type": "kline",
+                            "symbol": "SOLUSDT",
+                            "payload": {"open": "100", "high": "101", "low": "99.5", "close": "100", "quote_volume": "1000"},
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "event_type": "market_snapshot",
+                        "occurred_at": "2026-06-19T09:05:00Z",
+                        "symbol": "SOLUSDT",
+                        "ref_id": "kline:SOLUSDT:2",
+                        "payload": {
+                            "event_type": "kline",
+                            "symbol": "SOLUSDT",
+                            "payload": {"open": "100", "high": "103.5", "low": "99.8", "close": "100.2", "quote_volume": "3000"},
+                        },
+                    },
+                ]
+            }
+        )
+
+        sol = features["SOLUSDT"]
+        self.assertEqual(sol.spike_reversal_signal, "short")
+        self.assertGreater(sol.spike_wick_percent, 3.0)
+        self.assertGreater(sol.spike_wick_to_body_ratio, 10)
+        self.assertEqual(sol.spike_reversal_entry_price, 100.2)
+        self.assertGreater(sol.spike_reversal_stop_price, 103.5)
+        self.assertLess(sol.spike_reversal_target_price, 100.2)
+
+    def test_detects_lower_wick_spike_reversal_reference(self):
+        features = extract_features(
+            {
+                "records": [
+                    {
+                        "id": 1,
+                        "event_type": "market_snapshot",
+                        "occurred_at": "2026-06-19T09:00:00Z",
+                        "symbol": "SOLUSDT",
+                        "ref_id": "kline:SOLUSDT:1",
+                        "payload": {
+                            "event_type": "kline",
+                            "symbol": "SOLUSDT",
+                            "payload": {"open": "100", "high": "100.5", "low": "99", "close": "100", "quote_volume": "1000"},
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "event_type": "market_snapshot",
+                        "occurred_at": "2026-06-19T09:05:00Z",
+                        "symbol": "SOLUSDT",
+                        "ref_id": "kline:SOLUSDT:2",
+                        "payload": {
+                            "event_type": "kline",
+                            "symbol": "SOLUSDT",
+                            "payload": {"open": "100", "high": "100.2", "low": "96.5", "close": "99.8", "quote_volume": "3000"},
+                        },
+                    },
+                ]
+            }
+        )
+
+        sol = features["SOLUSDT"]
+        self.assertEqual(sol.spike_reversal_signal, "long")
+        self.assertGreater(sol.spike_wick_percent, 3.0)
+        self.assertGreater(sol.spike_wick_to_body_ratio, 10)
+        self.assertEqual(sol.spike_reversal_entry_price, 99.8)
+        self.assertLess(sol.spike_reversal_stop_price, 96.5)
+        self.assertGreater(sol.spike_reversal_target_price, 99.8)
+
 
 if __name__ == "__main__":
     unittest.main()

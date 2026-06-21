@@ -174,6 +174,22 @@ class BinanceFuturesSignedClient:
             params["origClientOrderId"] = orig_client_order_id
         return self._signed_request("DELETE", "/fapi/v1/order", params)
 
+    def cancel_algo_order(
+        self,
+        *,
+        symbol: str,
+        algo_id: int | str | None = None,
+        client_algo_id: str | None = None,
+    ) -> dict[str, Any]:
+        if algo_id is None and not client_algo_id:
+            raise ValueError("algo_id or client_algo_id is required")
+        params = {"symbol": _symbol(symbol)}
+        if algo_id is not None:
+            params["algoId"] = str(algo_id)
+        if client_algo_id:
+            params["clientAlgoId"] = client_algo_id
+        return self._signed_request("DELETE", "/fapi/v1/algoOrder", params)
+
     def cancel_all_open_algo_orders(self, symbol: str) -> dict[str, Any]:
         return self._signed_request(
             "DELETE",

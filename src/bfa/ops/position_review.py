@@ -24,6 +24,8 @@ class PositionReviewItem:
     reasons: list[str] = field(default_factory=list)
     entry_price: float | None = None
     mark_price: float | None = None
+    stop_price: float | None = None
+    target_price: float | None = None
     unrealized_pnl_usdt: float | None = None
     pnl_percent: float | None = None
     stop_r_multiple: float | None = None
@@ -32,6 +34,7 @@ class PositionReviewItem:
     elapsed_minutes: float | None = None
     hold_time_minutes: int | None = None
     algo_protection_count: int = 0
+    algo_orders: list[dict[str, Any]] = field(default_factory=list)
     matching_intent_event_id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,6 +47,8 @@ class PositionReviewItem:
             "reasons": list(self.reasons),
             "entry_price": self.entry_price,
             "mark_price": self.mark_price,
+            "stop_price": self.stop_price,
+            "target_price": self.target_price,
             "unrealized_pnl_usdt": self.unrealized_pnl_usdt,
             "pnl_percent": self.pnl_percent,
             "stop_r_multiple": self.stop_r_multiple,
@@ -52,6 +57,7 @@ class PositionReviewItem:
             "elapsed_minutes": self.elapsed_minutes,
             "hold_time_minutes": self.hold_time_minutes,
             "algo_protection_count": self.algo_protection_count,
+            "algo_orders": [dict(order) for order in self.algo_orders],
             "matching_intent_event_id": self.matching_intent_event_id,
         }
 
@@ -155,6 +161,8 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
             reasons=["manual_position_ignored"],
             entry_price=position.entry_price,
             mark_price=position.mark_price,
+            stop_price=position.matching_intent.stop_price if position.matching_intent else None,
+            target_price=position.matching_intent.target_price if position.matching_intent else None,
             unrealized_pnl_usdt=position.unrealized_pnl_usdt,
             pnl_percent=metrics["pnl_percent"],
             stop_r_multiple=metrics["stop_r_multiple"],
@@ -163,6 +171,7 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
             elapsed_minutes=position.elapsed_minutes,
             hold_time_minutes=position.matching_intent.hold_time_minutes if position.matching_intent else None,
             algo_protection_count=position.algo_protection_count,
+            algo_orders=[dict(order) for order in position.algo_orders],
             matching_intent_event_id=position.matching_intent.event_id if position.matching_intent else None,
         )
 
@@ -210,6 +219,8 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
         reasons=_dedupe(reasons),
         entry_price=position.entry_price,
         mark_price=position.mark_price,
+        stop_price=position.matching_intent.stop_price if position.matching_intent else None,
+        target_price=position.matching_intent.target_price if position.matching_intent else None,
         unrealized_pnl_usdt=position.unrealized_pnl_usdt,
         pnl_percent=metrics["pnl_percent"],
         stop_r_multiple=metrics["stop_r_multiple"],
@@ -218,6 +229,7 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
         elapsed_minutes=position.elapsed_minutes,
         hold_time_minutes=position.matching_intent.hold_time_minutes if position.matching_intent else None,
         algo_protection_count=position.algo_protection_count,
+        algo_orders=[dict(order) for order in position.algo_orders],
         matching_intent_event_id=position.matching_intent.event_id if position.matching_intent else None,
     )
 

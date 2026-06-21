@@ -110,6 +110,29 @@ class StrategySetupTests(unittest.TestCase):
         self.assertGreater(setup.stop_price, setup.entry_price)
         self.assertLess(setup.target_price, setup.entry_price)
 
+    def test_spike_reversal_factor_and_reference_are_exposed(self):
+        setup = build_trade_setup(
+            self.candidate(
+                spike_reversal_signal="short",
+                spike_wick_percent=3.3,
+                spike_wick_to_body_ratio=12.0,
+                spike_reversal_entry_price=100.2,
+                spike_reversal_stop_price=103.65,
+                spike_reversal_target_price=98.1,
+            ),
+            risk_limits=self.risk_limits(),
+        )
+
+        factor = next(item for item in setup.factor_scores if item.name == "spike_reversal")
+        self.assertEqual(factor.direction, "short")
+        self.assertIn("spike_reversal_short", factor.reasons)
+        reference = setup.price_basis["spike_reversal_reference"]
+        self.assertEqual(reference["signal"], "short")
+        self.assertEqual(reference["entry_price"], 100.2)
+        self.assertEqual(reference["stop_price"], 103.65)
+        self.assertEqual(reference["target_price"], 98.1)
+        self.assertIn("spike_reversal", {item["name"] for item in setup.factor_summary["top_factors"]})
+
     def test_passes_when_factor_edge_is_too_small(self):
         setup = build_trade_setup(
             self.candidate(

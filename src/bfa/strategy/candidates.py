@@ -18,6 +18,9 @@ class StrategyConfig:
     require_market_confirmation: bool = True
     max_position_notional_usdt: float | None = None
     paper_guard: Any | None = None
+    spike_reversal_enabled: bool = True
+    spike_min_wick_percent: float = 0.8
+    spike_min_wick_to_body_ratio: float = 1.8
 
 
 @dataclass(frozen=True)
@@ -80,7 +83,12 @@ def generate_candidates(
     replay_packet: Mapping[str, Any],
     config: StrategyConfig,
 ) -> CandidateGenerationResult:
-    features = extract_features(replay_packet)
+    features = extract_features(
+        replay_packet,
+        spike_reversal_enabled=config.spike_reversal_enabled,
+        spike_min_wick_percent=config.spike_min_wick_percent,
+        spike_min_wick_to_body_ratio=config.spike_min_wick_to_body_ratio,
+    )
     allowed = {symbol.upper() for symbol in config.allowed_symbols}
     candidates: list[CandidateSignal] = []
     rejected: list[RejectedCandidate] = []

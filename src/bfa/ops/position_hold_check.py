@@ -54,6 +54,7 @@ class PositionHoldItem:
     elapsed_minutes: float | None = None
     overdue: bool = False
     algo_protection_count: int = 0
+    algo_orders: list[dict[str, Any]] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,6 +69,7 @@ class PositionHoldItem:
             "elapsed_minutes": self.elapsed_minutes,
             "overdue": self.overdue,
             "algo_protection_count": self.algo_protection_count,
+            "algo_orders": [dict(order) for order in self.algo_orders],
             "reasons": list(self.reasons),
         }
 
@@ -353,7 +355,8 @@ def _position_item(
     amount = _float_or_zero(position.get("positionAmt"))
     position_side = _position_side(position, amount)
     intent = _latest_unclosed_submitted_intent(connection, symbol=symbol, position_side=position_side)
-    protection_count = _matching_algo_order_count(open_algo_orders, symbol=symbol, position_side=position_side)
+    matching_algo_orders = _matching_algo_orders(open_algo_orders, symbol=symbol, position_side=position_side)
+    protection_count = len(matching_algo_orders)
     reasons: list[str] = []
     elapsed: float | None = None
     overdue = False
@@ -379,6 +382,7 @@ def _position_item(
         elapsed_minutes=elapsed,
         overdue=overdue,
         algo_protection_count=protection_count,
+        algo_orders=matching_algo_orders,
         reasons=reasons,
     )
 
@@ -446,7 +450,16 @@ def _matching_algo_order_count(
     symbol: str,
     position_side: str | None,
 ) -> int:
-    count = 0
+    return len(_matching_algo_orders(open_algo_orders, symbol=symbol, position_side=position_side))
+
+
+def _matching_algo_orders(
+    open_algo_orders: list[Any],
+    *,
+    symbol: str,
+    position_side: str | None,
+) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
     for order in open_algo_orders:
         if not isinstance(order, Mapping):
             continue
@@ -455,8 +468,8 @@ def _matching_algo_order_count(
         order_position_side = str(order.get("positionSide") or "").upper()
         if position_side and order_position_side and order_position_side != position_side:
             continue
-        count += 1
-    return count
+        matches.append(dict(order))
+    return matches
 
 
 def _position_side(position: Mapping[str, Any], amount: float) -> str | None:
