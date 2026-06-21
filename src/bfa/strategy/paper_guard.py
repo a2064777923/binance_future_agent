@@ -37,6 +37,11 @@ class GuardGroupStats:
     total_net_pnl_usdt: float
     average_net_pnl_usdt: float
     loss_count: int
+    latest_outcome_at: str | None = None
+    recent_outcome_count: int = 0
+    recent_net_pnl_usdt: float = 0.0
+    decay_weight: float = 1.0
+    guard_strength: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +51,11 @@ class GuardGroupStats:
             "total_net_pnl_usdt": self.total_net_pnl_usdt,
             "average_net_pnl_usdt": self.average_net_pnl_usdt,
             "loss_count": self.loss_count,
+            "latest_outcome_at": self.latest_outcome_at,
+            "recent_outcome_count": self.recent_outcome_count,
+            "recent_net_pnl_usdt": self.recent_net_pnl_usdt,
+            "decay_weight": self.decay_weight,
+            "guard_strength": self.guard_strength,
         }
 
 
@@ -293,6 +303,7 @@ def _join_outcome(outcome: dict[str, Any], signal: dict[str, Any] | None) -> dic
     return {
         "symbol": str(outcome.get("symbol") or (signal or {}).get("symbol") or "").upper(),
         "side": str(outcome.get("side") or (signal or {}).get("side") or "unknown").lower(),
+        "closed_at": str(outcome.get("closed_at") or ""),
         "factor_reasons": factor_reasons,
         "net_pnl_usdt": _float_or_zero(outcome.get("net_pnl_usdt")),
     }
@@ -310,6 +321,7 @@ def _summary(signals: dict[int, dict[str, Any]], outcomes: list[dict[str, Any]])
         "win_rate": _ratio(len(wins), len(outcomes)),
         "total_net_pnl_usdt": round(sum(pnl_values), 8),
         "gross_loss_abs_usdt": round(abs(sum(losses)), 8),
+        "decay_model": "recent_last_3_outcomes_weighted_v1",
     }
 
 
@@ -332,6 +344,9 @@ def _group_stats(name: str, rows: list[dict[str, Any]]) -> GuardGroupStats:
     pnl_values = [_float_or_zero(item.get("net_pnl_usdt")) for item in rows]
     wins = [value for value in pnl_values if value > 0]
     losses = [value for value in pnl_values if value < 0]
+    recent_rows = _recent_rows(rows)
+    recent_net_pnl = sum(_float_or_zero(item.get("net_pnl_usdt")) for item in recent_rows)
+    decay_weight = _decay_weight(rows, recent_rows)
     return GuardGroupStats(
         name=name,
         outcome_count=len(rows),
@@ -339,6 +354,11 @@ def _group_stats(name: str, rows: list[dict[str, Any]]) -> GuardGroupStats:
         total_net_pnl_usdt=round(sum(pnl_values), 8),
         average_net_pnl_usdt=round(_ratio(sum(pnl_values), len(rows)), 8),
         loss_count=len(losses),
+        latest_outcome_at=max((str(item.get("closed_at") or "") for item in rows), default=None) or None,
+        recent_outcome_count=len(recent_rows),
+        recent_net_pnl_usdt=round(recent_net_pnl, 8),
+        decay_weight=decay_weight,
+        guard_strength=round(abs(sum(losses)) * decay_weight, 8),
     )
 
 
@@ -348,6 +368,32 @@ def _loss_block(stats: GuardGroupStats, *, min_outcomes: int, min_loss_usdt: flo
         and stats.total_net_pnl_usdt <= -abs(min_loss_usdt)
         and stats.win_rate <= max_win_rate
     )
+
+
+def _recent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda item: str(item.get("closed_at") or ""))[-min(3, len(rows)) :]
+
+
+def _decay_weight(rows: list[dict[str, Any]], recent_rows: list[dict[str, Any]]) -> float:
+    if not rows:
+        return 0.0
+    recent_loss_abs = abs(
+        sum(
+            _float_or_zero(item.get("net_pnl_usdt"))
+            for item in recent_rows
+            if _float_or_zero(item.get("net_pnl_usdt")) < 0
+        )
+    )
+    total_loss_abs = abs(
+        sum(
+            _float_or_zero(item.get("net_pnl_usdt"))
+            for item in rows
+            if _float_or_zero(item.get("net_pnl_usdt")) < 0
+        )
+    )
+    if total_loss_abs <= 0:
+        return 0.0
+    return round(min(max(recent_loss_abs / total_loss_abs, 0.1), 1.0), 4)
 
 
 def _merged_sequence(left: Any, right: Any) -> list[str]:

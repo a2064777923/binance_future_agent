@@ -355,6 +355,7 @@ def _trade_setup_summary(setup: Mapping[str, Any]) -> dict[str, Any] | None:
         "risk_reward_ratio": setup.get("risk_reward_ratio"),
         "stop_distance_percent": setup.get("stop_distance_percent"),
         "target_distance_percent": setup.get("target_distance_percent"),
+        "factor_summary": _mapping(setup.get("factor_summary")),
         "price_basis": _mapping(setup.get("price_basis")),
         "factor_scores": [_factor_summary(item) for item in _list(setup.get("factor_scores"))],
         "reasons": list(_list(setup.get("reasons"))),

@@ -50,6 +50,7 @@ class AiSchemaTests(unittest.TestCase):
                 "features": {
                     "mention_count": 2,
                     "quote_volume": 5_000_000,
+                    "open_interest_change_percent": 7.5,
                     "ignored_extra": "drop-me",
                 },
             },
@@ -61,6 +62,7 @@ class AiSchemaTests(unittest.TestCase):
 
         self.assertEqual(payload["candidate"]["symbol"], "BTCUSDT")
         self.assertEqual(payload["risk_limits"]["max_position_notional_usdt"], 20)
+        self.assertEqual(payload["candidate"]["features"]["open_interest_change_percent"], 7.5)
         self.assertAlmostEqual(payload["risk_limits"]["max_position_margin_usdt"], 20 / 3)
         self.assertNotIn("OPENAI_API_KEY", payload["candidate"])
         self.assertNotIn("ignored_extra", payload["candidate"]["features"])
@@ -89,6 +91,7 @@ class AiSchemaTests(unittest.TestCase):
                 "notional_usdt": 12.5,
                 "hold_time_minutes": 15,
                 "price_basis": {"model": "expected_market_entry_structure_stop_target_v1"},
+                "factor_summary": {"schema": "bfa_factor_summary_v1", "edge_score": 20},
                 "ignored_extra": "drop-me",
                 "factor_scores": [
                     {
@@ -109,6 +112,7 @@ class AiSchemaTests(unittest.TestCase):
         self.assertEqual(payload["candidate"]["features"]["atr_percent"], 1.2)
         self.assertEqual(payload["candidate"]["features"]["rsi"], 62.0)
         self.assertEqual(payload["quant_setup"]["entry_price"], 100.0)
+        self.assertEqual(payload["quant_setup"]["factor_summary"]["edge_score"], 20)
         self.assertEqual(payload["quant_setup"]["price_basis"]["model"], "expected_market_entry_structure_stop_target_v1")
         self.assertNotIn("ignored_extra", payload["quant_setup"])
         self.assertNotIn("ignored_extra", payload["quant_setup"]["factor_scores"][0])

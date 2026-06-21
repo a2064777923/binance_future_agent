@@ -25,6 +25,7 @@ class SymbolFeatures:
     quote_volume: float | None = None
     open_interest: float | None = None
     open_interest_value: float | None = None
+    open_interest_change_percent: float | None = None
     taker_buy_sell_ratio: float | None = None
     taker_buy_sell_ratio_change: float | None = None
     funding_rate: float | None = None
@@ -67,6 +68,7 @@ class SymbolFeatures:
             "quote_volume": self.quote_volume,
             "open_interest": self.open_interest,
             "open_interest_value": self.open_interest_value,
+            "open_interest_change_percent": self.open_interest_change_percent,
             "taker_buy_sell_ratio": self.taker_buy_sell_ratio,
             "taker_buy_sell_ratio_change": self.taker_buy_sell_ratio_change,
             "funding_rate": self.funding_rate,
@@ -152,9 +154,13 @@ def _apply_market(
         item.price_change_percent = _number(snapshot_payload.get("price_change_percent"))
         item.quote_volume = _number(snapshot_payload.get("quote_volume"))
     elif "open_interest_hist" in snapshot_type:
+        previous = item.open_interest_value
         item.open_interest_value = _number(snapshot_payload.get("sum_open_interest_value"))
+        item.open_interest_change_percent = _percent_change(previous, item.open_interest_value)
     elif "open_interest" in snapshot_type:
+        previous = item.open_interest
         item.open_interest = _number(snapshot_payload.get("open_interest"))
+        item.open_interest_change_percent = _percent_change(previous, item.open_interest)
     elif "taker_buy_sell_volume" in snapshot_type:
         _apply_taker_flow(item, snapshot_payload)
     elif "funding_rate" in snapshot_type:
@@ -293,6 +299,7 @@ def _add_missing_feature_notes(item: SymbolFeatures) -> None:
         "missing_market_confirmation": not item.market_event_ids,
         "missing_price_momentum": item.price_change_percent is None,
         "missing_quote_volume": item.quote_volume is None,
+        "missing_open_interest_change": item.open_interest_change_percent is None,
         "missing_taker_flow": item.taker_buy_sell_ratio is None,
         "missing_funding": item.funding_rate is None,
         "missing_volatility_proxy": item.kline_range_percent is None,
@@ -329,6 +336,12 @@ def _number(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
+
+
+def _percent_change(previous: float | None, current: float | None) -> float | None:
+    if previous is None or current is None or previous <= 0:
+        return None
+    return ((current - previous) / previous) * 100.0
 
 
 def _mapping(value: Any) -> Mapping[str, Any] | None:

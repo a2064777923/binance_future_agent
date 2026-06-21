@@ -105,6 +105,9 @@ class LiveOutcomeLedgerTests(unittest.TestCase):
                 and item["name"] == "SOLUSDT"
                 and not item["applies_changes"]
                 and not item["raises_risk"]
+                and item["sample_sufficient"]
+                and item["recent_outcome_count"] == 2
+                and item["decay_weight"] > 0
                 for item in payload["guard_feedback"]
             )
         )

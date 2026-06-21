@@ -125,6 +125,9 @@ class ForwardPaperGuardTests(unittest.TestCase):
         self.assertTrue(guard.blocks_symbol("btwusdt"))
         self.assertIn("BTWUSDT", guard.symbol_blocks)
         self.assertIn("taker_flow_acceleration", guard.factor_blocks)
+        self.assertEqual(guard.summary["decay_model"], "recent_last_3_outcomes_weighted_v1")
+        self.assertEqual(guard.symbol_blocks["BTWUSDT"].recent_outcome_count, 3)
+        self.assertGreater(guard.symbol_blocks["BTWUSDT"].guard_strength, 0)
         merged = merge_guard_profile({"name": "selective"}, guard)
         self.assertIn("taker_flow_acceleration", merged["blocked_factor_reasons"])
 

@@ -359,6 +359,8 @@ def _rank_groups(
             continue
         pnl_values = [_float_or_zero(item.get("net_pnl_usdt")) for item in group_rows]
         losses = [value for value in pnl_values if value < 0]
+        recent_rows = _recent_rows(group_rows)
+        decay_weight = _decay_weight(group_rows)
         ranked.append(
             {
                 "name": name,
@@ -368,6 +370,12 @@ def _rank_groups(
                 "average_net_pnl_usdt": round(_ratio(sum(pnl_values), len(pnl_values)), 8),
                 "gross_loss_abs_usdt": round(abs(sum(losses)), 8),
                 "loss_count": len(losses),
+                "latest_outcome_at": max((str(item.get("closed_at") or "") for item in group_rows), default=None),
+                "recent_outcome_count": len(recent_rows),
+                "recent_net_pnl_usdt": round(sum(_float_or_zero(item.get("net_pnl_usdt")) for item in recent_rows), 8),
+                "decay_weight": decay_weight,
+                "guard_strength": round(abs(sum(losses)) * decay_weight, 8),
+                "sample_sufficient": len(group_rows) >= min_group_outcomes,
             }
         )
     return sorted(ranked, key=lambda item: (float(item["total_net_pnl_usdt"]), -int(item["outcome_count"]), str(item["name"])))
@@ -396,6 +404,12 @@ def _guard_feedback(groups: dict[str, list[dict[str, Any]]]) -> list[dict[str, A
                     "outcome_count": row["outcome_count"],
                     "total_net_pnl_usdt": row["total_net_pnl_usdt"],
                     "win_rate": row["win_rate"],
+                    "latest_outcome_at": row.get("latest_outcome_at"),
+                    "recent_outcome_count": row.get("recent_outcome_count"),
+                    "recent_net_pnl_usdt": row.get("recent_net_pnl_usdt"),
+                    "decay_weight": row.get("decay_weight"),
+                    "guard_strength": row.get("guard_strength"),
+                    "sample_sufficient": row.get("sample_sufficient"),
                     "applies_changes": False,
                     "raises_risk": False,
                     "reason": "negative_live_outcome_group",
@@ -422,6 +436,33 @@ def _latest(rows: list[dict[str, Any]], *, latest_limit: int) -> list[dict[str, 
         "trace_ids",
     )
     return [{key: item.get(key) for key in keys} for item in selected[: max(0, latest_limit)]]
+
+
+def _recent_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(rows, key=lambda item: str(item.get("closed_at") or ""))[-min(3, len(rows)) :]
+
+
+def _decay_weight(rows: list[dict[str, Any]]) -> float:
+    if not rows:
+        return 0.0
+    recent_rows = _recent_rows(rows)
+    recent_loss_abs = abs(
+        sum(
+            _float_or_zero(item.get("net_pnl_usdt"))
+            for item in recent_rows
+            if _float_or_zero(item.get("net_pnl_usdt")) < 0
+        )
+    )
+    total_loss_abs = abs(
+        sum(
+            _float_or_zero(item.get("net_pnl_usdt"))
+            for item in rows
+            if _float_or_zero(item.get("net_pnl_usdt")) < 0
+        )
+    )
+    if total_loss_abs <= 0:
+        return 0.0
+    return round(min(max(recent_loss_abs / total_loss_abs, 0.1), 1.0), 4)
 
 
 def _reasons(rows: list[dict[str, Any]], feedback: list[dict[str, Any]]) -> list[str]:

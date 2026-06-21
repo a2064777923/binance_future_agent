@@ -873,6 +873,11 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.candidate_evaluations[1]["symbol"], "BTCUSDT")
         self.assertFalse(result.candidate_evaluations[1]["continued"])
         self.assertEqual(result.candidate_evaluations[1]["end_reason"], "submitted")
+        self.assertEqual(
+            result.candidate_evaluations[1]["setup"]["factor_summary"]["schema"],
+            "bfa_factor_summary_v1",
+        )
+        self.assertIn("sizing_diagnostics", result.candidate_evaluations[1]["setup"]["price_basis"])
 
     def test_run_once_tries_next_candidate_after_ai_pass(self):
         with tempfile.TemporaryDirectory() as tmp:

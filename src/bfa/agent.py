@@ -1009,6 +1009,8 @@ def _record_candidate_setup(candidate_evaluation: dict[str, Any], setup) -> None
         "stop_distance_percent": setup.stop_distance_percent,
         "target_distance_percent": setup.target_distance_percent,
         "notional_usdt": setup.notional_usdt,
+        "factor_summary": dict(setup.factor_summary),
+        "price_basis": dict(setup.price_basis),
     }
 
 

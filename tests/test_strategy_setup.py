@@ -68,12 +68,21 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.price_basis["model"], "expected_market_entry_structure_stop_target_v1")
         self.assertEqual(setup.price_basis["stop_basis"]["anchor"], "support_price")
         self.assertIn("target_basis", setup.price_basis)
+        self.assertEqual(setup.factor_summary["schema"], "bfa_factor_summary_v1")
+        self.assertIn("trend_momentum", setup.factor_summary["group_totals"])
+        self.assertTrue(setup.factor_summary["threshold_checks"]["edge_passed"])
+        self.assertIn("sizing_diagnostics", setup.price_basis)
+        self.assertIn("liquidation_diagnostics", setup.price_basis)
+        self.assertTrue(setup.price_basis["liquidation_diagnostics"]["stop_before_liquidation"])
+        self.assertEqual(setup.price_basis["exchange_filters"]["min_executable_notional"], 5.0)
         self.assertIn("quant_long_setup", setup.reasons)
         self.assertGreaterEqual(len(setup.factor_scores), 11)
         self.assertIn("momentum", {factor.name for factor in setup.factor_scores})
         self.assertIn("taker_flow", {factor.name for factor in setup.factor_scores})
         self.assertIn("trend_structure", {factor.name for factor in setup.factor_scores})
         self.assertIn("rsi_regime", {factor.name for factor in setup.factor_scores})
+        self.assertIn("group", setup.factor_scores[0].to_dict())
+        self.assertIn("polarity", setup.factor_scores[0].to_dict())
 
     def test_builds_short_setup_when_directional_factors_flip(self):
         setup = build_trade_setup(
@@ -232,6 +241,26 @@ class StrategySetupTests(unittest.TestCase):
         self.assertIn("profile_blocked_setup_reason:crowding_risk", crowded.reasons)
         self.assertEqual(weak_volume.decision, "pass")
         self.assertIn("profile_blocked_factor_name:volume_impulse", weak_volume.reasons)
+
+    def test_small_notional_pressure_is_explained(self):
+        setup = build_trade_setup(
+            self.candidate(min_executable_notional=8.0),
+            risk_limits=RiskLimits(
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=10,
+                max_risk_per_trade_usdt=0.25,
+                max_daily_loss_usdt=2,
+                max_open_positions=2,
+            ),
+            profile={"name": "fractional", "max_notional_fraction": 0.7},
+        )
+
+        diagnostics = setup.price_basis["sizing_diagnostics"]
+        self.assertIn("raised_to_min_executable_notional", setup.warnings)
+        self.assertGreater(diagnostics["min_notional_pressure"], 0)
+        self.assertEqual(diagnostics["max_position_notional_usdt"], 10)
+        self.assertEqual(diagnostics["final_notional_usdt"], setup.notional_usdt)
 
 
 if __name__ == "__main__":

@@ -25,11 +25,13 @@ class FactorScore:
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
+            "group": _factor_group(self.name),
             "value": self.value,
             "score": self.score,
             "weight": self.weight,
             "weighted_score": self.weighted_score,
             "direction": self.direction,
+            "polarity": _factor_polarity(self),
             "reasons": list(self.reasons),
         }
 
@@ -54,6 +56,7 @@ class TradeSetup:
     stop_distance_percent: float | None
     target_distance_percent: float | None
     reasons: list[str]
+    factor_summary: dict[str, Any] = field(default_factory=dict)
     price_basis: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
@@ -76,6 +79,7 @@ class TradeSetup:
             "risk_reward_ratio": self.risk_reward_ratio,
             "stop_distance_percent": self.stop_distance_percent,
             "target_distance_percent": self.target_distance_percent,
+            "factor_summary": dict(self.factor_summary),
             "price_basis": dict(self.price_basis),
             "reasons": list(self.reasons),
             "warnings": list(self.warnings),
@@ -154,6 +158,17 @@ def build_trade_setup(
     long_score, short_score = _direction_scores(factor_scores)
     side = _select_side(long_score, short_score)
     edge = max(long_score, short_score) - min(long_score, short_score)
+    base_confidence = _confidence(edge, factor_scores)
+    factor_summary = _factor_summary(
+        factors=factor_scores,
+        long_score=long_score,
+        short_score=short_score,
+        edge=edge,
+        selected_side=side,
+        confidence=base_confidence,
+        profile=setup_profile,
+        features=features,
+    )
     reference = _positive_float(features.get("reference_price"))
     volatility = _volatility_percent(features)
     regime = _regime(volatility, features)
@@ -168,7 +183,7 @@ def build_trade_setup(
             symbol=symbol,
             decision="pass",
             side="flat",
-            confidence=round(_confidence(edge, factor_scores), 4),
+            confidence=round(base_confidence, 4),
             entry_price=None,
             stop_price=None,
             target_price=None,
@@ -182,6 +197,7 @@ def build_trade_setup(
             risk_reward_ratio=None,
             stop_distance_percent=None,
             target_distance_percent=None,
+            factor_summary=factor_summary,
             price_basis={},
             reasons=_dedupe(["quant_setup_pass", *warnings]),
             warnings=warnings,
@@ -199,6 +215,14 @@ def build_trade_setup(
         setup_profile,
     )
     stop, target = _stop_target(entry, side, stop_distance, target_distance)
+    notional, sizing_warnings, sizing_diagnostics = _setup_notional(
+        entry_price=entry,
+        stop_price=stop,
+        risk_limits=risk_limits,
+        features=features,
+        edge=edge,
+        profile=setup_profile,
+    )
     price_basis = _price_basis(
         reference=reference,
         entry=entry,
@@ -209,14 +233,8 @@ def build_trade_setup(
         stop_basis=stop_basis,
         target_basis=target_basis,
         profile=setup_profile,
-    )
-    notional, sizing_warnings = _setup_notional(
-        entry_price=entry,
-        stop_price=stop,
         risk_limits=risk_limits,
-        features=features,
-        edge=edge,
-        profile=setup_profile,
+        sizing_diagnostics=sizing_diagnostics,
     )
     warnings.extend(sizing_warnings)
     reasons = _setup_reasons(side, factor_scores, regime, warnings)
@@ -259,9 +277,10 @@ def build_trade_setup(
             short_score=round(short_score, 4),
             edge_score=round(edge, 4),
             regime=regime,
-            risk_reward_ratio=None,
-            stop_distance_percent=None,
-            target_distance_percent=None,
+            risk_reward_ratio=round(target_distance / stop_distance, 4),
+            stop_distance_percent=round(stop_distance, 4),
+            target_distance_percent=round(target_distance, 4),
+            factor_summary=factor_summary,
             price_basis=price_basis,
             reasons=reasons,
             warnings=_dedupe(warnings),
@@ -285,6 +304,7 @@ def build_trade_setup(
         risk_reward_ratio=round(target_distance / stop_distance, 4),
         stop_distance_percent=round(stop_distance, 4),
         target_distance_percent=round(target_distance, 4),
+        factor_summary=factor_summary,
         price_basis=price_basis,
         reasons=reasons,
         warnings=_dedupe(warnings),
@@ -429,11 +449,21 @@ def _liquidity_factor(features: Mapping[str, Any]) -> FactorScore:
 
 def _oi_factor(features: Mapping[str, Any]) -> FactorScore:
     value = _float(features.get("open_interest_value")) or _float(features.get("open_interest"))
+    change = _float(features.get("open_interest_change_percent"))
     if value is None:
         return FactorScore("open_interest", None, 0.0, 1.0, direction="both", reasons=["missing_open_interest"])
     scale = 1_000_000.0 if _float(features.get("open_interest_value")) is not None else 100_000.0
     score = min(value / scale, 20.0)
-    return FactorScore("open_interest", value, score, 1.0, direction="both", reasons=["oi_confirmation"])
+    reasons = ["oi_confirmation"]
+    if change is None:
+        reasons.append("missing_open_interest_change")
+    elif change >= 2.0:
+        score += min(change * 1.5, 10.0)
+        reasons.append("oi_expanding")
+    elif change <= -2.0:
+        score -= min(abs(change) * 1.2, 8.0)
+        reasons.append("oi_contracting")
+    return FactorScore("open_interest", value, _clip(score, -8.0, 28.0), 1.0, direction="both", reasons=reasons)
 
 
 def _taker_flow_factor(features: Mapping[str, Any]) -> FactorScore:
@@ -556,14 +586,20 @@ def _stop_distance_percent(
     else:
         stop_distance = base
         anchor = "atr_volatility"
-    stop_distance *= max(profile.stop_distance_multiplier, 0.1)
-    stop_distance = min(max(stop_distance, 0.45), profile.max_stop_distance_percent)
-    return stop_distance, {
+    raw_stop_distance = stop_distance
+    profile_adjusted = raw_stop_distance * max(profile.stop_distance_multiplier, 0.1)
+    capped_stop_distance = min(max(profile_adjusted, 0.45), profile.max_stop_distance_percent)
+    return capped_stop_distance, {
         "anchor": anchor,
         "atr_percent": atr,
         "volatility_percent": volatility,
         "structure_distance_percent": structure_distance,
-        "raw_stop_distance_percent": stop_distance,
+        "raw_stop_distance_percent": raw_stop_distance,
+        "profile_adjusted_stop_distance_percent": profile_adjusted,
+        "capped_stop_distance_percent": capped_stop_distance,
+        "min_stop_distance_percent": 0.45,
+        "max_stop_distance_percent": profile.max_stop_distance_percent,
+        "was_capped": capped_stop_distance != profile_adjusted,
         "profile": profile.name,
     }
 
@@ -595,13 +631,19 @@ def _target_distance_percent(
     if structure_distance is not None and structure_distance >= stop_distance * 1.2:
         target = min(max(target, structure_distance), stop_distance * 2.4)
         anchor = "nearest_structure_with_min_rr"
-    target *= max(profile.target_distance_multiplier, 0.1)
-    target = min(max(target, stop_distance * profile.min_risk_reward), 7.0)
-    return target, {
+    raw_target = target
+    profile_adjusted = raw_target * max(profile.target_distance_multiplier, 0.1)
+    capped_target = min(max(profile_adjusted, stop_distance * profile.min_risk_reward), 7.0)
+    return capped_target, {
         "anchor": anchor,
         "reward_multiple": reward_multiple,
         "structure_distance_percent": structure_distance,
-        "raw_target_distance_percent": target,
+        "raw_target_distance_percent": raw_target,
+        "profile_adjusted_target_distance_percent": profile_adjusted,
+        "capped_target_distance_percent": capped_target,
+        "min_target_distance_percent": stop_distance * profile.min_risk_reward,
+        "max_target_distance_percent": 7.0,
+        "was_capped": capped_target != profile_adjusted,
         "profile": profile.name,
     }
 
@@ -622,26 +664,62 @@ def _setup_notional(
     features: Mapping[str, Any],
     edge: float,
     profile: TradeSetupProfile,
-) -> tuple[float | None, list[str]]:
+) -> tuple[float | None, list[str], dict[str, Any]]:
     stop_fraction = abs(entry_price - stop_price) / entry_price
     warnings: list[str] = []
+    diagnostics: dict[str, Any] = {
+        "entry_price": entry_price,
+        "stop_price": stop_price,
+        "stop_fraction": stop_fraction,
+        "stop_distance_percent": stop_fraction * 100.0,
+        "max_risk_per_trade_usdt": risk_limits.max_risk_per_trade_usdt,
+        "max_position_notional_usdt": risk_limits.max_position_notional_usdt,
+        "profile_notional_fraction": min(max(profile.max_notional_fraction, 0.0), 1.0),
+        "min_executable_notional": _positive_float(features.get("min_executable_notional")),
+        "min_qty": _positive_float(features.get("min_qty")),
+        "step_size": _positive_float(features.get("step_size")),
+        "min_notional": _positive_float(features.get("min_notional")),
+    }
     if stop_fraction <= 0:
-        return None, ["invalid_stop_distance"]
+        diagnostics["status"] = "invalid_stop_distance"
+        return None, ["invalid_stop_distance"], diagnostics
     risk_notional = risk_limits.max_risk_per_trade_usdt / stop_fraction
     edge_fraction = min(max(edge / 40.0, 0.35), 1.0)
     max_notional = min(risk_limits.max_position_notional_usdt, risk_notional)
     notional = max_notional * edge_fraction
     notional *= min(max(profile.max_notional_fraction, 0.0), 1.0)
+    diagnostics.update(
+        {
+            "risk_sized_notional_usdt": risk_notional,
+            "max_notional_before_edge_usdt": max_notional,
+            "edge_fraction": edge_fraction,
+            "candidate_notional_before_min_usdt": notional,
+            "stop_risk_at_cap_usdt": max_notional * stop_fraction,
+        }
+    )
     min_executable = _positive_float(features.get("min_executable_notional"))
     if min_executable is not None and notional < min_executable:
+        diagnostics["min_notional_pressure"] = round(min_executable - notional, 8)
         if min_executable <= max_notional:
             warnings.append("raised_to_min_executable_notional")
             notional = min_executable
         else:
-            return None, ["min_executable_exceeds_risk_sized_notional"]
+            diagnostics["status"] = "min_executable_exceeds_risk_sized_notional"
+            diagnostics["final_notional_usdt"] = None
+            return None, ["min_executable_exceeds_risk_sized_notional"], diagnostics
+    else:
+        diagnostics["min_notional_pressure"] = 0.0
     if notional <= 0:
-        return None, ["notional_not_positive"]
-    return min(notional, risk_limits.max_position_notional_usdt), warnings
+        diagnostics["status"] = "notional_not_positive"
+        diagnostics["final_notional_usdt"] = None
+        return None, ["notional_not_positive"], diagnostics
+    final_notional = min(notional, risk_limits.max_position_notional_usdt)
+    diagnostics["final_notional_usdt"] = final_notional
+    diagnostics["stop_risk_usdt"] = final_notional * stop_fraction
+    diagnostics["capped_by_max_position_notional"] = notional > risk_limits.max_position_notional_usdt
+    diagnostics["warnings"] = list(warnings)
+    diagnostics["status"] = "sized"
+    return final_notional, warnings, diagnostics
 
 
 def _setup_reasons(
@@ -691,6 +769,7 @@ def _regime(volatility: float | None, features: Mapping[str, Any]) -> str:
 def _volatility_percent(features: Mapping[str, Any]) -> float | None:
     return (
         _float(features.get("atr_percent"))
+        or _float(features.get("realized_volatility_percent"))
         or _float(features.get("kline_range_mean_percent"))
         or _float(features.get("kline_range_percent"))
         or _float(features.get("kline_range_max_percent"))
@@ -708,7 +787,12 @@ def _price_basis(
     stop_basis: Mapping[str, Any],
     target_basis: Mapping[str, Any],
     profile: TradeSetupProfile,
+    risk_limits: RiskLimits,
+    sizing_diagnostics: Mapping[str, Any],
 ) -> dict[str, Any]:
+    stop_distance = abs(entry - stop) / entry * 100.0
+    target_distance = abs(target - entry) / entry * 100.0
+    risk_reward = target_distance / stop_distance if stop_distance > 0 else None
     return {
         "model": "expected_market_entry_structure_stop_target_v1",
         "profile": profile.name,
@@ -728,6 +812,18 @@ def _price_basis(
         "indicator_sample_size": _float(features.get("indicator_sample_size")),
         "stop_basis": dict(stop_basis),
         "target_basis": dict(target_basis),
+        "risk_reward_ratio": round(risk_reward, 4) if risk_reward is not None else None,
+        "stop_distance_percent": round(stop_distance, 4),
+        "target_distance_percent": round(target_distance, 4),
+        "sizing_diagnostics": _rounded_mapping(sizing_diagnostics),
+        "liquidation_diagnostics": _liquidation_diagnostics(entry=entry, stop=stop, side=side, risk_limits=risk_limits),
+        "exchange_filters": {
+            "min_qty": _float(features.get("min_qty")),
+            "step_size": _float(features.get("step_size")),
+            "min_notional": _float(features.get("min_notional")),
+            "min_executable_notional": _float(features.get("min_executable_notional")),
+        },
+        "missing_inputs": _missing_geometry_inputs(features),
     }
 
 
@@ -828,6 +924,145 @@ def _setup_reason_rejections(reasons: list[str], profile: TradeSetupProfile) -> 
     if not blocked:
         return []
     return [f"profile_blocked_setup_reason:{reason}" for reason in reasons if reason.lower() in blocked]
+
+
+def _factor_summary(
+    *,
+    factors: list[FactorScore],
+    long_score: float,
+    short_score: float,
+    edge: float,
+    selected_side: str,
+    confidence: float,
+    profile: TradeSetupProfile,
+    features: Mapping[str, Any],
+) -> dict[str, Any]:
+    missing_inputs = sorted(
+        {
+            reason
+            for factor in factors
+            for reason in factor.reasons
+            if reason.startswith("missing_")
+        }
+        | {str(note) for note in _sequence(features.get("quality_notes")) if str(note).startswith("missing_")}
+    )
+    group_totals: dict[str, dict[str, float]] = {}
+    factor_rows: list[dict[str, Any]] = []
+    for factor in factors:
+        group = _factor_group(factor.name)
+        group_totals.setdefault(group, {"long": 0.0, "short": 0.0, "both": 0.0, "net": 0.0})
+        weighted = factor.weighted_score
+        if factor.direction == "both":
+            group_totals[group]["both"] += weighted
+        elif weighted >= 0:
+            group_totals[group]["long"] += weighted
+        else:
+            group_totals[group]["short"] += abs(weighted)
+        group_totals[group]["net"] += weighted
+        factor_rows.append(
+            {
+                "name": factor.name,
+                "group": group,
+                "direction": factor.direction,
+                "polarity": _factor_polarity(factor),
+                "weighted_score": round(weighted, 4),
+                "reasons": list(factor.reasons),
+            }
+        )
+    supportive = sorted(factor_rows, key=lambda item: abs(float(item["weighted_score"])), reverse=True)
+    threshold_checks = {
+        "min_edge": profile.min_edge,
+        "edge_passed": edge >= profile.min_edge,
+        "min_confidence": profile.min_confidence,
+        "confidence_passed": confidence >= profile.min_confidence,
+        "missing_input_count": len(missing_inputs),
+        "factor_count": len(factors),
+    }
+    return {
+        "schema": "bfa_factor_summary_v1",
+        "selected_side": selected_side,
+        "long_score": round(long_score, 4),
+        "short_score": round(short_score, 4),
+        "edge_score": round(edge, 4),
+        "confidence": round(confidence, 4),
+        "coverage_ratio": round((len(factors) - len([f for f in factors if any(r.startswith("missing_") for r in f.reasons)])) / len(factors), 4)
+        if factors
+        else 0.0,
+        "missing_inputs": missing_inputs,
+        "threshold_checks": threshold_checks,
+        "group_totals": {
+            key: {inner_key: round(inner_value, 4) for inner_key, inner_value in value.items()}
+            for key, value in sorted(group_totals.items())
+        },
+        "top_factors": supportive[:5],
+    }
+
+
+def _factor_group(name: str) -> str:
+    groups = {
+        "momentum": "trend_momentum",
+        "trend_structure": "trend_momentum",
+        "rsi_regime": "trend_momentum",
+        "volume_impulse": "volume",
+        "open_interest": "positioning",
+        "taker_flow": "flow",
+        "funding": "positioning",
+        "volatility": "volatility_range",
+        "liquidity": "liquidity_tradability",
+        "tradability": "liquidity_tradability",
+        "narrative": "narrative_heat",
+    }
+    return groups.get(name, "other")
+
+
+def _factor_polarity(factor: FactorScore) -> str:
+    weighted = factor.weighted_score
+    if abs(weighted) < 1e-9:
+        return "neutral"
+    if factor.direction == "both":
+        return "both_supportive" if weighted > 0 else "both_caution"
+    if weighted > 0:
+        return f"supports_{factor.direction}"
+    return "supports_short" if factor.direction == "long" else "supports_long"
+
+
+def _liquidation_diagnostics(*, entry: float, stop: float, side: str, risk_limits: RiskLimits) -> dict[str, Any]:
+    leverage = max(_float(risk_limits.max_leverage) or 1.0, 1.0)
+    liquidation_distance_percent = 100.0 / leverage
+    liquidation_price = entry * (1.0 - liquidation_distance_percent / 100.0) if side == "long" else entry * (1.0 + liquidation_distance_percent / 100.0)
+    stop_distance_percent = abs(entry - stop) / entry * 100.0
+    return {
+        "model": "approx_entry_inverse_leverage_v1",
+        "max_leverage": leverage,
+        "approx_liquidation_price": round(liquidation_price, 8),
+        "approx_liquidation_distance_percent": round(liquidation_distance_percent, 4),
+        "stop_distance_percent": round(stop_distance_percent, 4),
+        "stop_before_liquidation": stop_distance_percent < liquidation_distance_percent,
+        "conservative": True,
+    }
+
+
+def _missing_geometry_inputs(features: Mapping[str, Any]) -> list[str]:
+    checks = {
+        "missing_support_price": features.get("support_price") is None,
+        "missing_resistance_price": features.get("resistance_price") is None,
+        "missing_vwap": features.get("vwap") is None,
+        "missing_atr_percent": features.get("atr_percent") is None,
+        "missing_realized_volatility": features.get("realized_volatility_percent") is None,
+        "missing_close_position": features.get("kline_close_position_percent") is None,
+        "missing_min_executable_notional": features.get("min_executable_notional") is None,
+    }
+    return [name for name, missing in checks.items() if missing]
+
+
+def _rounded_mapping(values: Mapping[str, Any]) -> dict[str, Any]:
+    rounded: dict[str, Any] = {}
+    for key, value in values.items():
+        if isinstance(value, float):
+            rounded[key] = round(value, 8)
+        else:
+            rounded[key] = value
+    return rounded
 
 
 def _abs_momentum(features: Mapping[str, Any]) -> float:

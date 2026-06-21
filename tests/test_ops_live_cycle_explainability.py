@@ -78,6 +78,7 @@ class LiveCycleExplainabilityTests(unittest.TestCase):
         self.assertTrue(sol["order"]["submitted"])
         self.assertEqual(sol["candidate"]["score"], 88.0)
         self.assertEqual(sol["trade_setup"]["decision"], "trade")
+        self.assertEqual(sol["trade_setup"]["factor_summary"]["schema"], "bfa_factor_summary_v1")
         self.assertEqual(sol["ai_decision"]["decision"], "trade")
         self.assertTrue(sol["risk"]["accepted"])
         self.assertTrue(sol["exchange_responses"][0]["has_stop_loss_order"])
@@ -178,6 +179,11 @@ def _insert_submitted_sol_cycle(db_path: Path) -> int:
                     "target_price": 144.0,
                     "notional_usdt": 140.0,
                     "edge_score": 76,
+                    "factor_summary": {
+                        "schema": "bfa_factor_summary_v1",
+                        "selected_side": "long",
+                        "edge_score": 76,
+                    },
                     "factor_scores": [
                         {
                             "name": "taker_flow",

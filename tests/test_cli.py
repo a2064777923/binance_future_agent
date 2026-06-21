@@ -793,6 +793,11 @@ class CliTests(unittest.TestCase):
                         "risk_reward_ratio": 1.8,
                         "stop_distance_percent": 1.2,
                         "target_distance_percent": 2.16,
+                        "factor_summary": {
+                            "schema": "bfa_factor_summary_v1",
+                            "selected_side": "long",
+                            "edge_score": 37,
+                        },
                         "price_basis": {
                             "model": "expected_market_entry_structure_stop_target_v1",
                             "support_price": 98.7,
@@ -870,6 +875,7 @@ class CliTests(unittest.TestCase):
             "risk_and_intent",
         ])
         self.assertEqual(payload["decision_flow"][1]["factor_scores"][0]["name"], "momentum")
+        self.assertEqual(payload["decision_flow"][1]["factor_summary"]["schema"], "bfa_factor_summary_v1")
         self.assertEqual(payload["decision_flow"][1]["regime"], "trend_expansion")
         self.assertEqual(payload["decision_flow"][1]["price_basis"]["stop_basis"]["anchor"], "support_price")
         self.assertEqual(payload["decision_flow"][3]["risk_reasons"], ["risk_accepted"])

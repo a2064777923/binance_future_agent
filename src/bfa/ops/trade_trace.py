@@ -227,6 +227,7 @@ def _decision_flow(
                 "risk_reward_ratio": setup.get("risk_reward_ratio"),
                 "stop_distance_percent": setup.get("stop_distance_percent"),
                 "target_distance_percent": setup.get("target_distance_percent"),
+                "factor_summary": setup.get("factor_summary", {}),
                 "price_basis": setup.get("price_basis", {}),
                 "factor_scores": setup.get("factor_scores", []),
                 "reasons": setup.get("reasons", []),

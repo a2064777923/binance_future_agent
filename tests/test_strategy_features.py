@@ -39,6 +39,42 @@ class StrategyFeatureTests(unittest.TestCase):
         self.assertIn("missing_market_confirmation", doge.quality_notes)
         self.assertIn("missing_quote_volume", doge.quality_notes)
 
+    def test_extracts_open_interest_change_percent(self):
+        features = extract_features(
+            {
+                "records": [
+                    {
+                        "id": 1,
+                        "event_type": "market_snapshot",
+                        "occurred_at": "2026-06-19T09:00:00Z",
+                        "symbol": "SOLUSDT",
+                        "ref_id": "open_interest:SOLUSDT",
+                        "payload": {
+                            "event_type": "open_interest",
+                            "symbol": "SOLUSDT",
+                            "payload": {"open_interest": "1000"},
+                        },
+                    },
+                    {
+                        "id": 2,
+                        "event_type": "market_snapshot",
+                        "occurred_at": "2026-06-19T09:01:00Z",
+                        "symbol": "SOLUSDT",
+                        "ref_id": "open_interest:SOLUSDT",
+                        "payload": {
+                            "event_type": "open_interest",
+                            "symbol": "SOLUSDT",
+                            "payload": {"open_interest": "1125"},
+                        },
+                    },
+                ]
+            }
+        )
+
+        sol = features["SOLUSDT"]
+        self.assertEqual(sol.open_interest, 1125.0)
+        self.assertAlmostEqual(sol.open_interest_change_percent, 12.5)
+
 
 if __name__ == "__main__":
     unittest.main()
