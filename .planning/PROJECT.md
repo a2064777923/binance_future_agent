@@ -199,6 +199,15 @@ control of downside.
   open-interest change, market-structure point diagnostics, sizing/min-notional
   explanations, conservative liquidation-distance diagnostics, and
   recommendation-only guard recency/decay metadata before any AI overlay.
+- Phase 69 adds a deterministic adaptive sizing governor before AI. It scales
+  or blocks candidate notional using factor quality, liquidity, volatility,
+  stop/liquidation geometry, available balance, manual margin pressure, and
+  forward-paper guard evidence.
+- Phase 70 deploys v1.27 to the isolated server and verifies the live canary.
+  The live one-shot ran the broad scanner and latest multi-factor/adaptive
+  sizing stack, submitted no order because `forward_paper_guard_factor:24h_momentum`
+  blocked the setup, restored live/paper timers, and confirmed `BTWUSDT` as
+  manual exposure only.
 
 ### Active
 
@@ -303,7 +312,7 @@ control of downside.
   point precision before AI overlay.
 - [x] Add adaptive sizing and high-leverage governors that can downsize or
   block unsafe setups and require explicit evidence before raising risk.
-- [ ] Deploy v1.27 server canary evidence without touching unrelated server
+- [x] Deploy v1.27 server canary evidence without touching unrelated server
   projects or managing manual `BTWUSDT`.
 
 ### Out of Scope
@@ -517,14 +526,16 @@ packet is read-only, reports manual `BTWUSDT` separately from bot-managed
 capacity, and proves no order/env/systemd/risk/guard mutation during packet
 generation.
 
-## Current Milestone: v1.27 Adaptive Live Pilot Iteration
+## Completed Milestone: v1.27 Adaptive Live Pilot Iteration
 
 **Goal:** Make the live pilot iterate faster and more intelligently by widening
 hot-symbol observation, improving multi-factor edge and point precision, and
 adapting sizing inside explicit small-capital risk governors.
 
-**Status:** Phase 69 is complete locally. Phase 70 is next: deploy and verify
-the v1.27 server canary while preserving the manual `BTWUSDT` boundary.
+**Status:** Complete and shipped. Phases 66-70 are complete. The server is
+running v1.27 with live and paper timers active, services inactive, broad
+scanner and adaptive sizing governor enabled, and `BTWUSDT` preserved as manual
+exposure only.
 
 **Target features:**
 - Explain every recent live cycle by evaluated symbols, factor evidence,
@@ -538,6 +549,16 @@ the v1.27 server canary while preserving the manual `BTWUSDT` boundary.
   or unsafe setups and require explicit evidence before raising risk.
 - Deploy and verify the v1.27 canary on the isolated server while keeping
   `BTWUSDT` and other manual symbols outside bot management.
+
+**Server closeout:** Phase 70 deployed commit `7a55ece` to
+`/opt/binance-futures-agent/app`. Server focused tests passed with `107`
+tests, full suite passed with `420` tests, health-check returned `ok=true`, and
+Phase 70 artifacts under `/opt/binance-futures-agent/app/runtime` scanned clean
+for sensitive fields. The final exchange check shows one manual `BTWUSDT`
+SHORT, bot-managed active positions `0`, manual positions `1`, manual initial
+margin about `31.66096` USDT, and entry capacity available. The live one-shot
+canary submitted no order because guard evidence blocked `24h_momentum`; a
+later timer-restored check showed `REUSDT` flat with no order submitted.
 
 ## Completed Milestone: v1.25 Live Resume Clearance And Adaptive Pilot
 
@@ -866,7 +887,7 @@ remains paused.
 | Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | v1.26 complete through lifecycle, guarded exits, live outcome ledger, and pilot learning packet |
 | Explain live cycles before widening scanners | Broader hot-symbol scanning should be built on a report that explains submitted, skipped, AI-pass, risk-blocked, and manual-symbol cycles. | Phase 66 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
-| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current configured pilot capital is 45 USDT with 10x leverage, 300 USDT per-position notional, 30 bot-managed positions, 0.7 USDT per-trade risk, and 2 USDT daily loss. | v1.27 active |
+| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current live server caps are 45 USDT configured capital, 10x leverage, 500 USDT per-position/effective notional, 60 bot-managed open positions, 0.7 USDT per-trade risk, and 2 USDT daily loss. Manual `BTWUSDT` is excluded from bot management. | v1.27 shipped |
 
 ## Evolution
 
@@ -888,4 +909,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 69 completion.*
+*Last updated: 2026-06-21 after Phase 70 completion.*

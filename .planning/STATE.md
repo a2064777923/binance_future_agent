@@ -4,24 +4,24 @@ milestone: v1.27
 milestone_name: Adaptive Live Pilot Iteration
 current_phase: 70 — Server Canary And Manual Boundary Verification
 current_phase_name: Server Canary And Manual Boundary Verification
-status: planning
-stopped_at: Phase 69 complete
-last_updated: "2026-06-21T02:28:02Z"
+status: milestone_complete
+stopped_at: v1.27 complete
+last_updated: "2026-06-21T02:49:32Z"
 last_activity: 2026-06-21
-last_activity_desc: Phase 69 complete, transitioned to Phase 70
+last_activity_desc: Phase 70 complete; v1.27 shipped to server
 progress:
   total_phases: 5
-  completed_phases: 4
-  total_plans: 4
-  completed_plans: 4
-  percent: 80
+  completed_phases: 5
+  total_plans: 5
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 70 — Server Canary And Manual Boundary Verification
-**Status:** Ready to plan
+**Current phase:** v1.27 complete
+**Status:** Milestone complete
 **Last planned:** 2026-06-21
 **Plan count:** 0
 
@@ -32,9 +32,8 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Deploy and verify the v1.27 server canary while preserving
-isolated paths, live/paper timers, adaptive sizing diagnostics, and the manual
-`BTWUSDT` boundary.
+**Current focus:** Observe v1.27 live outcomes and decide the next milestone
+scope from guard/cap/live-result evidence.
 
 ## Decisions
 
@@ -54,6 +53,18 @@ isolated paths, live/paper timers, adaptive sizing diagnostics, and the manual
   `5000` USDT, same-direction cap is `3500` USDT, and multi-position is
   enabled. These are live env caps, not local defaults. Manual symbols remain
   visible in diagnostics but do not consume bot entry capacity.
+
+- Phase 70 deployed v1.27 to `/opt/binance-futures-agent/app` from commit
+  `7a55ece` and verified it under `/etc/binance-futures-agent/env`. The env was
+  backed up to `/etc/binance-futures-agent/env.bak.phase70-governor-20260621T024001Z`
+  before adding explicit adaptive sizing governor keys. Final server state:
+  live timer active, paper timer active, live service inactive, paper service
+  inactive. Final exchange check shows `BTWUSDT` manual SHORT as manual
+  exposure only: bot active positions `0`, manual positions `1`, manual initial
+  margin about `31.66096` USDT, entry capacity still available. The live
+  one-shot canary returned `quant_pass`, `submitted=false`, blocked by
+  `forward_paper_guard_factor:24h_momentum`; a later timer-restored check showed
+  `REUSDT` flat with no order submitted.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -790,26 +801,26 @@ isolated paths, live/paper timers, adaptive sizing diagnostics, and the manual
 
 ## Next Command
 
-Start Phase 70 with `$gsd-plan-phase 70`: deploy and verify the v1.27 server
-canary while preserving isolated paths and the manual `BTWUSDT` boundary.
+Start a new milestone with `$gsd-new-milestone`: observe v1.27 live outcomes
+and calibrate guard strictness from current server evidence.
 
 ## Session
 
 **Last session:** 2026-06-21T01:11:33.537Z
-**Stopped at:** Phase 69 complete
-verified locally; server canary remains Phase 70.
-**Resume file:** .planning/phases/69-adaptive-sizing-and-high-leverage-governor/69-CONTEXT.md
+**Stopped at:** v1.27 complete
+server canary verified and timers restored.
+**Resume file:** .planning/phases/70-server-canary-and-manual-boundary-verification/70-VERIFICATION.md
 
 ## Current Position
 
-Phase: 70 — Server Canary And Manual Boundary Verification
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-06-21 — Phase 69 complete, transitioned to Phase 70
+Phase: v1.27 complete
+Plan: All v1.27 plans complete
+Status: Milestone complete
+Last activity: 2026-06-21 — Phase 70 complete; v1.27 shipped to server
 
 ## Operator Next Steps
 
-- Run `$gsd-plan-phase 70`.
+- Run `$gsd-new-milestone`.
 
 ## Performance Metrics
 
@@ -817,3 +828,4 @@ Last activity: 2026-06-21 — Phase 69 complete, transitioned to Phase 70
 |-------|------|----------|-------|
 | Phase 67 P01 | 18 min | 9 tasks | 10 files |
 | Phase 69 P01 | 36 min | 4 tasks | 15 files |
+| Phase 70 P01 | 52 min | 6 tasks | server canary |

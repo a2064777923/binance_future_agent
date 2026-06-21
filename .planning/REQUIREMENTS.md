@@ -13,7 +13,7 @@ projects or losing control of downside.
   evaluated symbol, skip reason, factor score, AI decision, risk decision,
   sizing cap, and whether an order was submitted.
 
-- [ ] **OPS-04**: Server can produce a compact current-status packet that
+- [x] **OPS-04**: Server can produce a compact current-status packet that
   includes live/paper timer state, open positions, open algo orders, manual
   symbols, cap utilization, latest outcomes, and latest trade/no-trade traces.
 
@@ -77,12 +77,12 @@ projects or losing control of downside.
 
 ### Server Canary And Manual Boundary
 
-- [ ] **OPS-05**: Deployment and server verification for v1.27 remain isolated
+- [x] **OPS-05**: Deployment and server verification for v1.27 remain isolated
   under `/opt/binance-futures-agent` and `/etc/binance-futures-agent`, restore
   live/paper timers after any deployment pause, and scan artifacts for
   sensitive fields.
 
-- [ ] **RISK-05**: `BTWUSDT` and any configured manual symbols remain visible in
+- [x] **RISK-05**: `BTWUSDT` and any configured manual symbols remain visible in
   packets and diagnostics but are excluded from bot entry capacity,
   auto-management, close/reduce execution, and candidate selection.
 
@@ -115,7 +115,7 @@ projects or losing control of downside.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | OPS-03 | Phase 66 | Complete |
-| OPS-04 | Phase 70 | Pending |
+| OPS-04 | Phase 70 | Complete |
 | LEARN-04 | Phase 66 | Complete |
 | SCAN-01 | Phase 67 | Complete |
 | SCAN-02 | Phase 67 | Complete |
@@ -129,8 +129,8 @@ projects or losing control of downside.
 | SIZE-02 | Phase 69 | Complete |
 | SIZE-03 | Phase 69 | Complete |
 | SIZE-04 | Phase 69 | Complete |
-| OPS-05 | Phase 70 | Pending |
-| RISK-05 | Phase 70 | Pending |
+| OPS-05 | Phase 70 | Complete |
+| RISK-05 | Phase 70 | Complete |
 
 **Coverage:**
 
@@ -140,4 +140,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 69 verification*
+*Last updated: 2026-06-21 after Phase 70 verification*

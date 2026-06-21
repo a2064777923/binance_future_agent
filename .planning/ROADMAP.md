@@ -27,7 +27,8 @@
 - ✅ **v1.26 Live Position Management And Pilot Learning** — Phases 61-65,
   shipped 2026-06-21 ([archive](milestones/v1.26-ROADMAP.md)).
 
-- ◆ **v1.27 Adaptive Live Pilot Iteration** — Phases 66-70, in progress.
+- ✅ **v1.27 Adaptive Live Pilot Iteration** — Phases 66-70,
+  shipped 2026-06-21.
 
 ## Phases
 
@@ -139,13 +140,13 @@
 </details>
 
 <details open>
-<summary>◆ v1.27 Adaptive Live Pilot Iteration (Phases 66-70) — IN PROGRESS</summary>
+<summary>✅ v1.27 Adaptive Live Pilot Iteration (Phases 66-70) — SHIPPED 2026-06-21</summary>
 
 - [x] Phase 66: Live Cycle Explainability And Ledger Cadence (1/1 plan) (completed 2026-06-21)
 - [x] Phase 67: Adaptive Hot-Symbol Breadth And Guarded Queue (1 plan) (completed 2026-06-21)
 - [x] Phase 68: Multi-Factor Edge And Point Precision (1 plan) (completed 2026-06-21)
 - [x] Phase 69: Adaptive Sizing And High-Leverage Governor (1 plan) (completed 2026-06-21)
-- [ ] Phase 70: Server Canary And Manual Boundary Verification (1 plan)
+- [x] Phase 70: Server Canary And Manual Boundary Verification (1 plan) (completed 2026-06-21)
 
 </details>
 
@@ -266,8 +267,8 @@ under current live pilot conditions.
 
 **Requirements:** OPS-04, OPS-05, RISK-05
 
-**Plans:** 0/1 plan complete
-**Status:** Not started
+**Plans:** 1/1 plan complete
+**Status:** Complete
 
 **Success criteria:**
 
@@ -297,7 +298,7 @@ under current live pilot conditions.
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
 | v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
 | v1.26 Live Position Management And Pilot Learning | 61-65 | 5/5 | Complete | 2026-06-21 |
-| v1.27 Adaptive Live Pilot Iteration | 66-70 | 4/5 | In progress | - |
+| v1.27 Adaptive Live Pilot Iteration | 66-70 | 5/5 | Complete | 2026-06-21 |
 
 ## Requirement Coverage
 
@@ -312,5 +313,6 @@ under current live pilot conditions.
 
 ## Next Step
 
-Start Phase 70 with `$gsd-plan-phase 70`. The immediate focus is isolated
-server canary deployment and manual-boundary verification for `BTWUSDT`.
+Start a new milestone with `$gsd-new-milestone`. The immediate focus should be
+observing v1.27 live outcomes and calibrating guard strictness from current
+server evidence.
