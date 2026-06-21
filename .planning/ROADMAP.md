@@ -149,7 +149,7 @@
 
 </details>
 
-## Active Phase Details
+## v1.27 Adaptive Live Pilot Iteration (Phase Details)
 
 ### Phase 66: Live Cycle Explainability And Ledger Cadence
 
