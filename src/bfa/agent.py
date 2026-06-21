@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +59,8 @@ class AgentRunResult:
     position_review: dict[str, Any] | None = None
     position_adjustment_plan: dict[str, Any] | None = None
     paper_guard: dict[str, Any] | None = None
+    source_health: dict[str, Any] = field(default_factory=dict)
+    candidate_evaluations: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -96,6 +99,8 @@ class AgentRunResult:
             "position_review": self.position_review,
             "position_adjustment_plan": self.position_adjustment_plan,
             "paper_guard": self.paper_guard,
+            "source_health": dict(self.source_health),
+            "candidate_evaluations": [dict(item) for item in self.candidate_evaluations],
         }
 
 
@@ -140,6 +145,7 @@ def run_agent_once(
             mode=mode.value,
             started_at=started_at,
             validation_errors=[f"openai_retry_after:{backoff.retry_after_iso}"],
+            source_health=_pre_collection_source_health(config, reason="openai_backoff"),
         )
 
     signed_client = signed_client or _build_signed_client(config, mode)
@@ -162,6 +168,7 @@ def run_agent_once(
             mode=mode.value,
             started_at=started_at,
             validation_errors=["unable to read live position risk"],
+            source_health=_pre_collection_source_health(config, reason="position_risk_failed"),
         )
     connection = None
     try:
@@ -187,10 +194,11 @@ def run_agent_once(
                 persisted=_position_lifecycle_persisted(position_lifecycle_event_id),
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                source_health=_pre_collection_source_health(config, reason="entry_capacity_blocked"),
             )
 
         market = market_client or BinanceFuturesRestClient(base_url=config.get("BINANCE_FUTURES_BASE_URL"))
-        scan_symbols = _agent_scan_symbols(config, market)
+        scan_symbols, source_health = _agent_scan_symbols_with_health(config, market)
         collector = collector or MarketDataCollector(
             client=market,
             symbols=scan_symbols,
@@ -211,14 +219,27 @@ def run_agent_once(
         market_snapshots = collector.collect_rest_snapshots()
         market_event_ids = [store.insert_market_snapshot(snapshot) for snapshot in market_snapshots]
         narrative_records = narrative_runner.collect()
+        market_heat_records = []
+        market_heat_status = "not_needed" if narrative_records else "disabled"
         if not narrative_records and _truthy(config.get("BFA_MARKET_HEAT_NARRATIVE_ENABLED")):
-            narrative_records = _collect_market_heat_narratives(
+            market_heat_records = _collect_market_heat_narratives(
                 config,
                 market_snapshots,
                 started_at,
                 known_symbols=scan_symbols,
             )
+            narrative_records = market_heat_records
+            market_heat_status = "used" if market_heat_records else "empty"
         narrative_event_ids = [store.insert_narrative(record) for record in narrative_records]
+        source_health = _augment_live_source_health(
+            config,
+            source_health,
+            market_snapshots=market_snapshots,
+            narrative_records=narrative_records,
+            market_heat_records=market_heat_records,
+            market_heat_status=market_heat_status,
+            paper_guard=paper_guard,
+        )
 
         replay_packet = {
             "start": started_at,
@@ -259,6 +280,7 @@ def run_agent_once(
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=paper_guard.to_dict(),
+                source_health=source_health,
                 persisted={
                     **_position_lifecycle_persisted(position_lifecycle_event_id),
                     "candidates": persisted_candidate_count,
@@ -282,6 +304,7 @@ def run_agent_once(
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=paper_guard.to_dict(),
+                source_health=source_health,
                 persisted={
                     **_position_lifecycle_persisted(position_lifecycle_event_id),
                     "candidates": persisted_candidate_count,
@@ -309,6 +332,7 @@ def run_agent_once(
             position_lifecycle_event_id=position_lifecycle_event_id,
             position_adjustment_plan=position_adjustment_plan,
             paper_guard=paper_guard,
+            source_health=source_health,
         )
     finally:
         if connection is not None:
@@ -316,29 +340,255 @@ def run_agent_once(
 
 
 def _agent_scan_symbols(config: AppConfig, market_client) -> list[str]:
+    symbols, _health = _agent_scan_symbols_with_health(config, market_client)
+    return symbols
+
+
+def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[list[str], dict[str, Any]]:
     excluded = set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"))
-    fallback = _without_symbols(market_symbols(config), excluded)
+    fallback_source = market_symbols(config)
+    fallback = _without_symbols(fallback_source, excluded)
+    filters = {
+        "top_n": int(config.get("BFA_LIVE_AUTO_HOT_TOP_N")),
+        "min_quote_volume_usdt": float(config.get("BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT")),
+        "min_abs_price_change_percent": float(config.get("BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT")),
+    }
     if not _truthy(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS")):
-        return fallback
+        return fallback, _live_source_health_base(
+            config,
+            mode="config_fallback",
+            status="used" if fallback else "empty",
+            selected_symbols=fallback,
+            filters=filters,
+            fallback_symbols=fallback,
+            manual_excluded_symbols=_manual_excluded_symbols(fallback_source, excluded),
+            ticker_status="not_polled",
+        )
     try:
         ticker_response = market_client.ticker_24hr()
         ticker_payload = ticker_response.payload if isinstance(ticker_response.payload, list) else []
+        eligible_ticker_payload = [
+            item
+            for item in ticker_payload
+            if isinstance(item, dict) and str(item.get("symbol", "")).upper() not in excluded
+        ]
         hot_rows = select_hot_usdt_symbols(
-            ticker_payload,
+            eligible_ticker_payload,
             HotUniverseConfig(
-                top_n=int(config.get("BFA_LIVE_AUTO_HOT_TOP_N")),
-                min_quote_volume_usdt=float(config.get("BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT")),
-                min_abs_price_change_percent=float(config.get("BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT")),
+                top_n=filters["top_n"],
+                min_quote_volume_usdt=filters["min_quote_volume_usdt"],
+                min_abs_price_change_percent=filters["min_abs_price_change_percent"],
             ),
         )
-    except Exception:
-        return fallback
-    selected = _without_symbols([str(item["symbol"]) for item in hot_rows], excluded)
-    return selected or fallback
+    except Exception as exc:
+        return fallback, _live_source_health_base(
+            config,
+            mode="auto_hot_fallback",
+            status="fallback" if fallback else "empty",
+            selected_symbols=fallback,
+            filters=filters,
+            fallback_symbols=fallback,
+            manual_excluded_symbols=_manual_excluded_symbols(fallback_source, excluded),
+            fallback_reason="ticker_error",
+            ticker_status="error",
+            ticker_error_type=exc.__class__.__name__,
+        )
+    hot_symbols = [str(item["symbol"]).upper() for item in hot_rows if item.get("symbol")]
+    auto_selected = _without_symbols(hot_symbols, excluded)
+    selected = auto_selected or fallback
+    fallback_reason = None if auto_selected else "no_auto_hot_symbols_after_filters_or_manual_exclusions"
+    return selected, _live_source_health_base(
+        config,
+        mode="binance_24h_ticker" if auto_selected else "auto_hot_fallback",
+        status="used" if selected else "empty",
+        selected_symbols=selected,
+        ticker_payload_count=len(ticker_payload),
+        ticker_eligible_payload_count=len(eligible_ticker_payload),
+        selected_rows=hot_rows,
+        filters=filters,
+        fallback_symbols=fallback if not auto_selected else [],
+        manual_excluded_symbols=_manual_excluded_symbols(
+            [
+                *[
+                    str(item.get("symbol", "")).upper()
+                    for item in ticker_payload
+                    if isinstance(item, dict)
+                ],
+                *fallback_source,
+            ],
+            excluded,
+        ),
+        fallback_reason=fallback_reason,
+        ticker_status="used" if auto_selected else "empty",
+        ticker_selected_count=len(auto_selected),
+    )
 
 
 def _without_symbols(symbols: list[str], excluded: set[str]) -> list[str]:
     return [symbol for symbol in symbols if symbol.upper() not in excluded]
+
+
+def _manual_excluded_symbols(symbols: list[str], excluded: set[str]) -> list[str]:
+    return sorted({symbol.upper() for symbol in symbols if symbol.upper() in excluded})
+
+
+def _pre_collection_source_health(config: AppConfig, *, reason: str) -> dict[str, Any]:
+    return {
+        "symbol_selection": {
+            "mode": "not_started",
+            "status": "not_started",
+            "reason": reason,
+            "selected_count": 0,
+            "selected_symbols": [],
+        },
+        "manual_symbol_exclusions": {
+            "configured_symbols": config.get_list("BFA_MANUAL_POSITION_SYMBOLS"),
+            "excluded_symbols": [],
+            "excluded_count": 0,
+            "status": "configured" if config.get_list("BFA_MANUAL_POSITION_SYMBOLS") else "not_configured",
+        },
+        "configured_narrative_sources": _configured_narrative_sources(config),
+    }
+
+
+def _live_source_health_base(
+    config: AppConfig,
+    *,
+    mode: str,
+    status: str,
+    selected_symbols: list[str],
+    filters: dict[str, int | float],
+    fallback_symbols: list[str],
+    manual_excluded_symbols: list[str],
+    ticker_status: str,
+    ticker_payload_count: int | None = None,
+    ticker_eligible_payload_count: int | None = None,
+    selected_rows: list[dict[str, Any]] | None = None,
+    fallback_reason: str | None = None,
+    ticker_error_type: str | None = None,
+    ticker_selected_count: int | None = None,
+) -> dict[str, Any]:
+    symbol_selection: dict[str, Any] = {
+        "mode": mode,
+        "status": status,
+        "selected_count": len(selected_symbols),
+        "selected_symbols": list(selected_symbols),
+        "fallback_symbols": list(fallback_symbols),
+    }
+    if fallback_reason:
+        symbol_selection["fallback_reason"] = fallback_reason
+    ticker: dict[str, Any] = {
+        "status": ticker_status,
+        "payload_count": ticker_payload_count,
+        "eligible_payload_count": ticker_eligible_payload_count,
+        "selected_count": ticker_selected_count if ticker_selected_count is not None else len(selected_symbols),
+        "filters": dict(filters),
+        "selected_rows": list(selected_rows or []),
+    }
+    if ticker_error_type:
+        ticker["error_type"] = ticker_error_type
+    return {
+        "symbol_selection": symbol_selection,
+        "binance_24h_ticker": ticker,
+        "manual_symbol_exclusions": {
+            "configured_symbols": config.get_list("BFA_MANUAL_POSITION_SYMBOLS"),
+            "excluded_symbols": list(manual_excluded_symbols),
+            "excluded_count": len(manual_excluded_symbols),
+            "status": "excluded" if manual_excluded_symbols else "none_matched",
+        },
+        "configured_narrative_sources": _configured_narrative_sources(config),
+    }
+
+
+def _configured_narrative_sources(config: AppConfig) -> dict[str, Any]:
+    rss_urls = rss_feed_urls(config)
+    return {
+        "binance_square_manual_export_dir_configured": bool(config.get("SQUARE_EXPORT_DIR")),
+        "rss_feed_count": len(rss_urls),
+        "rss_feeds_configured": bool(rss_urls),
+        "market_heat_fallback_enabled": _truthy(config.get("BFA_MARKET_HEAT_NARRATIVE_ENABLED")),
+    }
+
+
+def _augment_live_source_health(
+    config: AppConfig,
+    source_health: dict[str, Any],
+    *,
+    market_snapshots,
+    narrative_records,
+    market_heat_records,
+    market_heat_status: str,
+    paper_guard,
+) -> dict[str, Any]:
+    payload = dict(source_health)
+    payload["market_snapshots"] = _market_snapshot_source_health(market_snapshots)
+    payload["narrative_sources"] = _narrative_source_health(config, narrative_records)
+    payload["market_heat_fallback"] = {
+        "enabled": _truthy(config.get("BFA_MARKET_HEAT_NARRATIVE_ENABLED")),
+        "status": market_heat_status,
+        "record_count": len(market_heat_records),
+        "covered_symbols": _narrative_covered_symbols(market_heat_records),
+    }
+    payload["paper_guard"] = _paper_guard_source_health(paper_guard)
+    return payload
+
+
+def _market_snapshot_source_health(market_snapshots) -> dict[str, Any]:
+    counts = Counter(str(snapshot.event_type or "unknown") for snapshot in market_snapshots)
+    covered_symbols = sorted({str(snapshot.symbol).upper() for snapshot in market_snapshots if snapshot.symbol})
+    expected = [
+        "ticker_24h",
+        "kline",
+        "funding_rate",
+        "open_interest",
+        "open_interest_hist",
+        "taker_buy_sell_volume",
+    ]
+    return {
+        "status": "available" if market_snapshots else "empty",
+        "total_count": len(market_snapshots),
+        "event_type_counts": dict(sorted(counts.items())),
+        "covered_symbols": covered_symbols,
+        "expected_event_status": {event: "available" if counts.get(event, 0) else "missing" for event in expected},
+    }
+
+
+def _narrative_source_health(config: AppConfig, narrative_records) -> dict[str, Any]:
+    source_counts = Counter(str(record.source or "unknown") for record in narrative_records)
+    configured = _configured_narrative_sources(config)
+    return {
+        "status": "available" if narrative_records else "empty",
+        "total_count": len(narrative_records),
+        "source_counts": dict(sorted(source_counts.items())),
+        "covered_symbols": _narrative_covered_symbols(narrative_records),
+        **configured,
+    }
+
+
+def _narrative_covered_symbols(narrative_records) -> list[str]:
+    symbols: set[str] = set()
+    for record in narrative_records:
+        symbols.update(str(symbol).upper() for symbol in record.symbol_mentions if str(symbol).strip())
+    return sorted(symbols)
+
+
+def _paper_guard_source_health(paper_guard) -> dict[str, Any]:
+    if paper_guard is None:
+        return {"status": "not_built", "enabled": False, "active": False}
+    payload = paper_guard.to_dict()
+    return {
+        "status": payload.get("status"),
+        "enabled": bool(payload.get("enabled")),
+        "active": bool(getattr(paper_guard, "active", False)),
+        "reasons": list(payload.get("reasons") or []),
+        "summary": dict(payload.get("summary") or {}),
+        "symbol_block_count": len(payload.get("symbol_blocks") or {}),
+        "side_block_count": len(payload.get("side_blocks") or {}),
+        "factor_block_count": len(payload.get("factor_blocks") or {}),
+        "guarded_symbols": sorted((payload.get("symbol_blocks") or {}).keys()),
+        "guarded_sides": sorted((payload.get("side_blocks") or {}).keys()),
+        "guarded_factors": sorted((payload.get("factor_blocks") or {}).keys()),
+    }
 
 
 def _build_narrative_runner(
@@ -405,8 +655,10 @@ def _evaluate_candidate_queue(
     position_lifecycle_event_id: int | None,
     position_adjustment_plan,
     paper_guard,
+    source_health: dict[str, Any],
 ) -> AgentRunResult:
     evaluated_symbols: list[str] = []
+    candidate_evaluations: list[dict[str, Any]] = []
     ai_decisions_persisted = 0
     trade_setups_persisted = 0
     skipped_risk_reasons: list[str] = []
@@ -416,6 +668,8 @@ def _evaluate_candidate_queue(
 
     for candidate in candidates:
         evaluated_symbols.append(candidate.symbol)
+        candidate_evaluation = _candidate_evaluation_base(candidate)
+        candidate_evaluations.append(candidate_evaluation)
         candidate_sizing = compute_position_sizing(
             sizing_input_from_config(config, candidate=candidate.to_dict()),
             enabled=dynamic_sizing_enabled(config),
@@ -433,11 +687,20 @@ def _evaluate_candidate_queue(
             decided_at=started_at,
         )
         trade_setups_persisted += 1
+        _record_candidate_setup(candidate_evaluation, setup)
         if setup.decision != "trade":
             last_status = "quant_pass"
             last_validation_errors = list(setup.reasons)
             skipped_risk_reasons.append(f"{candidate.symbol}:quant_pass")
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status="quant_pass",
+                risk_reasons=["quant_pass"],
+                continued=True,
+                end_reason="setup_pass",
+            )
             continue
+        ai_status = "not_evaluated"
         if ai_enabled and ai_client is not None:
             try:
                 ai_run = run_ai_decision(
@@ -455,6 +718,18 @@ def _evaluate_candidate_queue(
             except Exception as exc:
                 _record_openai_backoff(config, exc)
                 if not _ai_fallback_to_quant_enabled(config):
+                    _record_candidate_ai(
+                        candidate_evaluation,
+                        status="error",
+                        validation_errors=[_safe_ai_error(exc)],
+                    )
+                    _finish_candidate_evaluation(
+                        candidate_evaluation,
+                        execution_status="ai_error",
+                        risk_reasons=[],
+                        continued=False,
+                        end_reason="ai_error",
+                    )
                     return AgentRunResult(
                         status="ai_error",
                         mode=mode.value,
@@ -471,6 +746,8 @@ def _evaluate_candidate_queue(
                         position_review=_position_review_summary(position_adjustment_plan),
                         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                         paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+                        source_health=source_health,
+                        candidate_evaluations=candidate_evaluations,
                         persisted={
                             **_position_lifecycle_persisted(position_lifecycle_event_id),
                             "candidates": persisted_candidate_count,
@@ -485,10 +762,12 @@ def _evaluate_candidate_queue(
                     decided_at=started_at,
                     reason=_safe_ai_error(exc),
                 )
+                ai_status = "fallback_to_quant"
                 skipped_risk_reasons.append(f"{candidate.symbol}:ai_fallback_to_quant")
             else:
                 _clear_openai_backoff(config)
                 ai_decisions_persisted += ai_run.persisted
+                ai_status = "accepted"
         elif _ai_fallback_to_quant_enabled(config):
             ai_run = _quant_fallback_run(
                 candidate=candidate,
@@ -497,8 +776,21 @@ def _evaluate_candidate_queue(
                 decided_at=started_at,
                 reason="ai_disabled_or_backoff",
             )
+            ai_status = "quant_only"
             skipped_risk_reasons.append(f"{candidate.symbol}:quant_only")
         else:
+            _record_candidate_ai(
+                candidate_evaluation,
+                status="unavailable",
+                validation_errors=["ai_client_unavailable"],
+            )
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status="ai_error",
+                risk_reasons=[],
+                continued=False,
+                end_reason="ai_client_unavailable",
+            )
             return AgentRunResult(
                 status="ai_error",
                 mode=mode.value,
@@ -515,6 +807,8 @@ def _evaluate_candidate_queue(
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+                source_health=source_health,
+                candidate_evaluations=candidate_evaluations,
                 persisted={
                     **_position_lifecycle_persisted(position_lifecycle_event_id),
                     "candidates": persisted_candidate_count,
@@ -522,6 +816,21 @@ def _evaluate_candidate_queue(
                     "ai_decisions": ai_decisions_persisted,
                 },
             )
+        ai_decision = ai_run.validation.decision
+        if ai_decision is not None and ai_decision.decision == "pass":
+            last_status = "ai_pass"
+            last_validation_errors = list(ai_run.validation.validation_errors)
+            skipped_risk_reasons.append(f"{candidate.symbol}:ai_decision_pass")
+            _record_candidate_ai(candidate_evaluation, status="ai_pass", ai_run=ai_run)
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status="ai_pass",
+                risk_reasons=["ai_decision_pass"],
+                continued=True,
+                end_reason="ai_pass",
+            )
+            continue
+        _record_candidate_ai(candidate_evaluation, status=ai_status, ai_run=ai_run)
         if not ai_run.validation.accepted:
             last_status = (
                 "ai_pass"
@@ -530,6 +839,14 @@ def _evaluate_candidate_queue(
             )
             last_validation_errors = list(ai_run.validation.validation_errors)
             skipped_risk_reasons.append(f"{candidate.symbol}:{last_status}")
+            _record_candidate_ai(candidate_evaluation, status=last_status, ai_run=ai_run)
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status=last_status,
+                risk_reasons=[last_status],
+                continued=True,
+                end_reason=last_status,
+            )
             continue
 
         filters = _filters_for_candidate(exchange_info, candidate.symbol)
@@ -537,6 +854,13 @@ def _evaluate_candidate_queue(
             last_status = "rejected"
             last_risk_reasons = ["symbol_filters_missing"]
             skipped_risk_reasons.append(f"{candidate.symbol}:symbol_filters_missing")
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status="rejected",
+                risk_reasons=["symbol_filters_missing"],
+                continued=True,
+                end_reason="symbol_filters_missing",
+            )
             continue
 
         execution = ExecutionEngine(
@@ -556,8 +880,22 @@ def _evaluate_candidate_queue(
             last_status = execution.status
             last_risk_reasons = list(execution.risk.reason_codes)
             skipped_risk_reasons.extend(f"{candidate.symbol}:{reason}" for reason in execution.risk.reason_codes)
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status=execution.status,
+                risk_reasons=list(execution.risk.reason_codes),
+                continued=True,
+                end_reason="retryable_risk_skip",
+            )
             continue
 
+        _finish_candidate_evaluation(
+            candidate_evaluation,
+            execution_status=execution.status,
+            risk_reasons=list(execution.risk.reason_codes),
+            continued=False,
+            end_reason="submitted" if execution.submitted else execution.status,
+        )
         return AgentRunResult(
             status=execution.status,
             mode=mode.value,
@@ -576,6 +914,8 @@ def _evaluate_candidate_queue(
             position_review=_position_review_summary(position_adjustment_plan),
             position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
             paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+            source_health=source_health,
+            candidate_evaluations=candidate_evaluations,
             persisted={
                 **_position_lifecycle_persisted(position_lifecycle_event_id),
                 "candidates": persisted_candidate_count,
@@ -604,6 +944,8 @@ def _evaluate_candidate_queue(
         position_review=_position_review_summary(position_adjustment_plan),
         position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
         paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+        source_health=source_health,
+        candidate_evaluations=candidate_evaluations,
         persisted={
             **_position_lifecycle_persisted(position_lifecycle_event_id),
             "candidates": persisted_candidate_count,
@@ -623,14 +965,93 @@ def _filters_for_candidate(exchange_info, symbol: str) -> SymbolExecutionFilters
 def _should_try_next_candidate(reason_codes: list[str]) -> bool:
     retryable = {
         "ai_decision_pass",
+        "ai_decision_not_accepted",
         "duplicate_symbol_direction_exposure",
+        "leverage_exceeds_cap",
+        "notional_exceeds_cap",
         "notional_below_min",
         "notional_below_min_executable",
+        "price_not_positive",
+        "quantity_above_max",
         "quantity_below_min",
         "quantity_not_positive",
+        "risk_exceeds_cap",
         "symbol_filters_missing",
+        "trade_decision_missing_prices",
     }
     return bool(reason_codes) and all(reason in retryable for reason in reason_codes)
+
+
+def _candidate_evaluation_base(candidate) -> dict[str, Any]:
+    return {
+        "symbol": candidate.symbol,
+        "score": candidate.score,
+        "candidate_reason_codes": list(candidate.reason_codes),
+        "data_quality_notes": list(candidate.data_quality_notes),
+        "setup": {"status": "not_evaluated"},
+        "ai": {"status": "not_evaluated"},
+        "execution": {"status": "not_evaluated"},
+        "risk_reasons": [],
+        "continued": False,
+        "end_reason": None,
+    }
+
+
+def _record_candidate_setup(candidate_evaluation: dict[str, Any], setup) -> None:
+    candidate_evaluation["setup"] = {
+        "status": "trade" if setup.decision == "trade" else "pass",
+        "decision": setup.decision,
+        "side": setup.side,
+        "confidence": setup.confidence,
+        "reasons": list(setup.reasons),
+        "warnings": list(setup.warnings),
+        "risk_reward_ratio": setup.risk_reward_ratio,
+        "stop_distance_percent": setup.stop_distance_percent,
+        "target_distance_percent": setup.target_distance_percent,
+        "notional_usdt": setup.notional_usdt,
+    }
+
+
+def _record_candidate_ai(
+    candidate_evaluation: dict[str, Any],
+    *,
+    status: str,
+    ai_run: AiDecisionRun | None = None,
+    validation_errors: list[str] | None = None,
+) -> None:
+    payload: dict[str, Any] = {"status": status}
+    if ai_run is not None:
+        validation = ai_run.validation
+        decision = validation.decision
+        payload.update(
+            {
+                "accepted": validation.accepted,
+                "validation_errors": list(validation.validation_errors),
+                "validation_warnings": list(validation.validation_warnings),
+                "decision": decision.decision if decision is not None else None,
+                "side": decision.side if decision is not None else None,
+                "confidence": decision.confidence if decision is not None else None,
+                "persisted": ai_run.persisted,
+            }
+        )
+    if validation_errors is not None:
+        payload["accepted"] = False
+        payload["validation_errors"] = list(validation_errors)
+    candidate_evaluation["ai"] = payload
+
+
+def _finish_candidate_evaluation(
+    candidate_evaluation: dict[str, Any],
+    *,
+    execution_status: str,
+    risk_reasons: list[str],
+    continued: bool,
+    end_reason: str,
+) -> None:
+    candidate_evaluation["execution"] = {"status": execution_status}
+    candidate_evaluation["risk_reasons"] = list(risk_reasons)
+    candidate_evaluation["continued"] = continued
+    candidate_evaluation["end_reason"] = end_reason
 
 
 def _quant_fallback_run(

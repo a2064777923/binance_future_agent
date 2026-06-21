@@ -47,7 +47,7 @@ def base_env(**overrides):
         "BFA_POSITION_AUTO_MANAGEMENT_ENABLED": "false",
         "BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE": "1",
         "BFA_LIVE_AUTO_HOT_SYMBOLS": "false",
-        "BFA_LIVE_AUTO_HOT_TOP_N": "40",
+        "BFA_LIVE_AUTO_HOT_TOP_N": "80",
         "BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT": "10000000",
         "BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT": "0.5",
         "BFA_FORWARD_PAPER_SYMBOLS": "",
@@ -107,7 +107,7 @@ class ConfigTests(unittest.TestCase):
 
         self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS"), "false")
-        self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "40")
+        self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "80")
         self.assertEqual(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"), [])
         self.assertEqual(config.get("BFA_POSITION_AUTO_MANAGEMENT_ENABLED"), "false")
         self.assertEqual(config.get("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE"), "1")

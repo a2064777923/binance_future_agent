@@ -316,6 +316,33 @@ class AutoHotMarketClient:
         )
 
 
+class PassThenTradeAiClient(FakeAiClient):
+    def create_decision(self, context, *, instructions, schema):
+        symbol = context.get("candidate", {}).get("symbol")
+        if symbol == "HYPEUSDT":
+            self.calls += 1
+            self.contexts.append(context)
+            payload = {
+                "decision": "pass",
+                "side": "flat",
+                "confidence": 0.6,
+                "entry_price": None,
+                "stop_price": None,
+                "target_price": None,
+                "notional_usdt": None,
+                "hold_time_minutes": None,
+                "reasons": ["weak_follow_through"],
+            }
+            return OpenAIResponse(
+                response_id="resp_agent_pass",
+                request_payload={"context": context, "schema": schema},
+                raw_response={"id": "resp_agent_pass", "output_text": json.dumps(payload)},
+                output_text=json.dumps(payload),
+                response_headers={},
+            )
+        return super().create_decision(context, instructions=instructions, schema=schema)
+
+
 class AgentRunnerTests(unittest.TestCase):
     def test_run_once_collects_decides_and_executes_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -441,6 +468,9 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.narrative_record_count, 1)
         self.assertEqual(ai_client.calls, 1)
         self.assertGreaterEqual(result.persisted["order_intent"], 1)
+        self.assertEqual(result.source_health["market_heat_fallback"]["status"], "used")
+        self.assertEqual(result.source_health["market_heat_fallback"]["record_count"], 1)
+        self.assertEqual(result.source_health["narrative_sources"]["source_counts"]["market_heat"], 1)
 
     def test_run_once_stops_before_execution_when_openai_errors(self):
         class FailingAiClient:
@@ -837,6 +867,101 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(ai_client.calls, 2)
         self.assertIn("HYPEUSDT:duplicate_symbol_direction_exposure", result.risk_reasons)
         self.assertIn("risk_accepted", result.risk_reasons)
+        self.assertEqual(result.candidate_evaluations[0]["symbol"], "HYPEUSDT")
+        self.assertTrue(result.candidate_evaluations[0]["continued"])
+        self.assertEqual(result.candidate_evaluations[0]["end_reason"], "retryable_risk_skip")
+        self.assertEqual(result.candidate_evaluations[1]["symbol"], "BTCUSDT")
+        self.assertFalse(result.candidate_evaluations[1]["continued"])
+        self.assertEqual(result.candidate_evaluations[1]["end_reason"], "submitted")
+
+    def test_run_once_tries_next_candidate_after_ai_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ai_client = PassThenTradeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "HYPEUSDT,BTCUSDT",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=TwoSymbolMarketClient(),
+                collector=TwoSymbolCollector(),
+                narrative_runner=TwoSymbolNarrativeRunner(),
+                ai_client=ai_client,
+                top_n=2,
+            )
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(result.selected_symbol, "BTCUSDT")
+        self.assertEqual(result.evaluated_symbols, ["HYPEUSDT", "BTCUSDT"])
+        self.assertEqual(ai_client.calls, 2)
+        self.assertEqual(result.candidate_evaluations[0]["ai"]["status"], "ai_pass")
+        self.assertTrue(result.candidate_evaluations[0]["continued"])
+        self.assertEqual(result.candidate_evaluations[0]["end_reason"], "ai_pass")
+        self.assertEqual(result.candidate_evaluations[1]["execution"]["status"], "dry_run")
+
+    def test_live_run_once_stops_candidate_queue_on_portfolio_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ai_client = FakeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "HYPEUSDT,BTCUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "3",
+                    "BFA_MULTI_POSITION_ENABLED": "true",
+                    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+                    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "105",
+                    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "500",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=TwoSymbolMarketClient(),
+                collector=TwoSymbolCollector(),
+                narrative_runner=TwoSymbolNarrativeRunner(),
+                ai_client=ai_client,
+                signed_client=FakeSignedClient(
+                    positions=[
+                        {
+                            "symbol": "OTHERUSDT",
+                            "positionAmt": "1",
+                            "positionSide": "LONG",
+                            "notional": "100",
+                            "initialMargin": "10",
+                            "leverage": "10",
+                        }
+                    ]
+                ),
+                top_n=2,
+            )
+
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.submitted)
+        self.assertEqual(result.evaluated_symbols, ["HYPEUSDT"])
+        self.assertEqual(ai_client.calls, 1)
+        self.assertIn("portfolio_notional_cap_reached", result.risk_reasons)
+        self.assertFalse(result.candidate_evaluations[0]["continued"])
+        self.assertEqual(result.candidate_evaluations[0]["end_reason"], "rejected")
 
     def test_run_once_can_scan_auto_hot_symbols_beyond_fixed_live_allowlist(self):
         class AutoHotCollector:
@@ -905,6 +1030,113 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(len(result.evaluated_symbols), 1)
         self.assertIn(result.selected_symbol, {"HOTUSDT", "ALTUSDT"})
         self.assertIn(("ticker_24hr", None), market_client.calls)
+        self.assertEqual(result.source_health["binance_24h_ticker"]["selected_count"], 2)
+        self.assertEqual(result.source_health["market_snapshots"]["event_type_counts"]["kline"], 2)
+        self.assertEqual(result.source_health["narrative_sources"]["source_counts"]["binance_square"], 2)
+        self.assertEqual(result.source_health["market_heat_fallback"]["status"], "not_needed")
+        self.assertIn("paper_guard", result.source_health)
+
+    def test_run_once_auto_hot_default_selects_80_symbols_and_excludes_manual_before_ranking(self):
+        symbols = [f"HOT{i:03d}USDT" for i in range(1, 81)]
+
+        class BroadAutoHotMarketClient:
+            def __init__(self):
+                self.calls = []
+
+            def ticker_24hr(self, symbol=None):
+                self.calls.append(("ticker_24hr", symbol))
+                payload = [
+                    {"symbol": "BTWUSDT", "priceChangePercent": "500", "quoteVolume": "999000000", "count": 1000}
+                ]
+                payload.extend(
+                    {
+                        "symbol": symbol,
+                        "priceChangePercent": str(200 - index),
+                        "quoteVolume": str(900000000 - index),
+                        "count": 1000,
+                    }
+                    for index, symbol in enumerate(symbols)
+                )
+                return MarketDataResponse(endpoint="/fapi/v1/ticker/24hr", params={}, payload=payload)
+
+            def exchange_info(self):
+                self.calls.append(("exchange_info",))
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/exchangeInfo",
+                    params={},
+                    payload=exchange_info_payload(*symbols),
+                )
+
+        class BroadCollector:
+            def collect_rest_snapshots(self):
+                snapshots = []
+                for symbol in symbols:
+                    snapshots.extend(snapshots_for_symbol(symbol, price_change="8.0", quote_volume="50000000"))
+                    snapshots.append(
+                        NormalizedMarketSnapshot(
+                            source="binance_usdm",
+                            event_type="open_interest",
+                            symbol=symbol,
+                            event_time=1700000000005,
+                            received_at="2026-06-20T10:00:00Z",
+                            payload={"open_interest": "500000"},
+                        )
+                    )
+                return snapshots
+
+        class BroadNarrativeRunner:
+            def collect(self):
+                return [
+                    NormalizedNarrativeRecord(
+                        source="binance_square",
+                        source_id=f"square-{symbol}",
+                        author="poster",
+                        symbol_mentions=[symbol],
+                        text=f"{symbol} hot narrative",
+                        url=None,
+                        published_at="2026-06-20T09:58:00Z",
+                        collected_at="2026-06-20T10:00:00Z",
+                        engagement={"likes": 70, "comments": 7},
+                        raw={},
+                        quality_flags=[],
+                    )
+                    for symbol in symbols
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            market_client = BroadAutoHotMarketClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTWUSDT,HOT001USDT",
+                    "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                    "BFA_LIVE_AUTO_HOT_SYMBOLS": "true",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=market_client,
+                collector=BroadCollector(),
+                narrative_runner=BroadNarrativeRunner(),
+                ai_client=FakeAiClient(),
+                top_n=1,
+            )
+
+        self.assertEqual(len(result.scan_symbols), 80)
+        self.assertNotIn("BTWUSDT", result.scan_symbols)
+        self.assertEqual(result.source_health["symbol_selection"]["selected_count"], 80)
+        self.assertEqual(result.source_health["binance_24h_ticker"]["payload_count"], 81)
+        self.assertEqual(result.source_health["binance_24h_ticker"]["eligible_payload_count"], 80)
+        self.assertEqual(result.source_health["manual_symbol_exclusions"]["excluded_symbols"], ["BTWUSDT"])
+        self.assertNotIn("BTWUSDT", result.evaluated_symbols)
 
     def test_run_once_auto_hot_falls_back_to_market_symbols_when_empty(self):
         class EmptyHotMarketClient(FakeMarketClient):
@@ -1036,6 +1268,9 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.scan_symbols, ["HOTUSDT"])
         self.assertNotIn("BTWUSDT", result.evaluated_symbols)
         self.assertIn(("ticker_24hr", None), market_client.calls)
+        self.assertEqual(result.source_health["manual_symbol_exclusions"]["excluded_symbols"], ["BTWUSDT"])
+        self.assertEqual(result.source_health["binance_24h_ticker"]["eligible_payload_count"], 1)
+        self.assertNotIn("BTWUSDT", result.source_health["symbol_selection"]["selected_symbols"])
 
     def test_run_once_forward_paper_guard_rejects_blocked_symbol_before_ai(self):
         with tempfile.TemporaryDirectory() as tmp:

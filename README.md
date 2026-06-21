@@ -167,8 +167,13 @@ evaluate the next candidate while still submitting at most one order per cycle.
 
 Live auto-hot scanning is optional and disabled by default. When
 `BFA_LIVE_AUTO_HOT_SYMBOLS=true`, the runner can select a wider hot-symbol
-scanning universe from Binance USD-M 24h ticker data, then still applies
-`--top-n`, setup gates, AI overlay or quant fallback, risk caps, and the
+scanning universe from Binance USD-M 24h ticker data; the default live
+auto-hot universe is 80 symbols through `BFA_LIVE_AUTO_HOT_TOP_N` and remains
+fully configurable. The live result includes source-health diagnostics for
+ticker selection, market snapshots, narrative inputs, market-heat fallback, and
+paper-guard state, plus per-candidate queue diagnostics showing setup, AI, and
+risk/execution outcomes. The runner still applies `--top-n`, setup gates, AI
+overlay or quant fallback, risk caps, manual-symbol exclusions, and the
 one-order-per-cycle limit. If auto-hot selection is off or returns no symbols,
 live falls back to `BFA_MARKET_SYMBOLS`.
 
