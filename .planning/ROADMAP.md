@@ -144,7 +144,7 @@
 - [x] Phase 66: Live Cycle Explainability And Ledger Cadence (1/1 plan) (completed 2026-06-21)
 - [x] Phase 67: Adaptive Hot-Symbol Breadth And Guarded Queue (1 plan) (completed 2026-06-21)
 - [x] Phase 68: Multi-Factor Edge And Point Precision (1 plan) (completed 2026-06-21)
-- [ ] Phase 69: Adaptive Sizing And High-Leverage Governor (1 plan)
+- [x] Phase 69: Adaptive Sizing And High-Leverage Governor (1 plan) (completed 2026-06-21)
 - [ ] Phase 70: Server Canary And Manual Boundary Verification (1 plan)
 
 </details>
@@ -213,7 +213,7 @@ well-formed trade/no-trade proposal instead of a thin hotness summary.
 **Requirements:** EDGE-01, EDGE-02, EDGE-03, EDGE-04
 
 **Plans:** 1/1 plans complete
-**Status:** Not started
+**Status:** Complete
 
 **Success criteria:**
 
@@ -238,8 +238,8 @@ portfolio pressure is unsafe for the pilot.
 
 **Requirements:** SIZE-01, SIZE-02, SIZE-03, SIZE-04
 
-**Plans:** 0/1 plan complete
-**Status:** Not started
+**Plans:** 1/1 plans complete
+**Status:** Complete
 
 **Success criteria:**
 
@@ -297,7 +297,7 @@ under current live pilot conditions.
 | v1.24 Server Readiness And Paper Promotion | 53-55 | 3/3 | Complete | 2026-06-21 |
 | v1.25 Live Resume Clearance And Adaptive Pilot | 56-60 | 5/5 | Complete | 2026-06-21 |
 | v1.26 Live Position Management And Pilot Learning | 61-65 | 5/5 | Complete | 2026-06-21 |
-| v1.27 Adaptive Live Pilot Iteration | 66-70 | 1/5 | In progress | - |
+| v1.27 Adaptive Live Pilot Iteration | 66-70 | 4/5 | In progress | - |
 
 ## Requirement Coverage
 
@@ -312,6 +312,5 @@ under current live pilot conditions.
 
 ## Next Step
 
-Start Phase 67 with `$gsd-discuss-phase 67`. The immediate focus is broader
-live hot-symbol scanning and guarded queue behavior using the Phase 66
-explainability surface.
+Start Phase 70 with `$gsd-plan-phase 70`. The immediate focus is isolated
+server canary deployment and manual-boundary verification for `BTWUSDT`.

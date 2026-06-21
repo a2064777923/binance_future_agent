@@ -176,6 +176,8 @@ class ExposureStatusTests(unittest.TestCase):
                     BFA_MANUAL_POSITION_SYMBOLS="BTWUSDT",
                     BFA_MULTI_POSITION_ENABLED="false",
                     BFA_MAX_OPEN_POSITIONS="1",
+                    BFA_MAX_PORTFOLIO_MARGIN_USDT="20",
+                    BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
                 ),
                 db_path=str(db_path),
                 signed_client=client,
@@ -187,8 +189,49 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertTrue(payload["entry_capacity"]["can_open_new_position"])
         self.assertEqual(payload["entry_capacity"]["active_position_count"], 0)
         self.assertEqual(payload["entry_capacity"]["manual_position_count"], 1)
+        self.assertAlmostEqual(payload["entry_capacity"]["manual_initial_margin_usdt"], 7.32)
+        self.assertAlmostEqual(payload["entry_capacity"]["total_initial_margin_usdt"], 7.32)
         self.assertEqual(payload["entry_capacity"]["active_exposures"], [])
         self.assertEqual(payload["entry_capacity"]["manual_exposures"][0]["symbol"], "BTWUSDT")
+
+    def test_manual_margin_pressure_can_block_without_counting_manual_position_slot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            db_path = root / "agent.sqlite"
+            client = FakeSignedClient(
+                positions=[
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "notional": "-73.2",
+                        "initialMargin": "7.32",
+                        "leverage": "10",
+                    }
+                ]
+            )
+
+            report = build_exposure_status_report(
+                self.config(
+                    root,
+                    BFA_MANUAL_POSITION_SYMBOLS="BTWUSDT",
+                    BFA_MAX_OPEN_POSITIONS="1",
+                    BFA_MULTI_POSITION_ENABLED="false",
+                    BFA_MAX_PORTFOLIO_MARGIN_USDT="6",
+                    BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+                ),
+                db_path=str(db_path),
+                signed_client=client,
+                target_profile="",
+            )
+
+        payload = report.to_dict()
+        self.assertEqual(payload["entry_capacity"]["active_position_count"], 0)
+        self.assertEqual(payload["entry_capacity"]["manual_position_count"], 1)
+        self.assertFalse(payload["entry_capacity"]["can_open_new_position"])
+        self.assertIn("portfolio_margin_cap_reached", payload["entry_capacity"]["reasons"])
+        self.assertIn("manual_margin_pressure_included", payload["entry_capacity"]["reasons"])
 
 
 def _persist_submitted_hype_intent(db_path: Path) -> int:

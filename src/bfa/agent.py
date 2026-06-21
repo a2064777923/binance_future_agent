@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 import time
@@ -24,7 +24,12 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
-from bfa.execution.sizing import compute_position_sizing, dynamic_sizing_enabled, sizing_input_from_config
+from bfa.execution.sizing import (
+    apply_adaptive_sizing_governor,
+    compute_position_sizing,
+    dynamic_sizing_enabled,
+    sizing_input_from_config,
+)
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.market.collector import MarketDataCollector
 from bfa.narrative.collector import NarrativeCollectionRunner
@@ -680,6 +685,14 @@ def _evaluate_candidate_queue(
             risk_limits=risk_limits,
             profile=merge_guard_profile(None, paper_guard),
         )
+        governor = apply_adaptive_sizing_governor(
+            config,
+            setup=setup,
+            candidate=candidate,
+            risk_state=risk_state,
+            paper_guard=paper_guard,
+        )
+        setup = _setup_with_sizing_governor(setup, governor)
         persist_trade_setup(
             store,
             setup=setup,
@@ -688,6 +701,19 @@ def _evaluate_candidate_queue(
         )
         trade_setups_persisted += 1
         _record_candidate_setup(candidate_evaluation, setup)
+        candidate_evaluation["sizing_governor"] = governor.to_dict()
+        if not governor.accepted:
+            last_status = "quant_pass"
+            last_validation_errors = list(governor.reason_codes)
+            skipped_risk_reasons.extend(f"{candidate.symbol}:{reason}" for reason in governor.reason_codes)
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status="quant_pass",
+                risk_reasons=list(governor.reason_codes),
+                continued=True,
+                end_reason="adaptive_sizing_governor",
+            )
+            continue
         if setup.decision != "trade":
             last_status = "quant_pass"
             last_validation_errors = list(setup.reasons)
@@ -1014,6 +1040,37 @@ def _record_candidate_setup(candidate_evaluation: dict[str, Any], setup) -> None
     }
 
 
+def _setup_with_sizing_governor(setup, governor):
+    payload = governor.to_dict()
+    price_basis = dict(setup.price_basis)
+    price_basis["adaptive_sizing_governor"] = payload
+    warnings = _dedupe([*setup.warnings, *governor.warnings])
+    reasons = _dedupe([*setup.reasons, *governor.reason_codes])
+    if not governor.accepted:
+        return replace(
+            setup,
+            decision="pass",
+            side="flat",
+            entry_price=None,
+            stop_price=None,
+            target_price=None,
+            notional_usdt=None,
+            hold_time_minutes=None,
+            price_basis=price_basis,
+            reasons=reasons,
+            warnings=warnings,
+        )
+    if governor.final_notional_usdt is None:
+        return replace(setup, price_basis=price_basis, reasons=reasons, warnings=warnings)
+    return replace(
+        setup,
+        notional_usdt=governor.final_notional_usdt,
+        price_basis=price_basis,
+        reasons=reasons,
+        warnings=warnings,
+    )
+
+
 def _record_candidate_ai(
     candidate_evaluation: dict[str, Any],
     *,
@@ -1236,43 +1293,75 @@ def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None 
         positions = signed_client.position_risk()
     except Exception:
         return None
+    account_available_balance = None
+    account_total_wallet_balance = None
+    try:
+        account = signed_client.account()
+    except Exception:
+        account = {}
+    if isinstance(account, dict):
+        account_available_balance = _float_or_none(account.get("availableBalance"))
+        account_total_wallet_balance = _float_or_none(account.get("totalWalletBalance"))
     excluded = {symbol.upper() for symbol in (manual_symbols or set())}
     active_positions = 0
     active_exposures: list[dict[str, Any]] = []
+    manual_exposures: list[dict[str, Any]] = []
     for position in positions:
         symbol = str(position.get("symbol", "")).upper()
         try:
             amount = abs(float(position.get("positionAmt", 0)))
         except (TypeError, ValueError):
             amount = 0.0
-        if amount > 0 and symbol not in excluded:
+        if amount <= 0:
+            continue
+        exposure = {
+            "symbol": symbol,
+            "direction": _position_direction(position),
+            "notional_usdt": _position_notional(position),
+            "initial_margin_usdt": _position_initial_margin(position),
+            "leverage": _position_leverage(position),
+        }
+        if symbol in excluded:
+            manual_exposures.append(exposure)
+        else:
             active_positions += 1
-            direction = _position_direction(position)
-            active_exposures.append(
-                {
-                    "symbol": symbol,
-                    "direction": direction,
-                    "notional_usdt": _position_notional(position),
-                    "initial_margin_usdt": _position_initial_margin(position),
-                    "leverage": _position_leverage(position),
-                }
-            )
-    return RiskState(active_positions=active_positions, active_exposures=active_exposures)
+            active_exposures.append(exposure)
+    return RiskState(
+        active_positions=active_positions,
+        active_exposures=active_exposures,
+        manual_exposures=manual_exposures,
+        account_available_balance_usdt=account_available_balance,
+        account_total_wallet_balance_usdt=account_total_wallet_balance,
+    )
 
 
 def _live_entry_capacity_blockers(config: AppConfig, risk_state: RiskState | None) -> list[str]:
-    if risk_state is None or risk_state.active_positions <= 0:
+    if risk_state is None:
         return []
     reasons: list[str] = []
-    if not _truthy(config.get("BFA_MULTI_POSITION_ENABLED")):
+    if risk_state.active_positions > 0 and not _truthy(config.get("BFA_MULTI_POSITION_ENABLED")):
         reasons.append("multi_position_disabled")
     try:
         max_open_positions = int(config.get("BFA_MAX_OPEN_POSITIONS"))
     except (TypeError, ValueError):
         max_open_positions = 0
-    if risk_state.active_positions >= max_open_positions:
+    if risk_state.active_positions > 0 and risk_state.active_positions >= max_open_positions:
         reasons.append("max_open_positions_reached")
+    portfolio_margin_cap = _portfolio_margin_cap(config)
+    if portfolio_margin_cap > 0 and risk_state.total_initial_margin_usdt >= portfolio_margin_cap:
+        reasons.append("portfolio_margin_cap_reached")
+        if risk_state.manual_initial_margin_usdt > 0:
+            reasons.append("manual_margin_pressure_included")
     return _dedupe(reasons)
+
+
+def _portfolio_margin_cap(config: AppConfig) -> float:
+    absolute = _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_USDT")) or 0.0
+    capital = _float_or_none(config.get("BFA_ACCOUNT_CAPITAL_USDT")) or 0.0
+    fraction = _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_FRACTION")) or 0.0
+    fraction_cap = capital * fraction
+    positive = [value for value in (absolute, fraction_cap) if value > 0]
+    return min(positive) if positive else 0.0
 
 
 def _position_direction(position: dict[str, Any]) -> str:

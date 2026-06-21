@@ -1,7 +1,13 @@
 import unittest
 
 from bfa.config import load_config
-from bfa.execution.sizing import compute_position_sizing, dynamic_sizing_enabled, sizing_input_from_config
+from bfa.execution.models import RiskState
+from bfa.execution.sizing import (
+    apply_adaptive_sizing_governor,
+    compute_position_sizing,
+    dynamic_sizing_enabled,
+    sizing_input_from_config,
+)
 
 
 class ExecutionSizingTests(unittest.TestCase):
@@ -109,6 +115,149 @@ class ExecutionSizingTests(unittest.TestCase):
 
         self.assertLess(result.max_position_notional_usdt, 5.1)
         self.assertIn("below_min_executable_notional", result.warnings)
+
+    def test_adaptive_governor_can_scale_strong_setup_inside_hard_caps(self):
+        config = load_config(
+            {
+                "BFA_ACCOUNT_CAPITAL_USDT": "100",
+                "BFA_MAX_LEVERAGE": "10",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+                "BFA_STRONG_LIQUIDITY_QUOTE_VOLUME_USDT": "50000000",
+            }
+        )
+
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(notional=120, edge=55, confidence=0.84, stop_distance=1.0),
+            candidate=_candidate(quote_volume=120_000_000, volatility=1.2),
+            risk_state=RiskState(account_available_balance_usdt=80),
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertGreater(result.final_notional_usdt, 120)
+        self.assertLessEqual(result.final_notional_usdt, 500)
+        self.assertIn("adaptive_scaled_up_within_caps", result.reason_codes)
+        self.assertEqual(result.diagnostics["hard_cap_candidates"]["max_position_notional"], 500)
+
+    def test_adaptive_governor_downsizes_weak_or_manual_pressure_setup(self):
+        config = load_config(
+            {
+                "BFA_ACCOUNT_CAPITAL_USDT": "100",
+                "BFA_MAX_LEVERAGE": "10",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+            }
+        )
+
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(notional=220, edge=12, confidence=0.58, stop_distance=1.0),
+            candidate=_candidate(quote_volume=8_000_000, volatility=4.0),
+            risk_state=RiskState(
+                account_available_balance_usdt=80,
+                manual_exposures=[{"symbol": "BTWUSDT", "initial_margin_usdt": 55}],
+            ),
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertLess(result.final_notional_usdt, 220)
+        self.assertIn("adaptive_downsized", result.reason_codes)
+        self.assertIn("adaptive_manual_margin_pressure_downsize", result.warnings)
+
+    def test_adaptive_governor_does_not_upsize_weak_signal_just_because_cap_is_wide(self):
+        config = load_config(
+            {
+                "BFA_ACCOUNT_CAPITAL_USDT": "100",
+                "BFA_MAX_LEVERAGE": "10",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+            }
+        )
+
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(notional=120, edge=14, confidence=0.58, stop_distance=1.0),
+            candidate=_candidate(quote_volume=18_000_000, volatility=2.0),
+            risk_state=RiskState(account_available_balance_usdt=80),
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertLessEqual(result.final_notional_usdt, 120)
+        self.assertFalse(result.diagnostics["expansion_allowed"])
+
+    def test_high_leverage_governor_blocks_stop_too_close_to_liquidation(self):
+        config = load_config(
+            {
+                "BFA_MAX_LEVERAGE": "20",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_HIGH_LEVERAGE_THRESHOLD": "8",
+                "BFA_HIGH_LEVERAGE_MAX_STOP_TO_LIQUIDATION_RATIO": "0.15",
+            }
+        )
+
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(notional=120, edge=50, confidence=0.82, stop_distance=2.0),
+            candidate=_candidate(quote_volume=80_000_000, volatility=1.0),
+            risk_state=RiskState(account_available_balance_usdt=80),
+        )
+
+        self.assertFalse(result.accepted)
+        self.assertIsNone(result.final_notional_usdt)
+        self.assertIn("stop_too_close_to_liquidation_for_high_leverage", result.reason_codes)
+
+
+def _setup(*, notional: float, edge: float, confidence: float, stop_distance: float) -> dict:
+    return {
+        "symbol": "SOLUSDT",
+        "decision": "trade",
+        "side": "long",
+        "confidence": confidence,
+        "entry_price": 100.0,
+        "stop_price": 100.0 * (1 - stop_distance / 100),
+        "target_price": 103.0,
+        "notional_usdt": notional,
+        "hold_time_minutes": 15,
+        "factor_summary": {
+            "edge_score": edge,
+            "confidence": confidence,
+            "coverage_ratio": 0.92,
+        },
+        "price_basis": {
+            "stop_distance_percent": stop_distance,
+            "risk_reward_ratio": 2.0,
+            "sizing_diagnostics": {"stop_distance_percent": stop_distance},
+            "liquidation_diagnostics": {
+                "approx_liquidation_distance_percent": 10.0,
+                "stop_before_liquidation": True,
+            },
+        },
+        "reasons": ["quant_long_setup"],
+        "warnings": [],
+    }
+
+
+def _candidate(*, quote_volume: float, volatility: float) -> dict:
+    return {
+        "symbol": "SOLUSDT",
+        "features": {
+            "quote_volume": quote_volume,
+            "atr_percent": volatility,
+            "min_executable_notional": 5.0,
+        },
+    }
 
 
 if __name__ == "__main__":

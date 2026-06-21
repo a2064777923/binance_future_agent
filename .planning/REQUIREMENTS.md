@@ -59,19 +59,19 @@ projects or losing control of downside.
 
 ### Adaptive Sizing And Leverage Governor
 
-- [ ] **SIZE-01**: Dynamic sizing can raise or lower per-trade notional within
+- [x] **SIZE-01**: Dynamic sizing can raise or lower per-trade notional within
   configured absolute caps using signal quality, stop distance, liquidity,
   volatility, available balance, and recent outcome health.
 
-- [ ] **SIZE-02**: High-leverage entries are blocked or downsized when stop
+- [x] **SIZE-02**: High-leverage entries are blocked or downsized when stop
   distance, liquidation distance, spread/slippage, or volatility makes the
   setup unsafe for the active small-capital pilot.
 
-- [ ] **SIZE-03**: Portfolio risk checks include account-level available
+- [x] **SIZE-03**: Portfolio risk checks include account-level available
   balance and manual-position margin pressure while continuing to exclude
   manual symbols from bot-managed position count and bot exit actions.
 
-- [ ] **SIZE-04**: Any risk-cap or sizing-rule increase has a preview artifact,
+- [x] **SIZE-04**: Any risk-cap or sizing-rule increase has a preview artifact,
   rollback path, and evidence gate; guard feedback can decrease risk but cannot
   increase risk without explicit operator approval.
 
@@ -125,10 +125,10 @@ projects or losing control of downside.
 | EDGE-02 | Phase 68 | Complete |
 | EDGE-03 | Phase 68 | Complete |
 | EDGE-04 | Phase 68 | Complete |
-| SIZE-01 | Phase 69 | Pending |
-| SIZE-02 | Phase 69 | Pending |
-| SIZE-03 | Phase 69 | Pending |
-| SIZE-04 | Phase 69 | Pending |
+| SIZE-01 | Phase 69 | Complete |
+| SIZE-02 | Phase 69 | Complete |
+| SIZE-03 | Phase 69 | Complete |
+| SIZE-04 | Phase 69 | Complete |
 | OPS-05 | Phase 70 | Pending |
 | RISK-05 | Phase 70 | Pending |
 
@@ -140,4 +140,4 @@ projects or losing control of downside.
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after Phase 67 verification*
+*Last updated: 2026-06-21 after Phase 69 verification*

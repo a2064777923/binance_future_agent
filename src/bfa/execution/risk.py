@@ -123,6 +123,13 @@ def evaluate_risk(
     )
     if _portfolio_margin_after_entry(intent, risk_state) > portfolio_margin_fraction_cap:
         reasons.append("portfolio_margin_fraction_reached")
+    if (
+        risk_state.account_available_balance_usdt is not None
+        and intent.estimated_initial_margin_usdt > risk_state.account_available_balance_usdt
+    ):
+        reasons.append("account_available_balance_insufficient")
+    if risk_state.manual_initial_margin_usdt > 0:
+        warnings.append("manual_margin_pressure_included")
     if _portfolio_notional_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_NOTIONAL_USDT"):
         reasons.append("portfolio_notional_cap_reached")
     if _same_direction_notional_after_entry(intent, risk_state) > _float_config(
@@ -173,7 +180,7 @@ def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
 
 
 def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
-    return risk_state.active_initial_margin_usdt + intent.estimated_initial_margin_usdt
+    return risk_state.total_initial_margin_usdt + intent.estimated_initial_margin_usdt
 
 
 def _portfolio_notional_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:

@@ -295,13 +295,13 @@ control of downside.
   back into guard recommendations.
 - [x] Deploy v1.26 server evidence without touching unrelated server projects
   or managing manual `BTWUSDT`.
-- [ ] Make latest live-cycle decisions explainable by evaluated symbol, factor,
+- [x] Make latest live-cycle decisions explainable by evaluated symbol, factor,
   AI/risk decision, sizing cap, and order/no-order result.
-- [ ] Broaden live hot-symbol scanning while preserving liquidity,
+- [x] Broaden live hot-symbol scanning while preserving liquidity,
   tradability, weak-evidence, one-order-per-cycle, and manual-symbol guards.
-- [ ] Improve deterministic multi-factor edge scoring and entry/stop/target
+- [x] Improve deterministic multi-factor edge scoring and entry/stop/target
   point precision before AI overlay.
-- [ ] Add adaptive sizing and high-leverage governors that can downsize or
+- [x] Add adaptive sizing and high-leverage governors that can downsize or
   block unsafe setups and require explicit evidence before raising risk.
 - [ ] Deploy v1.27 server canary evidence without touching unrelated server
   projects or managing manual `BTWUSDT`.
@@ -523,8 +523,8 @@ generation.
 hot-symbol observation, improving multi-factor edge and point precision, and
 adapting sizing inside explicit small-capital risk governors.
 
-**Status:** Phase 68 is complete locally. Phase 69 is next: add adaptive sizing
-and high-leverage governors using the richer factor and point diagnostics.
+**Status:** Phase 69 is complete locally. Phase 70 is next: deploy and verify
+the v1.27 server canary while preserving the manual `BTWUSDT` boundary.
 
 **Target features:**
 - Explain every recent live cycle by evaluated symbols, factor evidence,
@@ -888,4 +888,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 68 completion.*
+*Last updated: 2026-06-21 after Phase 69 completion.*

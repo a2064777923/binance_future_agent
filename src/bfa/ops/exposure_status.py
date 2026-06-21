@@ -52,6 +52,8 @@ class EntryCapacity:
     manual_position_count: int = 0
     active_notional_usdt: float = 0.0
     active_initial_margin_usdt: float = 0.0
+    manual_initial_margin_usdt: float = 0.0
+    total_initial_margin_usdt: float = 0.0
     max_portfolio_notional_usdt: float | None = None
     max_portfolio_margin_usdt: float | None = None
     active_exposures: list[dict[str, Any]] = field(default_factory=list)
@@ -69,6 +71,8 @@ class EntryCapacity:
             "manual_position_count": self.manual_position_count,
             "active_notional_usdt": self.active_notional_usdt,
             "active_initial_margin_usdt": self.active_initial_margin_usdt,
+            "manual_initial_margin_usdt": self.manual_initial_margin_usdt,
+            "total_initial_margin_usdt": self.total_initial_margin_usdt,
             "max_portfolio_notional_usdt": self.max_portfolio_notional_usdt,
             "max_portfolio_margin_usdt": self.max_portfolio_margin_usdt,
             "active_exposures": [dict(item) for item in self.active_exposures],
@@ -240,6 +244,8 @@ def _entry_capacity(
     multi_enabled = multi_position_enabled(config)
     active_notional = sum(_float_or_none(item.get("notional_usdt")) or 0.0 for item in active_exposures)
     active_margin = sum(_exposure_margin(item) for item in active_exposures)
+    manual_margin = sum(_exposure_margin(item) for item in manual_exposures)
+    total_margin = active_margin + manual_margin
     max_portfolio_notional = _float_or_none(config.get("BFA_MAX_PORTFOLIO_NOTIONAL_USDT"))
     max_portfolio_margin = min(
         _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_USDT")) or 0.0,
@@ -257,8 +263,10 @@ def _entry_capacity(
         reasons.append("max_open_positions_reached")
     if max_portfolio_notional is not None and active_notional >= max_portfolio_notional:
         reasons.append("portfolio_notional_cap_reached")
-    if max_portfolio_margin > 0 and active_margin >= max_portfolio_margin:
+    if max_portfolio_margin > 0 and total_margin >= max_portfolio_margin:
         reasons.append("portfolio_margin_cap_reached")
+        if manual_margin > 0:
+            reasons.append("manual_margin_pressure_included")
 
     hypothetical = _hypothetical_capacity(
         active_exposures,
@@ -290,6 +298,8 @@ def _entry_capacity(
         manual_position_count=len(manual_exposures),
         active_notional_usdt=round(active_notional, 8),
         active_initial_margin_usdt=round(active_margin, 8),
+        manual_initial_margin_usdt=round(manual_margin, 8),
+        total_initial_margin_usdt=round(total_margin, 8),
         max_portfolio_notional_usdt=max_portfolio_notional,
         max_portfolio_margin_usdt=round(max_portfolio_margin, 8) if max_portfolio_margin > 0 else None,
         active_exposures=active_exposures,

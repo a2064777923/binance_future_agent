@@ -31,6 +31,8 @@ class RiskProfileTests(unittest.TestCase):
         self.assertEqual(changed["BFA_MAX_LEVERAGE"], "8")
         self.assertEqual(changed["BFA_MAX_POSITION_NOTIONAL_USDT"], "20")
         self.assertEqual(changed["BFA_DYNAMIC_POSITION_SIZING_ENABLED"], "true")
+        self.assertEqual(plan.target_values["BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED"], "true")
+        self.assertEqual(changed["BFA_ADAPTIVE_SIZING_MAX_MULTIPLIER"], "0.90")
         self.assertTrue(plan.confirmation_token.startswith("RISK-PROFILE-30U_8X_DYNAMIC-"))
 
     def test_two_position_preview_sets_multi_position_keys(self):
@@ -63,6 +65,9 @@ class RiskProfileTests(unittest.TestCase):
         self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_MARGIN_FRACTION"], "2.50")
         self.assertEqual(plan.target_values["BFA_MAX_PORTFOLIO_NOTIONAL_USDT"], "3600")
         self.assertEqual(plan.target_values["BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT"], "2700")
+        self.assertEqual(plan.target_values["BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED"], "true")
+        self.assertEqual(plan.target_values["BFA_ADAPTIVE_SIZING_MAX_MULTIPLIER"], "1.15")
+        self.assertEqual(plan.target_values["BFA_HIGH_LEVERAGE_MAX_STOP_TO_LIQUIDATION_RATIO"], "0.45")
 
     def test_apply_requires_matching_confirmation_token(self):
         report = apply_risk_profile(

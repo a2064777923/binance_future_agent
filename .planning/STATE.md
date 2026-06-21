@@ -2,25 +2,25 @@
 gsd_state_version: 1.0
 milestone: v1.27
 milestone_name: Adaptive Live Pilot Iteration
-current_phase: 69 — Adaptive Sizing And High-Leverage Governor
-current_phase_name: Multi-Factor Edge And Point Precision
+current_phase: 70 — Server Canary And Manual Boundary Verification
+current_phase_name: Server Canary And Manual Boundary Verification
 status: planning
-stopped_at: Phase 68 context gathered
-last_updated: "2026-06-21T01:50:55.645Z"
+stopped_at: Phase 69 complete
+last_updated: "2026-06-21T02:28:02Z"
 last_activity: 2026-06-21
-last_activity_desc: Phase 68 complete, transitioned to Phase 69
+last_activity_desc: Phase 69 complete, transitioned to Phase 70
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 3
-  completed_plans: 3
-  percent: 60
+  completed_phases: 4
+  total_plans: 4
+  completed_plans: 4
+  percent: 80
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** 69 — Adaptive Sizing And High-Leverage Governor
+**Current phase:** 70 — Server Canary And Manual Boundary Verification
 **Status:** Ready to plan
 **Last planned:** 2026-06-21
 **Plan count:** 0
@@ -32,9 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Upgrade deterministic multi-factor edge scoring and
-entry/stop/target point precision now that Phase 67 broad scanning and
-candidate-queue diagnostics are in place.
+**Current focus:** Deploy and verify the v1.27 server canary while preserving
+isolated paths, live/paper timers, adaptive sizing diagnostics, and the manual
+`BTWUSDT` boundary.
 
 ## Decisions
 
@@ -46,12 +46,14 @@ candidate-queue diagnostics are in place.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active trial profile: 45 USDT configured account capital, 10x max leverage,
-  300 USDT max bot-managed position notional, 30 USDT max margin per position,
-  0.7 USDT max per-trade risk, 2 USDT max daily loss, 30 bot-managed open
-  positions, 2400 USDT portfolio notional cap, and 1800 USDT same-direction
-  notional cap under dynamic sizing and portfolio caps. Manual symbols such as
-  `BTWUSDT` remain visible in diagnostics but do not consume bot entry capacity.
+- Active live server caps were operator-widened during Phase 69 while keeping
+  10x max leverage and 0.7 USDT max per-trade risk: `BTWUSDT` is manual,
+  `BFA_MAX_OPEN_POSITIONS=60`, per-position/effective notional caps are
+  `500` USDT, max margin per position is `50` USDT, portfolio margin cap is
+  `150` USDT, portfolio margin fraction is `3.00`, portfolio notional cap is
+  `5000` USDT, same-direction cap is `3500` USDT, and multi-position is
+  enabled. These are live env caps, not local defaults. Manual symbols remain
+  visible in diagnostics but do not consume bot entry capacity.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -788,30 +790,30 @@ candidate-queue diagnostics are in place.
 
 ## Next Command
 
-Start Phase 68 with `$gsd-discuss-phase 68`: improve deterministic
-multi-factor edge scoring and entry/stop/target point precision before the AI
-overlay.
+Start Phase 70 with `$gsd-plan-phase 70`: deploy and verify the v1.27 server
+canary while preserving isolated paths and the manual `BTWUSDT` boundary.
 
 ## Session
 
 **Last session:** 2026-06-21T01:11:33.537Z
-**Stopped at:** Phase 68 context gathered
-verified locally without order/env/systemd/risk mutation.
-**Resume file:** .planning/phases/68-multi-factor-edge-and-point-precision/68-CONTEXT.md
+**Stopped at:** Phase 69 complete
+verified locally; server canary remains Phase 70.
+**Resume file:** .planning/phases/69-adaptive-sizing-and-high-leverage-governor/69-CONTEXT.md
 
 ## Current Position
 
-Phase: 68 — Multi-Factor Edge And Point Precision
+Phase: 70 — Server Canary And Manual Boundary Verification
 Plan: Not started
-Status: Ready to discuss
-Last activity: 2026-06-21 — Phase 68 complete, transitioned to Phase 69
+Status: Ready to plan
+Last activity: 2026-06-21 — Phase 69 complete, transitioned to Phase 70
 
 ## Operator Next Steps
 
-- Run `$gsd-discuss-phase 68`.
+- Run `$gsd-plan-phase 70`.
 
 ## Performance Metrics
 
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 67 P01 | 18 min | 9 tasks | 10 files |
+| Phase 69 P01 | 36 min | 4 tasks | 15 files |

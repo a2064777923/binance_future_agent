@@ -379,6 +379,14 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(result.persisted["candidates"], 1)
         self.assertEqual(result.persisted["ai_decisions"], 1)
         self.assertGreaterEqual(result.persisted["order_intent"], 1)
+        governor = result.candidate_evaluations[0]["sizing_governor"]
+        self.assertEqual(governor["schema"], "bfa_adaptive_sizing_governor_v1")
+        self.assertTrue(governor["accepted"])
+        self.assertIn("signal_quality", governor["components"])
+        self.assertIn(
+            "adaptive_sizing_governor",
+            result.candidate_evaluations[0]["setup"]["price_basis"],
+        )
 
     def test_run_once_sends_reference_price_to_ai_client(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -816,6 +824,57 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(ai_client.calls, 1)
         self.assertNotIn("max_open_positions_reached", result.risk_reasons)
         self.assertEqual(diagnostics["BTWUSDT"]["lifecycle_decision"], "manual_hold")
+
+    def test_live_run_once_blocks_manual_margin_pressure_without_counting_manual_slot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ai_client = FakeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "1",
+                    "BFA_MULTI_POSITION_ENABLED": "false",
+                    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "6",
+                    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+                signed_client=FakeSignedClient(
+                    positions=[
+                        {
+                            "symbol": "BTWUSDT",
+                            "positionAmt": "-556",
+                            "positionSide": "SHORT",
+                            "notional": "-73.2",
+                            "initialMargin": "7.32",
+                            "leverage": "10",
+                        }
+                    ],
+                    open_algo_orders=[{"symbol": "BTWUSDT", "positionSide": "SHORT"}],
+                ),
+            )
+
+        self.assertEqual(result.status, "entry_capacity_blocked")
+        self.assertEqual(ai_client.calls, 0)
+        self.assertNotIn("max_open_positions_reached", result.risk_reasons)
+        self.assertIn("portfolio_margin_cap_reached", result.risk_reasons)
+        self.assertIn("manual_margin_pressure_included", result.risk_reasons)
 
     def test_live_run_once_tries_next_candidate_after_duplicate_exposure_reject(self):
         with tempfile.TemporaryDirectory() as tmp:
