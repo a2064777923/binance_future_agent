@@ -2,26 +2,26 @@
 gsd_state_version: 1.0
 milestone: v1.27
 milestone_name: Adaptive Live Pilot Iteration
-current_phase: Phase 67 — Adaptive Hot-Symbol Breadth And Guarded Queue
-current_phase_name: Adaptive Hot-Symbol Breadth And Guarded Queue
-status: executing
-stopped_at: Phase 67 context gathered
-last_updated: "2026-06-21T00:44:56.673Z"
+current_phase: Phase 68 — Multi-Factor Edge And Point Precision
+current_phase_name: Multi-Factor Edge And Point Precision
+status: ready_to_discuss
+stopped_at: Phase 67 complete
+last_updated: "2026-06-21T01:03:55.504Z"
 last_activity: 2026-06-21
-last_activity_desc: Phase 66 complete
+last_activity_desc: Phase 67 complete
 progress:
-  total_phases: 67
-  completed_phases: 66
-  total_plans: 86
-  completed_plans: 86
-  percent: 99
+  total_phases: 70
+  completed_phases: 67
+  total_plans: 90
+  completed_plans: 87
+  percent: 96
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 67 — Adaptive Hot-Symbol Breadth And Guarded Queue
-**Status:** Ready to execute
+**Current phase:** Phase 68 — Multi-Factor Edge And Point Precision
+**Status:** Ready to discuss
 **Last planned:** 2026-06-21
 **Plan count:** 0
 
@@ -32,9 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Broaden live hot-symbol scanning and guarded candidate-queue
-behavior now that recent live cycles are inspectable by evaluated symbols,
-factor evidence, AI/risk decisions, sizing caps, and order/no-order outcomes.
+**Current focus:** Upgrade deterministic multi-factor edge scoring and
+entry/stop/target point precision now that Phase 67 broad scanning and
+candidate-queue diagnostics are in place.
 
 ## Decisions
 
@@ -788,23 +788,30 @@ factor evidence, AI/risk decisions, sizing caps, and order/no-order outcomes.
 
 ## Next Command
 
-Start Phase 67 with `$gsd-discuss-phase 67`: broaden live hot-symbol scanning
-and guarded queue behavior using the Phase 66 explainability surface.
+Start Phase 68 with `$gsd-discuss-phase 68`: improve deterministic
+multi-factor edge scoring and entry/stop/target point precision before the AI
+overlay.
 
 ## Session
 
-**Last session:** 2026-06-21T00:38:10.537Z
-**Stopped at:** Phase 67 context gathered
+**Last session:** 2026-06-21T01:03:32.205Z
+**Stopped at:** Phase 67 complete
 verified locally without order/env/systemd/risk mutation.
-**Resume file:** .planning/phases/67-adaptive-hot-symbol-breadth-and-guarded-queue/67-CONTEXT.md
+**Resume file:** None
 
 ## Current Position
 
-Phase: 67 — Adaptive Hot-Symbol Breadth And Guarded Queue
+Phase: 68 — Multi-Factor Edge And Point Precision
 Plan: Not planned
-Status: Ready to discuss/plan
-Last activity: 2026-06-21 — Phase 66 complete
+Status: Ready to discuss
+Last activity: 2026-06-21 — Phase 67 complete
 
 ## Operator Next Steps
 
-- Run `$gsd-discuss-phase 67`.
+- Run `$gsd-discuss-phase 68`.
+
+## Performance Metrics
+
+| Phase | Plan | Duration | Notes |
+|-------|------|----------|-------|
+| Phase 67 P01 | 18 min | 9 tasks | 10 files |

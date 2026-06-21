@@ -142,7 +142,7 @@
 <summary>◆ v1.27 Adaptive Live Pilot Iteration (Phases 66-70) — IN PROGRESS</summary>
 
 - [x] Phase 66: Live Cycle Explainability And Ledger Cadence (1/1 plan) (completed 2026-06-21)
-- [ ] Phase 67: Adaptive Hot-Symbol Breadth And Guarded Queue (1 plan)
+- [x] Phase 67: Adaptive Hot-Symbol Breadth And Guarded Queue (1 plan) (completed 2026-06-21)
 - [ ] Phase 68: Multi-Factor Edge And Point Precision (1 plan)
 - [ ] Phase 69: Adaptive Sizing And High-Leverage Governor (1 plan)
 - [ ] Phase 70: Server Canary And Manual Boundary Verification (1 plan)
@@ -185,8 +185,11 @@ tradability, and manual-symbol guards in front of AI and execution.
 
 **Requirements:** SCAN-01, SCAN-02, SCAN-03, SCAN-04
 
-**Plans:** 0/1 plan complete
-**Status:** Not started
+**Plans:** 1/1 plans complete
+
+- [x] 67-01-PLAN.md
+
+**Status:** Complete
 
 **Success criteria:**
 

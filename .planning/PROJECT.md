@@ -516,9 +516,9 @@ generation.
 hot-symbol observation, improving multi-factor edge and point precision, and
 adapting sizing inside explicit small-capital risk governors.
 
-**Status:** Phase 66 is complete locally. Phase 67 is next: broaden live
-hot-symbol scanning and guarded queue behavior using the new explainability
-surface.
+**Status:** Phase 67 is complete locally. Phase 68 is next: improve
+deterministic multi-factor edge scoring and entry/stop/target point precision
+before the AI overlay.
 
 **Target features:**
 - Explain every recent live cycle by evaluated symbols, factor evidence,

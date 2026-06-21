@@ -12,25 +12,30 @@ projects or losing control of downside.
 - [x] **OPS-03**: Operator can inspect the latest live cycles and see every
   evaluated symbol, skip reason, factor score, AI decision, risk decision,
   sizing cap, and whether an order was submitted.
+
 - [ ] **OPS-04**: Server can produce a compact current-status packet that
   includes live/paper timer state, open positions, open algo orders, manual
   symbols, cap utilization, latest outcomes, and latest trade/no-trade traces.
+
 - [x] **LEARN-04**: Closed live outcome reconciliation and live ledger reporting
   can run on a scheduled or single-command path without placing orders,
   changing env files, or applying guard/risk changes.
 
 ### Adaptive Hot-Symbol Breadth
 
-- [ ] **SCAN-01**: Live hot-symbol selection can evaluate at least 80 current
+- [x] **SCAN-01**: Live hot-symbol selection can evaluate at least 80 current
   Binance USD-M USDT symbols while excluding manual symbols and symbols that
   fail exchange tradability or configured liquidity floors.
-- [ ] **SCAN-02**: Candidate selection records source health and factor inputs
+
+- [x] **SCAN-02**: Candidate selection records source health and factor inputs
   from Binance ticker, klines, open interest, funding, taker flow, and any
   available narrative/manual/social-export sources.
-- [ ] **SCAN-03**: Candidate queues avoid repeatedly spending cycles on symbols,
+
+- [x] **SCAN-03**: Candidate queues avoid repeatedly spending cycles on symbols,
   sides, or factor patterns with recent weak live/paper evidence unless the
   operator explicitly resets or overrides the guard.
-- [ ] **SCAN-04**: A live cycle can continue evaluating later candidates after
+
+- [x] **SCAN-04**: A live cycle can continue evaluating later candidates after
   AI pass, setup pass, duplicate-exposure, or other retryable symbol-level
   skips while still respecting the configured one-order-per-cycle limit.
 
@@ -39,12 +44,15 @@ projects or losing control of downside.
 - [ ] **EDGE-01**: Deterministic setup scoring combines trend/momentum, volume
   impulse, taker flow, open-interest change, funding, volatility/range, and
   liquidity/tradability factors before any AI overlay is requested.
+
 - [ ] **EDGE-02**: Entry, stop, and target points are derived from market
   structure and exchange filters, with explicit risk/reward, stop-distance,
   liquidation-distance, and min-notional diagnostics.
+
 - [ ] **EDGE-03**: Trade/no-trade traces explain the factor thresholds and point
   geometry that produced the final action, including why the position size was
   small when sizing caps or stop risk constrained it.
+
 - [ ] **EDGE-04**: Live/paper outcomes update recommendation-only factor guards
   with minimum-sample, recency, and decay rules so weak evidence can reduce
   exposure without silently promoting risk.
@@ -54,12 +62,15 @@ projects or losing control of downside.
 - [ ] **SIZE-01**: Dynamic sizing can raise or lower per-trade notional within
   configured absolute caps using signal quality, stop distance, liquidity,
   volatility, available balance, and recent outcome health.
+
 - [ ] **SIZE-02**: High-leverage entries are blocked or downsized when stop
   distance, liquidation distance, spread/slippage, or volatility makes the
   setup unsafe for the active small-capital pilot.
+
 - [ ] **SIZE-03**: Portfolio risk checks include account-level available
   balance and manual-position margin pressure while continuing to exclude
   manual symbols from bot-managed position count and bot exit actions.
+
 - [ ] **SIZE-04**: Any risk-cap or sizing-rule increase has a preview artifact,
   rollback path, and evidence gate; guard feedback can decrease risk but cannot
   increase risk without explicit operator approval.
@@ -70,6 +81,7 @@ projects or losing control of downside.
   under `/opt/binance-futures-agent` and `/etc/binance-futures-agent`, restore
   live/paper timers after any deployment pause, and scan artifacts for
   sensitive fields.
+
 - [ ] **RISK-05**: `BTWUSDT` and any configured manual symbols remain visible in
   packets and diagnostics but are excluded from bot entry capacity,
   auto-management, close/reduce execution, and candidate selection.
@@ -80,8 +92,10 @@ projects or losing control of downside.
 
 - **STRAT-06**: Add stable external social/news adapters only when collection
   access is allowed, measurable, and observable in source-health reports.
+
 - **MODEL-02**: Add multi-regime strategy routing across breakout, trend,
   reversal, and no-trade modes after v1.27 traces prove factor quality.
+
 - **SCALE-02**: Consider additional capital or higher leverage only after
   repeated positive live outcomes pass net-PnL, drawdown, profit-factor, and
   operator-review gates.
@@ -103,10 +117,10 @@ projects or losing control of downside.
 | OPS-03 | Phase 66 | Complete |
 | OPS-04 | Phase 70 | Pending |
 | LEARN-04 | Phase 66 | Complete |
-| SCAN-01 | Phase 67 | Pending |
-| SCAN-02 | Phase 67 | Pending |
-| SCAN-03 | Phase 67 | Pending |
-| SCAN-04 | Phase 67 | Pending |
+| SCAN-01 | Phase 67 | Complete |
+| SCAN-02 | Phase 67 | Complete |
+| SCAN-03 | Phase 67 | Complete |
+| SCAN-04 | Phase 67 | Complete |
 | EDGE-01 | Phase 68 | Pending |
 | EDGE-02 | Phase 68 | Pending |
 | EDGE-03 | Phase 68 | Pending |
@@ -119,10 +133,11 @@ projects or losing control of downside.
 | RISK-05 | Phase 70 | Pending |
 
 **Coverage:**
+
 - v1.27 requirements: 17 total
 - Mapped to phases: 17
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-21*
-*Last updated: 2026-06-21 after v1.27 milestone initialization*
+*Last updated: 2026-06-21 after Phase 67 verification*
