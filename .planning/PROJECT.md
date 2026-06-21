@@ -192,6 +192,13 @@ control of downside.
   factors; keeps `BTWUSDT` visible as manual/non-bot-managed evidence; and
   reuses the live outcome ledger cadence without order/env/systemd/risk/guard
   mutation.
+- Phase 67 widens live auto-hot scanning to an 80-symbol default, adds
+  source-health and candidate-queue diagnostics, and keeps manual symbols such
+  as `BTWUSDT` excluded before ranking, AI, and execution.
+- Phase 68 enriches deterministic setup evidence with grouped factor summaries,
+  open-interest change, market-structure point diagnostics, sizing/min-notional
+  explanations, conservative liquidation-distance diagnostics, and
+  recommendation-only guard recency/decay metadata before any AI overlay.
 
 ### Active
 
@@ -368,7 +375,7 @@ The user's chosen direction:
 ## Current State
 
 Milestones v1.0, v1.21, v1.22, v1.23, v1.24, v1.25, and v1.26 are archived.
-Phases 1 through 66 are complete, and the current server deployment is installed under the isolated
+Phases 1 through 68 are complete, and the current server deployment is installed under the isolated
 `/opt/binance-futures-agent` path. The project is installable as an isolated
 Python package, has a safe environment contract, official Binance USD-M public
 market-data access, narrative/manual/RSS ingestion, normalized JSONL evidence
@@ -516,9 +523,8 @@ generation.
 hot-symbol observation, improving multi-factor edge and point precision, and
 adapting sizing inside explicit small-capital risk governors.
 
-**Status:** Phase 67 is complete locally. Phase 68 is next: improve
-deterministic multi-factor edge scoring and entry/stop/target point precision
-before the AI overlay.
+**Status:** Phase 68 is complete locally. Phase 69 is next: add adaptive sizing
+and high-leverage governors using the richer factor and point diagnostics.
 
 **Target features:**
 - Explain every recent live cycle by evaluated symbols, factor evidence,
@@ -882,4 +888,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 66 completion.*
+*Last updated: 2026-06-21 after Phase 68 completion.*

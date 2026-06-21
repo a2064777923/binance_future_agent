@@ -41,19 +41,19 @@ projects or losing control of downside.
 
 ### Multi-Factor Edge And Point Precision
 
-- [ ] **EDGE-01**: Deterministic setup scoring combines trend/momentum, volume
+- [x] **EDGE-01**: Deterministic setup scoring combines trend/momentum, volume
   impulse, taker flow, open-interest change, funding, volatility/range, and
   liquidity/tradability factors before any AI overlay is requested.
 
-- [ ] **EDGE-02**: Entry, stop, and target points are derived from market
+- [x] **EDGE-02**: Entry, stop, and target points are derived from market
   structure and exchange filters, with explicit risk/reward, stop-distance,
   liquidation-distance, and min-notional diagnostics.
 
-- [ ] **EDGE-03**: Trade/no-trade traces explain the factor thresholds and point
+- [x] **EDGE-03**: Trade/no-trade traces explain the factor thresholds and point
   geometry that produced the final action, including why the position size was
   small when sizing caps or stop risk constrained it.
 
-- [ ] **EDGE-04**: Live/paper outcomes update recommendation-only factor guards
+- [x] **EDGE-04**: Live/paper outcomes update recommendation-only factor guards
   with minimum-sample, recency, and decay rules so weak evidence can reduce
   exposure without silently promoting risk.
 
@@ -121,10 +121,10 @@ projects or losing control of downside.
 | SCAN-02 | Phase 67 | Complete |
 | SCAN-03 | Phase 67 | Complete |
 | SCAN-04 | Phase 67 | Complete |
-| EDGE-01 | Phase 68 | Pending |
-| EDGE-02 | Phase 68 | Pending |
-| EDGE-03 | Phase 68 | Pending |
-| EDGE-04 | Phase 68 | Pending |
+| EDGE-01 | Phase 68 | Complete |
+| EDGE-02 | Phase 68 | Complete |
+| EDGE-03 | Phase 68 | Complete |
+| EDGE-04 | Phase 68 | Complete |
 | SIZE-01 | Phase 69 | Pending |
 | SIZE-02 | Phase 69 | Pending |
 | SIZE-03 | Phase 69 | Pending |
