@@ -128,6 +128,23 @@ confirmation-gated `30u_10x_multi_dynamic` preview.
 python -m bfa.cli ops exposure-status --env-file .env --db runtime/agent.sqlite --hypothetical-symbol HYPEUSDT --hypothetical-side long
 ```
 
+Use live-cycle explainability when reviewing what the automated runner actually
+considered in recent live cycles. The report includes submitted and no-order
+cycles, candidate/setup/AI/risk/exchange evidence, manual-symbol lifecycle
+diagnostics, optional live outcome ledger cadence, and a mutation proof.
+
+```bash
+python -m bfa.cli ops live-cycle-explainability --env-file .env --db runtime/agent.sqlite --latest-cycles 10
+python -m bfa.cli ops live-cycle-explainability --env-file .env --db runtime/agent.sqlite --reconcile --persist-closed
+```
+
+For small positions, check each cycle's `sizing_explanation.limiting_factors`.
+Common values are `stop_risk_cap`, `margin_fraction_cap`,
+`effective_notional_cap`, `below_min_executable_notional`, `risk_exceeds_cap`,
+and portfolio caps such as `portfolio_notional_cap_reached`. Manual symbols in
+`BFA_MANUAL_POSITION_SYMBOLS` remain visible in lifecycle diagnostics but are
+reported as non-bot-managed.
+
 When a read-only operator resume decision packet is available, use the
 confirmation-gated live resume plan command to preview the exact profile/env and
 timer changes before any mutation. The apply command refuses to mutate unless

@@ -1586,6 +1586,130 @@ class CliTests(unittest.TestCase):
         self.assertTrue(payload["mutation_proof"]["persists_closed_fills_and_outcomes"])
         self.assertFalse(payload["mutation_proof"]["places_orders"])
 
+    def test_ops_live_cycle_explainability_outputs_json_shape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            decided_at = "2026-06-21T06:30:00Z"
+            store.insert_artifact(
+                "candidates",
+                occurred_at=decided_at,
+                source="strategy.hot",
+                symbol="SOLUSDT",
+                ref_id=f"candidate:SOLUSDT:{decided_at}",
+                payload={
+                    "score": 82.0,
+                    "reason_codes": ["hot_symbol"],
+                    "features": {"reference_price": 140.0},
+                },
+                event_type="candidate",
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-cycle-explainability",
+                "--db",
+                str(db_path),
+                "--no-ledger",
+                env={"BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT"},
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_live_cycle_explainability_v1")
+        self.assertEqual(payload["status"], "explainability_ready")
+        self.assertEqual(payload["manual_symbols"], ["BTWUSDT"])
+        self.assertIsNone(payload["ledger"])
+        self.assertEqual(payload["cycles"][0]["symbol"], "SOLUSDT")
+        self.assertEqual(payload["cycles"][0]["candidate"]["score"], 82.0)
+        self.assertFalse(payload["mutation_proof"]["places_orders"])
+        self.assertFalse(payload["mutation_proof"]["writes_env_files"])
+
+    def test_ops_live_cycle_explainability_reconcile_uses_signed_client_for_ledger(self):
+        class FakeSignedClient:
+            def user_trades(self, symbol, *, start_time=None, end_time=None, limit=500):
+                return [
+                    {
+                        "id": 210,
+                        "orderId": 2100,
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "qty": "0.05",
+                        "price": "100",
+                        "quoteQty": "5",
+                        "realizedPnl": "0",
+                        "commission": "0.002",
+                        "commissionAsset": "USDT",
+                        "time": 1781923762837,
+                    },
+                    {
+                        "id": 211,
+                        "orderId": 2101,
+                        "symbol": symbol,
+                        "side": "SELL",
+                        "qty": "0.05",
+                        "price": "104",
+                        "quoteQty": "5.2",
+                        "realizedPnl": "0.2",
+                        "commission": "0.00208",
+                        "commissionAsset": "USDT",
+                        "time": 1781924000000,
+                    },
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            store = EventStore(connection)
+            intent = OrderIntent(
+                symbol="SOLUSDT",
+                side="BUY",
+                quantity=0.05,
+                notional_usdt=5.0,
+                entry_price=100,
+                stop_price=98,
+                target_price=104,
+                leverage=10,
+                mode="live",
+                decided_at="2026-06-21T05:00:00Z",
+            )
+            persist_order_intent(
+                store,
+                intent=intent,
+                status="submitted",
+                risk=RiskDecision(True, ["risk_accepted"]),
+            )
+            connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "live-cycle-explainability",
+                "--db",
+                str(db_path),
+                "--reconcile",
+                "--persist-closed",
+                env={
+                    "BFA_MODE": "live",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: FakeSignedClient(),
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_live_cycle_explainability_v1")
+        self.assertEqual(payload["ledger"]["reconciliation"]["closed"], 1)
+        self.assertEqual(payload["ledger"]["summary"]["outcome_count"], 1)
+        self.assertTrue(payload["mutation_proof"]["persists_closed_fills_and_outcomes"])
+        self.assertFalse(payload["mutation_proof"]["places_orders"])
+
     def test_ops_pilot_learning_packet_outputs_read_only_packet(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

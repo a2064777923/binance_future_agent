@@ -2,28 +2,28 @@
 gsd_state_version: 1.0
 milestone: v1.27
 milestone_name: Adaptive Live Pilot Iteration
-current_phase: Phase 66 — Live Cycle Explainability And Ledger Cadence
-current_phase_name: Live Cycle Explainability And Ledger Cadence
-status: ready_to_execute
-stopped_at: Phase 66 planned; ready to execute live-cycle explainability
-last_updated: "2026-06-21T07:58:00+08:00"
+current_phase: Phase 67 — Adaptive Hot-Symbol Breadth And Guarded Queue
+current_phase_name: Adaptive Hot-Symbol Breadth And Guarded Queue
+status: ready_to_discuss
+stopped_at: Phase 66 complete; Phase 67 ready to discuss/plan
+last_updated: "2026-06-21T08:25:00+08:00"
 last_activity: 2026-06-21
-last_activity_desc: Phase 66 planned
+last_activity_desc: Phase 66 complete
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
   completed_plans: 1
-  percent: 0
+  percent: 20
 ---
 
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** Phase 66 — Live Cycle Explainability And Ledger Cadence
-**Status:** Phase 66 planned; ready to execute
+**Current phase:** Phase 67 — Adaptive Hot-Symbol Breadth And Guarded Queue
+**Status:** Phase 66 complete; Phase 67 ready to discuss/plan
 **Last planned:** 2026-06-21
-**Plan count:** 1
+**Plan count:** 0
 
 ## Project Reference
 
@@ -32,9 +32,9 @@ See: `.planning/PROJECT.md` (updated 2026-06-21)
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Make recent live cycles explainable by evaluated symbols,
-factor evidence, AI/risk decisions, sizing caps, and order/no-order outcomes
-before widening the next live-iteration loop.
+**Current focus:** Broaden live hot-symbol scanning and guarded candidate-queue
+behavior now that recent live cycles are inspectable by evaluated symbols,
+factor evidence, AI/risk decisions, sizing caps, and order/no-order outcomes.
 
 ## Decisions
 
@@ -47,10 +47,11 @@ before widening the next live-iteration loop.
 
 - Exchange: Binance USD-M futures.
 - Active trial profile: 45 USDT configured account capital, 10x max leverage,
-  200 USDT max bot-managed position notional, 0.7 USDT max per-trade risk,
-  2 USDT max daily loss, and 20 bot-managed open positions under dynamic sizing
-  and portfolio caps. Manual symbols such as `BTWUSDT` remain visible in
-  diagnostics but do not consume bot entry capacity.
+  300 USDT max bot-managed position notional, 30 USDT max margin per position,
+  0.7 USDT max per-trade risk, 2 USDT max daily loss, 30 bot-managed open
+  positions, 2400 USDT portfolio notional cap, and 1800 USDT same-direction
+  notional cap under dynamic sizing and portfolio caps. Manual symbols such as
+  `BTWUSDT` remain visible in diagnostics but do not consume bot entry capacity.
 
 - v1.22 direction: do not let one open HYPEUSDT position freeze the whole agent
   after an operator-approved multi-position profile is enabled. Continue hot
@@ -787,23 +788,23 @@ before widening the next live-iteration loop.
 
 ## Next Command
 
-Execute Phase 66 with `$gsd-execute-phase 66`: build live-cycle explainability
-and ledger cadence before changing scanner or sizing behavior again.
+Start Phase 67 with `$gsd-discuss-phase 67`: broaden live hot-symbol scanning
+and guarded queue behavior using the Phase 66 explainability surface.
 
 ## Session
 
 **Last session:** 2026-06-21T00:00:00+08:00
-**Stopped at:** Phase 65 complete; pilot learning packet deployed and verified
-on the isolated server without order/env/systemd/risk mutation.
-**Resume file:** .planning/phases/65-server-canary-and-pilot-learning-packet/65-VERIFICATION.md
+**Stopped at:** Phase 66 complete; live-cycle explainability implemented and
+verified locally without order/env/systemd/risk mutation.
+**Resume file:** .planning/phases/66-live-cycle-explainability-and-ledger-cadence/66-VERIFICATION.md
 
 ## Current Position
 
-Phase: 66 — Live Cycle Explainability And Ledger Cadence
-Plan: 1/1 complete
-Status: Ready to execute
-Last activity: 2026-06-21 — Phase 66 planned
+Phase: 67 — Adaptive Hot-Symbol Breadth And Guarded Queue
+Plan: Not planned
+Status: Ready to discuss/plan
+Last activity: 2026-06-21 — Phase 66 complete
 
 ## Operator Next Steps
 
-- Run `$gsd-execute-phase 66`.
+- Run `$gsd-discuss-phase 67`.

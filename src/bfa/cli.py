@@ -46,6 +46,7 @@ from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.forward_paper import run_forward_paper
 from bfa.ops.forward_paper_loss_attribution import build_forward_paper_loss_attribution_report
 from bfa.ops.forward_paper_performance import build_forward_paper_performance_report
+from bfa.ops.live_cycle_explainability import build_live_cycle_explainability_report
 from bfa.ops.live_outcome_ledger import build_live_outcome_ledger_report
 from bfa.ops.live_status import build_live_status_report
 from bfa.ops.manual_loss import build_manual_loss_incident, record_manual_loss_incident
@@ -456,6 +457,30 @@ def _build_parser() -> argparse.ArgumentParser:
         help="run the submitted-intent reconciliation sweep before reporting",
     )
     live_outcome_ledger.add_argument(
+        "--persist-closed",
+        action="store_true",
+        help="with --reconcile, persist idempotent fills/outcomes for closed trades",
+    )
+
+    live_cycle_explainability = ops_subparsers.add_parser(
+        "live-cycle-explainability",
+        help="read-only explanation of recent live trade and no-trade cycles with ledger cadence",
+    )
+    live_cycle_explainability.add_argument("--env-file", help="optional env file to load before environment overrides")
+    live_cycle_explainability.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    live_cycle_explainability.add_argument("--since", help="only include cycle artifacts at or after this ISO time")
+    live_cycle_explainability.add_argument("--latest-cycles", type=int, default=10, help="number of recent cycles to show")
+    live_cycle_explainability.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="omit live outcome ledger cadence from the report",
+    )
+    live_cycle_explainability.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="run the submitted-intent reconciliation sweep before ledger reporting",
+    )
+    live_cycle_explainability.add_argument(
         "--persist-closed",
         action="store_true",
         help="with --reconcile, persist idempotent fills/outcomes for closed trades",
@@ -1646,6 +1671,21 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 1 if report.status == "ledger_blocked" else 0
+    if args.ops_command == "live-cycle-explainability":
+        report = build_live_cycle_explainability_report(
+            config,
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            since=args.since,
+            latest_cycles=args.latest_cycles,
+            include_ledger=not args.no_ledger,
+            reconcile=args.reconcile,
+            persist_closed=args.persist_closed,
+            signed_client=_build_signed_client(config, signed_client_factory)
+            if args.reconcile
+            else None,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 1 if report.status == "explainability_blocked" else 0
     if args.ops_command == "pilot-learning-packet":
         report = build_pilot_learning_packet_report(
             config,

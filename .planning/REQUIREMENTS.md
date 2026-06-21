@@ -9,13 +9,13 @@ projects or losing control of downside.
 
 ### Live Cycle Explainability
 
-- [ ] **OPS-03**: Operator can inspect the latest live cycles and see every
+- [x] **OPS-03**: Operator can inspect the latest live cycles and see every
   evaluated symbol, skip reason, factor score, AI decision, risk decision,
   sizing cap, and whether an order was submitted.
 - [ ] **OPS-04**: Server can produce a compact current-status packet that
   includes live/paper timer state, open positions, open algo orders, manual
   symbols, cap utilization, latest outcomes, and latest trade/no-trade traces.
-- [ ] **LEARN-04**: Closed live outcome reconciliation and live ledger reporting
+- [x] **LEARN-04**: Closed live outcome reconciliation and live ledger reporting
   can run on a scheduled or single-command path without placing orders,
   changing env files, or applying guard/risk changes.
 
@@ -100,9 +100,9 @@ projects or losing control of downside.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| OPS-03 | Phase 66 | Pending |
+| OPS-03 | Phase 66 | Complete |
 | OPS-04 | Phase 70 | Pending |
-| LEARN-04 | Phase 66 | Pending |
+| LEARN-04 | Phase 66 | Complete |
 | SCAN-01 | Phase 67 | Pending |
 | SCAN-02 | Phase 67 | Pending |
 | SCAN-03 | Phase 67 | Pending |
