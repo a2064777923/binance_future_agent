@@ -53,6 +53,9 @@ class BacktestMatrixSuiteConfig:
     window_bars: int = 72
     step_bars: int = 36
     variants: tuple[str, ...] = (
+        "quant_setup_hf_profit_guarded",
+        "quant_setup_high_frequency_flow_guarded",
+        "quant_setup_high_frequency_guarded",
         "quant_setup_selective",
         "quant_setup_selective_guarded",
         "quant_setup_loss_recalibrated",

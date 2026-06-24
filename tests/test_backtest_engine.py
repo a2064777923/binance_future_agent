@@ -1,7 +1,8 @@
 import unittest
 
-from bfa.backtest.engine import run_hot_momentum_backtest, run_staged_sweep
+from bfa.backtest.engine import _hold_bars_from_setup, run_hot_momentum_backtest, run_staged_sweep
 from bfa.backtest.models import BacktestBar, BacktestConfig
+from bfa.strategy.setup import TradeSetup
 
 
 FIVE_MINUTES_MS = 300_000
@@ -260,6 +261,68 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(result.trade_count, 0)
         self.assertGreater(result.rejected_signals, 0)
 
+    def test_quant_setup_trailing_stop_locks_profit_after_favorable_move(self):
+        closes = [100, 102, 101, 103, 102, 104]
+        bars = []
+        for index, close in enumerate(closes):
+            open_price = closes[index - 1] if index else 100
+            bars.append(
+                bar(
+                    index,
+                    open_price=open_price,
+                    high=max(open_price, close) * 1.006,
+                    low=min(open_price, close) * 0.998,
+                    close=close,
+                    quote_volume=20_000_000,
+                    taker_ratio=1.25,
+                )
+            )
+        bars.extend(
+            [
+                bar(6, open_price=104, high=105.4, low=103.8, close=105.0, quote_volume=22_000_000, taker_ratio=1.25),
+                bar(7, open_price=105.0, high=105.2, low=104.6, close=104.8, quote_volume=20_000_000, taker_ratio=1.1),
+                bar(8, open_price=104.8, high=105.0, low=104.5, close=104.7, quote_volume=18_000_000, taker_ratio=1.0),
+            ]
+        )
+
+        result = run_hot_momentum_backtest(
+            {"BTCUSDT": bars},
+            self.config(
+                name="trail_unit",
+                strategy_type="quant_setup",
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=20,
+                max_risk_per_trade_usdt=0.5,
+                max_daily_loss_usdt=2,
+                max_open_positions=1,
+                lookback_bars=6,
+                max_hold_bars=4,
+                cooldown_bars=10,
+                trailing_stop_enabled=True,
+                trailing_activate_r=0.5,
+                trailing_lock_r=0.1,
+                trailing_giveback_r=0.25,
+                setup_profile={
+                    "name": "trail_unit",
+                    "min_edge": 0,
+                    "min_confidence": 0,
+                    "min_risk_reward": 1.2,
+                    "max_stop_distance_percent": 1.2,
+                    "min_indicator_sample_size": 0,
+                    "require_trend_alignment": False,
+                    "require_rsi_not_extreme": False,
+                    "max_notional_fraction": 1.0,
+                    "stop_distance_multiplier": 0.5,
+                    "target_distance_multiplier": 2.0,
+                },
+            ),
+        )
+
+        self.assertEqual(result.trade_count, 1)
+        self.assertEqual(result.trades[0].exit_reason, "trailing_stop")
+        self.assertGreater(result.trades[0].net_pnl_usdt, 0)
+
     def test_daily_loss_gate_counts_only_realized_exits(self):
         def series(symbol):
             return [
@@ -280,6 +343,32 @@ class BacktestEngineTests(unittest.TestCase):
         self.assertEqual(result.trade_count, 2)
         self.assertGreater(result.skipped_daily_loss_signals, 0)
         self.assertTrue(all(trade.exit_reason == "stop_loss" for trade in result.trades))
+
+    def test_quant_setup_hold_time_scales_to_one_second_bars(self):
+        setup = TradeSetup(
+            symbol="BTCUSDT",
+            decision="trade",
+            side="long",
+            confidence=0.8,
+            entry_price=100.0,
+            stop_price=99.0,
+            target_price=102.0,
+            notional_usdt=20.0,
+            hold_time_minutes=30,
+            factor_scores=[],
+            long_score=1.0,
+            short_score=0.0,
+            edge_score=1.0,
+            regime="normal",
+            risk_reward_ratio=2.0,
+            stop_distance_percent=1.0,
+            target_distance_percent=2.0,
+            reasons=["unit"],
+        )
+
+        hold_bars = _hold_bars_from_setup(setup, self.config(max_hold_bars=3), interval_ms=1_000)
+
+        self.assertEqual(hold_bars, 900)
 
 
 if __name__ == "__main__":

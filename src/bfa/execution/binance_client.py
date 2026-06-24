@@ -107,6 +107,8 @@ class BinanceFuturesSignedClient:
         side: str,
         order_type: str,
         quantity: float,
+        price: float | None = None,
+        time_in_force: str | None = None,
         reduce_only: bool = False,
         position_side: str | None = None,
         new_client_order_id: str | None = None,
@@ -117,6 +119,10 @@ class BinanceFuturesSignedClient:
             "type": order_type.upper(),
             "quantity": _number(quantity),
         }
+        if price is not None:
+            params["price"] = _number(price)
+        if time_in_force:
+            params["timeInForce"] = time_in_force.upper()
         if reduce_only:
             params["reduceOnly"] = "true"
         if position_side:
@@ -174,6 +180,22 @@ class BinanceFuturesSignedClient:
             params["origClientOrderId"] = orig_client_order_id
         return self._signed_request("DELETE", "/fapi/v1/order", params)
 
+    def query_order(
+        self,
+        *,
+        symbol: str,
+        order_id: int | str | None = None,
+        orig_client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        if order_id is None and not orig_client_order_id:
+            raise ValueError("order_id or orig_client_order_id is required")
+        params = {"symbol": _symbol(symbol)}
+        if order_id is not None:
+            params["orderId"] = str(order_id)
+        if orig_client_order_id:
+            params["origClientOrderId"] = orig_client_order_id
+        return self._signed_request("GET", "/fapi/v1/order", params)
+
     def cancel_algo_order(
         self,
         *,
@@ -204,6 +226,8 @@ class BinanceFuturesSignedClient:
         side: str,
         order_type: str,
         quantity: float,
+        price: float | None = None,
+        time_in_force: str | None = None,
         position_side: str | None = None,
     ) -> dict[str, Any]:
         params = {
@@ -212,6 +236,10 @@ class BinanceFuturesSignedClient:
             "type": order_type.upper(),
             "quantity": _number(quantity),
         }
+        if price is not None:
+            params["price"] = _number(price)
+        if time_in_force:
+            params["timeInForce"] = time_in_force.upper()
         if position_side:
             params["positionSide"] = position_side.upper()
         return self._signed_request(

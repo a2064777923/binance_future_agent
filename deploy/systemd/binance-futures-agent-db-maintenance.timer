@@ -1,0 +1,13 @@
+[Unit]
+Description=Run Binance Futures Agent retention maintenance hourly
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+AccuracySec=5min
+Persistent=true
+Unit=binance-futures-agent-db-maintenance.service
+
+[Install]
+WantedBy=timers.target
+

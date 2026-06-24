@@ -35,6 +35,7 @@ class PositionAdjustmentOrderPlan:
     stop_price: float | None = None
     target_price: float | None = None
     cancel_algo_orders: list[dict[str, Any]] = field(default_factory=list)
+    missing_protective_order_types: list[str] = field(default_factory=list)
     reason_codes: list[str] = field(default_factory=list)
     source_recommendation: str | None = None
     expected_remaining_position_amt: float | None = None
@@ -51,6 +52,7 @@ class PositionAdjustmentOrderPlan:
             "stop_price": self.stop_price,
             "target_price": self.target_price,
             "cancel_algo_orders": [dict(order) for order in self.cancel_algo_orders],
+            "missing_protective_order_types": list(self.missing_protective_order_types),
             "reason_codes": list(self.reason_codes),
             "source_recommendation": self.source_recommendation,
             "expected_remaining_position_amt": self.expected_remaining_position_amt,
@@ -243,6 +245,7 @@ def build_position_adjustment_plan_report(
     market_client=None,
     exchange_info: Mapping[str, Any] | None = None,
     require_filters: bool = True,
+    ignore_normal_open_orders: bool = False,
 ) -> PositionAdjustmentPlanReport:
     if not _truthy(config.get("BFA_POSITION_ADJUSTMENT_ENABLED", "true")):
         return PositionAdjustmentPlanReport(
@@ -274,6 +277,7 @@ def build_position_adjustment_plan_report(
             review,
         ),
         require_filters=require_filters,
+        ignore_normal_open_orders=ignore_normal_open_orders,
     )
 
 
@@ -289,6 +293,7 @@ def position_adjustment_plan_from_review(
     trailing_target_extension_r: float = 0.75,
     filters_by_symbol: Mapping[str, SymbolExecutionFilters] | None = None,
     require_filters: bool = False,
+    ignore_normal_open_orders: bool = False,
 ) -> PositionAdjustmentPlanReport:
     reasons: list[str] = []
     report_blockers: list[str] = []
@@ -299,9 +304,11 @@ def position_adjustment_plan_from_review(
     if "exchange_evidence_missing" in review.reasons:
         reasons.append("exchange_evidence_missing")
         report_blockers.append("exchange_evidence_missing")
-    if hold_check and hold_check.open_order_count:
+    if hold_check and hold_check.open_order_count and not ignore_normal_open_orders:
         reasons.append("normal_open_orders_present")
         report_blockers.append("normal_open_orders_present")
+    elif hold_check and hold_check.open_order_count and ignore_normal_open_orders:
+        reasons.append("normal_open_orders_ignored_for_sentinel")
     if hold_check and hold_check.openai_backoff_active:
         reasons.append("ai_backoff_active")
 
@@ -345,7 +352,10 @@ def position_adjustment_plan_from_review(
             plans=plans,
             diagnostics=diagnostics,
         )
-    if allowed_plans and all(reason in {"ai_backoff_active"} for reason in reasons):
+    if allowed_plans and all(
+        reason in {"ai_backoff_active", "normal_open_orders_ignored_for_sentinel"}
+        for reason in reasons
+    ):
         return PositionAdjustmentPlanReport(
             status="adjustment_plan_ready",
             adjustment_allowed=True,
@@ -543,7 +553,7 @@ def _diagnostic_for_item(
         lifecycle_decision=lifecycle_decision,
         urgency=item.urgency,
         manual_symbol=manual_symbol,
-        protection_state="protected" if item.algo_protection_count > 0 else "unprotected",
+        protection_state="protected" if item.algo_protection_count >= 2 else "unprotected",
         matching_intent_state="present" if item.matching_intent_event_id is not None else "missing",
         exchange_filter_state=_exchange_filter_state(
             item,
@@ -587,7 +597,7 @@ def _diagnostic_passed_preconditions(
     passed: list[str] = []
     if item.position_amt != 0:
         passed.append("non_zero_position")
-    if item.algo_protection_count > 0:
+    if item.algo_protection_count >= 2:
         passed.append("algo_protection_present")
     if item.matching_intent_event_id is not None:
         passed.append("matching_intent_present")
@@ -621,6 +631,8 @@ def _lifecycle_decision(
             return "reduce"
         if plan.order_plan.action == "trail_protective_orders":
             return "trail_ready"
+        if plan.order_plan.action == "backfill_protective_orders":
+            return "protective_backfill_ready"
     return "blocked"
 
 
@@ -677,6 +689,13 @@ def _plan_for_item(
             adjustment_allowed=False,
             reasons=["zero_position_amount"],
         )
+    if item.algo_protection_count < 2 and item.matching_intent_event_id is not None:
+        return _backfill_protective_order_plan(
+            item,
+            position_mode=position_mode,
+            filters=filters,
+            require_filters=require_filters,
+        )
     if item.recommendation == "trail_or_reduce":
         if trailing_protection_enabled:
             return _trailing_protection_plan(
@@ -710,6 +729,139 @@ def _plan_for_item(
             reasons=["watch_only_recheck_later"],
         )
     return None
+
+
+def _backfill_protective_order_plan(
+    item: PositionReviewItem,
+    *,
+    position_mode: str,
+    filters: SymbolExecutionFilters | None,
+    require_filters: bool,
+) -> PositionAdjustmentPlanItem:
+    if require_filters and filters is None:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=["symbol_filters_missing"],
+        )
+    side = _position_direction(item)
+    if side is None:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=["position_side_unknown"],
+        )
+    prices = _backfill_protective_prices(item, side=side, filters=filters)
+    if prices["rejections"]:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=list(prices["rejections"]),
+        )
+    missing_types = _missing_protective_order_types(item)
+    if not missing_types:
+        return PositionAdjustmentPlanItem(
+            review_item=item,
+            adjustment_allowed=False,
+            reasons=["protective_orders_already_complete"],
+        )
+    hedge_mode = position_mode.strip().lower() == "hedge"
+    return PositionAdjustmentPlanItem(
+        review_item=item,
+        adjustment_allowed=True,
+        reasons=["protective_backfill_candidate"],
+        order_plan=PositionAdjustmentOrderPlan(
+            symbol=item.symbol,
+            action="backfill_protective_orders",
+            side="SELL" if item.position_amt > 0 else "BUY",
+            order_type="ALGO_BACKFILL",
+            quantity=abs(item.position_amt),
+            position_side=item.position_side if hedge_mode else None,
+            reduce_only=None,
+            stop_price=prices["stop_price"],
+            target_price=prices["target_price"],
+            missing_protective_order_types=missing_types,
+            reason_codes=_dedupe(
+                [
+                    "protective_backfill",
+                    *[f"missing_protective_order:{order_type.lower()}" for order_type in missing_types],
+                    *prices["reason_codes"],
+                    *item.reasons,
+                ]
+            ),
+            source_recommendation=item.recommendation,
+            expected_remaining_position_amt=item.position_amt,
+        ),
+    )
+
+
+def _backfill_protective_prices(
+    item: PositionReviewItem,
+    *,
+    side: str,
+    filters: SymbolExecutionFilters | None,
+) -> dict[str, Any]:
+    mark = _positive_float(item.mark_price or item.entry_price)
+    stop = _positive_float(item.stop_price)
+    target = _positive_float(item.target_price)
+    rejections: list[str] = []
+    reason_codes: list[str] = []
+    if mark is None:
+        rejections.append("missing_mark_price")
+    if stop is None:
+        rejections.append("missing_stop_price")
+    if target is None:
+        rejections.append("missing_target_price")
+    if rejections:
+        return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
+    assert mark is not None
+    assert stop is not None
+    assert target is not None
+    emergency_gap = max(abs(target - stop) * 0.05, mark * 0.003)
+    reward_gap = max(abs(target - stop) * 0.10, mark * 0.006)
+    if side == "LONG":
+        if stop >= mark:
+            stop = mark - emergency_gap
+            reason_codes.append("stop_price_emergency_rebased_below_mark")
+        if target <= mark:
+            target = mark + reward_gap
+            reason_codes.append("target_price_emergency_rebased_above_mark")
+        stop_price = _round_price(stop, filters.tick_size if filters is not None else None, up=False)
+        target_price = _round_price(target, filters.tick_size if filters is not None else None, up=True)
+        if not (stop_price < Decimal(str(mark)) < target_price):
+            rejections.append("invalid_long_backfill_geometry")
+    else:
+        if stop <= mark:
+            stop = mark + emergency_gap
+            reason_codes.append("stop_price_emergency_rebased_above_mark")
+        if target >= mark:
+            target = mark - reward_gap
+            reason_codes.append("target_price_emergency_rebased_below_mark")
+        stop_price = _round_price(stop, filters.tick_size if filters is not None else None, up=True)
+        target_price = _round_price(target, filters.tick_size if filters is not None else None, up=False)
+        if not (target_price < Decimal(str(mark)) < stop_price):
+            rejections.append("invalid_short_backfill_geometry")
+    if filters is not None:
+        reason_codes.append("price_filter_checked")
+    if rejections:
+        return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
+    return {
+        "stop_price": float(stop_price),
+        "target_price": float(target_price),
+        "reason_codes": reason_codes,
+        "rejections": [],
+    }
+
+
+def _missing_protective_order_types(item: PositionReviewItem) -> list[str]:
+    seen: set[str] = set()
+    for order in item.algo_orders:
+        order_type = str(order.get("type") or order.get("orderType") or "").upper()
+        if "TAKE_PROFIT" in order_type:
+            seen.add("TAKE_PROFIT")
+        elif "STOP" in order_type:
+            seen.add("STOP")
+    return [order_type for order_type in ("STOP", "TAKE_PROFIT") if order_type not in seen]
 
 
 def _trailing_protection_plan(
@@ -817,21 +969,32 @@ def _trail_prices(
         return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
     signed_move = mark - entry if side == "LONG" else entry - mark
     current_r = signed_move / risk_distance
-    if current_r < max(activate_r, 0.0):
-        rejections.append("trailing_activation_r_not_reached")
-    if current_r <= 0:
+    target_progress = _float_or_default(item.target_progress, 0.0)
+    target_progress_activation = "sentinel_profit_protection" in item.reasons and target_progress > 0
+    loss_control_activation = "sentinel_loss_control" in item.reasons
+    if current_r < max(activate_r, 0.0) and not target_progress_activation:
+        if not loss_control_activation:
+            rejections.append("trailing_activation_r_not_reached")
+    if current_r <= 0 and not loss_control_activation:
         rejections.append("position_not_in_profit")
     if rejections:
         return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
 
-    lock_r = max(lock_r, 0.0)
-    giveback_r = max(giveback_r, 0.0)
-    target_extension_r = max(target_extension_r, 0.0)
+    overrides = _sentinel_trailing_overrides(item.reasons)
+    lock_r = max(overrides.get("lock_r", lock_r), 0.0)
+    giveback_r = max(overrides.get("giveback_r", giveback_r), 0.0)
+    target_extension_r = max(overrides.get("target_extension_r", target_extension_r), 0.0)
     if side == "LONG":
-        candidate_stop = max(stop, entry + lock_r * risk_distance, mark - giveback_r * risk_distance)
+        if loss_control_activation:
+            candidate_stop = max(stop, mark - giveback_r * risk_distance)
+        else:
+            candidate_stop = max(stop, entry + lock_r * risk_distance, mark - giveback_r * risk_distance)
         candidate_target = max(target, mark + target_extension_r * risk_distance)
     else:
-        candidate_stop = min(stop, entry - lock_r * risk_distance, mark + giveback_r * risk_distance)
+        if loss_control_activation:
+            candidate_stop = min(stop, mark + giveback_r * risk_distance)
+        else:
+            candidate_stop = min(stop, entry - lock_r * risk_distance, mark + giveback_r * risk_distance)
         candidate_target = min(target, mark - target_extension_r * risk_distance)
 
     candidate_stop = _round_price(
@@ -861,17 +1024,42 @@ def _trail_prices(
     reason_codes.extend(
         [
             f"trailing_current_r:{round(current_r, 4)}",
+            f"trailing_target_progress:{round(target_progress, 4)}",
             f"trailing_lock_r:{round(lock_r, 4)}",
             f"trailing_giveback_r:{round(giveback_r, 4)}",
             f"target_extension_r:{round(target_extension_r, 4)}",
         ]
     )
+    if target_progress_activation:
+        reason_codes.append("trailing_activated_by_target_progress")
+    if loss_control_activation:
+        reason_codes.append("trailing_activated_by_loss_control")
     return {
         "stop_price": float(candidate_stop),
         "target_price": float(candidate_target),
         "reason_codes": reason_codes,
         "rejections": [],
     }
+
+
+def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
+    values: dict[str, float] = {}
+    mapping = {
+        "sentinel_lock_r": "lock_r",
+        "sentinel_giveback_r": "giveback_r",
+        "sentinel_target_extension_r": "target_extension_r",
+    }
+    for reason in reasons:
+        if ":" not in str(reason):
+            continue
+        key, value = str(reason).split(":", 1)
+        target = mapping.get(key)
+        if target is None:
+            continue
+        parsed = _float_or_none(value)
+        if parsed is not None and parsed >= 0:
+            values[target] = parsed
+    return values
 
 
 def _position_direction(item: PositionReviewItem) -> str | None:
@@ -1107,6 +1295,8 @@ def _execute_plan_item(
     try:
         if order_plan.action == "trail_protective_orders":
             response = _replace_protective_orders(client, order_plan=order_plan, checked_at=checked_at)
+        elif order_plan.action == "backfill_protective_orders":
+            response = _backfill_protective_orders(client, order_plan=order_plan, checked_at=checked_at)
         else:
             response = client.new_order(
                 symbol=order_plan.symbol,
@@ -1126,12 +1316,22 @@ def _execute_plan_item(
         }
 
     if response is not None:
-        post_amount = _matching_position_amount(
-            client,
-            symbol=order_plan.symbol,
-            position_side=order_plan.position_side,
-        )
-        if post_amount is None:
+        if order_plan.action == "trail_protective_orders" and _protective_replace_not_attempted(response):
+            status = "position_adjustment_failed"
+            error = {
+                "endpoint": "/fapi/v1/algoOrder",
+                "code": None,
+                "message": "protective order replacement was not attempted after old order cancel failed",
+            }
+        else:
+            post_amount = _matching_position_amount(
+                client,
+                symbol=order_plan.symbol,
+                position_side=order_plan.position_side,
+            )
+        if error is not None and status == "position_adjustment_failed":
+            pass
+        elif post_amount is None:
             status = "position_adjustment_submitted_cleanup_deferred"
             error = {
                 "endpoint": "/fapi/v2/positionRisk",
@@ -1151,6 +1351,13 @@ def _execute_plan_item(
                 "endpoint": "/fapi/v1/algoOrder",
                 "code": None,
                 "message": "protective order replacement needs follow-up",
+            }
+        elif order_plan.action == "backfill_protective_orders" and _protective_replace_needs_attention(response):
+            status = "position_adjustment_submitted_cleanup_deferred"
+            error = {
+                "endpoint": "/fapi/v1/algoOrder",
+                "code": None,
+                "message": "protective order placement needs follow-up",
             }
         elif order_plan.action == "full_close":
             cleanup_status, cancel_response, cleanup_error = _cancel_algo_orders_after_full_close(client, order_plan)
@@ -1205,6 +1412,13 @@ def _replace_protective_orders(
 ) -> dict[str, Any]:
     if order_plan.stop_price is None or order_plan.target_price is None:
         raise ValueError("trail protective order plan requires stop and target prices")
+    cancel_responses = _cancel_replaced_algo_orders(client, order_plan)
+    if any(isinstance(item, Mapping) and ("error" in item or item.get("skipped")) for item in cancel_responses):
+        return {
+            "cancel_replaced_algo_orders": cancel_responses,
+            "stop_loss_order": None,
+            "take_profit_order": None,
+        }
     stop_response = client.new_algo_order(
         symbol=order_plan.symbol,
         side=order_plan.side,
@@ -1228,14 +1442,54 @@ def _replace_protective_orders(
         return {
             "stop_loss_order": stop_response,
             "take_profit_error": _signed_error_payload(exc),
-            "cancel_replaced_algo_orders": [],
+            "cancel_replaced_algo_orders": cancel_responses,
         }
-    cancel_responses = _cancel_replaced_algo_orders(client, order_plan)
     return {
         "stop_loss_order": stop_response,
         "take_profit_order": target_response,
         "cancel_replaced_algo_orders": cancel_responses,
     }
+
+
+def _backfill_protective_orders(
+    client: BinanceFuturesSignedClient,
+    *,
+    order_plan: PositionAdjustmentOrderPlan,
+    checked_at: str,
+) -> dict[str, Any]:
+    missing = set(order_plan.missing_protective_order_types or ["STOP", "TAKE_PROFIT"])
+    response: dict[str, Any] = {"cancel_replaced_algo_orders": []}
+    if "STOP" in missing:
+        if order_plan.stop_price is None:
+            raise ValueError("protective backfill plan requires stop price")
+        try:
+            response["stop_loss_order"] = client.new_algo_order(
+                symbol=order_plan.symbol,
+                side=order_plan.side,
+                order_type="STOP_MARKET",
+                stop_price=order_plan.stop_price,
+                close_position=True,
+                position_side=order_plan.position_side,
+                client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="backfill-sl"),
+            )
+        except BinanceSignedError as exc:
+            response["stop_loss_error"] = _signed_error_payload(exc)
+    if "TAKE_PROFIT" in missing:
+        if order_plan.target_price is None:
+            raise ValueError("protective backfill plan requires target price")
+        try:
+            response["take_profit_order"] = client.new_algo_order(
+                symbol=order_plan.symbol,
+                side=order_plan.side,
+                order_type="TAKE_PROFIT_MARKET",
+                stop_price=order_plan.target_price,
+                close_position=True,
+                position_side=order_plan.position_side,
+                client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="backfill-tp"),
+            )
+        except BinanceSignedError as exc:
+            response["take_profit_error"] = _signed_error_payload(exc)
+    return response
 
 
 def _cancel_replaced_algo_orders(
@@ -1265,12 +1519,22 @@ def _cancel_replaced_algo_orders(
 
 
 def _protective_replace_needs_attention(response: Mapping[str, Any]) -> bool:
+    if "stop_loss_error" in response:
+        return True
     if "take_profit_error" in response:
         return True
     for item in response.get("cancel_replaced_algo_orders") or []:
         if isinstance(item, Mapping) and ("error" in item or item.get("skipped")):
             return True
     return False
+
+
+def _protective_replace_not_attempted(response: Mapping[str, Any]) -> bool:
+    return (
+        "cancel_replaced_algo_orders" in response
+        and response.get("stop_loss_order") is None
+        and response.get("take_profit_order") is None
+    )
 
 
 def _signed_error_payload(exc: BinanceSignedError) -> dict[str, Any]:
@@ -1439,8 +1703,15 @@ def _number(value: float) -> str:
 
 
 def _positive_float(value: Any) -> float | None:
-    parsed = _float_or_default(value, 0.0)
+    parsed = _float_or_none(value)
     return parsed if parsed > 0 else None
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _float_or_default(value: Any, default: float) -> float:

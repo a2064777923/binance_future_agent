@@ -4,12 +4,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bfa.agent import run_agent_once
+from bfa.agent import (
+    _build_live_outcome_guard,
+    _candidate_latency_summary,
+    _live_micro_grid_extra_capacity_preflight_reasons,
+    run_agent_once,
+)
 from bfa.ai.client import OpenAIAPIError, OpenAIResponse
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
+from bfa.execution.models import RiskState
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
+from bfa.strategy.candidates import CandidateSignal
 
 
 EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchange_info.json"
@@ -21,6 +28,67 @@ class FakeMarketClient:
 
     def ticker_24hr(self, symbol=None):
         return MarketDataResponse(endpoint="/fapi/v1/ticker/24hr", params={}, payload=[])
+
+
+class LatencyTelemetryTests(unittest.TestCase):
+    def test_normal_candidate_uses_latest_market_time_as_signal_time(self):
+        candidate = CandidateSignal(
+            symbol="BTCUSDT",
+            score=10.0,
+            narrative_score=0.0,
+            market_score=10.0,
+            reason_codes=["strategy_leg:trend"],
+            data_quality_notes=[],
+            source_event_ids=[],
+            market_event_ids=[],
+            generated_at="2026-06-20T10:00:03Z",
+            features={
+                "strategy_leg": "trend",
+                "latest_market_at": 1781949601000,
+            },
+        )
+
+        latency = _candidate_latency_summary(candidate)
+
+        self.assertEqual(latency["latest_market_at_ms"], 1781949601000)
+        self.assertEqual(latency["signal_time_ms"], 1781949601000)
+        self.assertEqual(latency["candidate_generated_at_ms"], 1781949603000)
+        self.assertEqual(latency["signal_to_candidate_ms"], 2000)
+        self.assertTrue(latency["ai_expected"])
+
+
+class MicroGridExtraCapacityTests(unittest.TestCase):
+    def test_preflight_allows_scan_when_only_base_open_position_cap_is_full(self):
+        config = load_config(
+            {
+                "BFA_MAX_OPEN_POSITIONS": "5",
+                "BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS": "2",
+            }
+        )
+
+        reasons = _live_micro_grid_extra_capacity_preflight_reasons(
+            config,
+            RiskState(active_positions=5),
+            ["max_open_positions_reached"],
+        )
+
+        self.assertEqual(reasons, [])
+
+    def test_preflight_blocks_when_micro_grid_extra_slots_are_also_full(self):
+        config = load_config(
+            {
+                "BFA_MAX_OPEN_POSITIONS": "5",
+                "BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS": "2",
+            }
+        )
+
+        reasons = _live_micro_grid_extra_capacity_preflight_reasons(
+            config,
+            RiskState(active_positions=7),
+            ["max_open_positions_reached"],
+        )
+
+        self.assertEqual(reasons, ["max_open_positions_reached"])
 
 
 def exchange_info_payload(*symbols):
@@ -82,6 +150,85 @@ class FakeCollector:
                 payload={"buy_sell_ratio": "1.2"},
             ),
         ]
+
+
+class MultiKlineMomentumCollector:
+    def __init__(self, symbol="BTCUSDT"):
+        self.symbol = symbol
+
+    def collect_rest_snapshots(self):
+        snapshots = [
+            NormalizedMarketSnapshot(
+                source="binance_usdm",
+                event_type="ticker_24h",
+                symbol=self.symbol,
+                event_time=1700000000000,
+                received_at="2026-06-20T10:00:00Z",
+                payload={"price_change_percent": "8.5", "quote_volume": "95000000"},
+            ),
+            NormalizedMarketSnapshot(
+                source="binance_usdm",
+                event_type="funding_rate",
+                symbol=self.symbol,
+                event_time=1700000000001,
+                received_at="2026-06-20T10:00:00Z",
+                payload={"funding_rate": "0.00005"},
+            ),
+            NormalizedMarketSnapshot(
+                source="binance_usdm",
+                event_type="open_interest_hist",
+                symbol=self.symbol,
+                event_time=1700000000002,
+                received_at="2026-06-20T10:00:00Z",
+                payload={"sum_open_interest_value": "12000000"},
+            ),
+            NormalizedMarketSnapshot(
+                source="binance_usdm",
+                event_type="taker_buy_sell_volume",
+                symbol=self.symbol,
+                event_time=1700000000003,
+                received_at="2026-06-20T10:00:00Z",
+                payload={"buy_sell_ratio": "1.34"},
+            ),
+            NormalizedMarketSnapshot(
+                source="binance_usdm",
+                event_type="exchange_symbol",
+                symbol=self.symbol,
+                event_time=1700000000004,
+                received_at="2026-06-20T10:00:00Z",
+                payload={
+                    "status": "TRADING",
+                    "contract_type": "PERPETUAL",
+                    "filters": {
+                        "MARKET_LOT_SIZE": {"minQty": "0.001", "stepSize": "0.001"},
+                        "MIN_NOTIONAL": {"notional": "5"},
+                    },
+                },
+            ),
+        ]
+        price = 100.0
+        closes = [102.0, 101.0, 103.0, 102.0, 104.0, 103.0, 105.0, 106.0]
+        quote_volume = 8_000_000.0
+        for index, close in enumerate(closes):
+            snapshots.append(
+                NormalizedMarketSnapshot(
+                    source="binance_usdm",
+                    event_type="kline",
+                    symbol=self.symbol,
+                    event_time=1700000000100 + index,
+                    received_at="2026-06-20T10:00:00Z",
+                    payload={
+                        "open": str(price),
+                        "high": str(max(price, close) * 1.006),
+                        "low": str(min(price, close) * 0.998),
+                        "close": str(close),
+                        "quote_volume": str(quote_volume),
+                    },
+                )
+            )
+            price = close
+            quote_volume *= 1.12
+        return snapshots
 
 
 def snapshots_for_symbol(symbol, *, price_change="5.2", quote_volume="12000000", ratio="1.2"):
@@ -244,6 +391,38 @@ class FakeAiClient:
         )
 
 
+class LimitReasonDroppingAiClient(FakeAiClient):
+    def create_decision(self, context, *, instructions, schema):
+        response = super().create_decision(context, instructions=instructions, schema=schema)
+        payload = json.loads(response.output_text)
+        payload["reasons"] = [
+            reason
+            for reason in payload["reasons"]
+            if not str(reason).startswith(
+                (
+                    "entry_order_type:",
+                    "entry_time_in_force:",
+                    "limit_entry_max_wait_seconds:",
+                    "signal_mode:",
+                    "strategy_leg:",
+                    "regime_label:",
+                    "route_decision:",
+                    "regime_confidence:",
+                )
+            )
+        ]
+        if not payload["reasons"]:
+            payload["reasons"] = ["ai_agrees_with_quant_setup"]
+        output_text = json.dumps(payload)
+        return OpenAIResponse(
+            response_id="resp_agent_limit_reason_drop",
+            request_payload=response.request_payload,
+            raw_response={"id": "resp_agent_limit_reason_drop", "output_text": output_text},
+            output_text=output_text,
+            response_headers={},
+        )
+
+
 class FakeSignedClient:
     def __init__(self, positions=None, open_orders=None, open_algo_orders=None):
         self.positions = [] if positions is None else positions
@@ -287,6 +466,36 @@ class FakeSignedClient:
         self.calls.append(("cancel_algo_order", kwargs))
         self.cancelled_algo_orders.append(kwargs)
         return {"status": "CANCELED", **kwargs}
+
+
+class RecordingProtectiveSignedClient(FakeSignedClient):
+    def new_algo_order(self, **kwargs):
+        response = super().new_algo_order(**kwargs)
+        self._open_algo_orders.append(
+            {
+                "symbol": kwargs.get("symbol"),
+                "positionSide": kwargs.get("position_side"),
+                "type": kwargs.get("order_type"),
+                "orderType": kwargs.get("order_type"),
+                "triggerPrice": str(kwargs.get("stop_price")),
+                "algoId": response.get("algoId"),
+                "clientAlgoId": kwargs.get("client_algo_id"),
+            }
+        )
+        return response
+
+
+def protective_algo_orders(symbol, position_side, *, stop="96", target="108"):
+    return [
+        {"symbol": symbol, "positionSide": position_side, "type": "STOP_MARKET", "triggerPrice": stop, "algoId": 11},
+        {
+            "symbol": symbol,
+            "positionSide": position_side,
+            "type": "TAKE_PROFIT_MARKET",
+            "triggerPrice": target,
+            "algoId": 12,
+        },
+    ]
 
 
 class TwoSymbolMarketClient:
@@ -395,6 +604,65 @@ class AgentRunnerTests(unittest.TestCase):
             result.candidate_evaluations[0]["setup"]["price_basis"],
         )
 
+    def test_run_once_persists_decision_snapshot_without_raw_market_snapshots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_PERSIST_MARKET_SNAPSHOTS": "false",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                journal_path=str(root / "ai.jsonl"),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                market_rows = connection.execute("SELECT COUNT(*) FROM market_snapshots").fetchone()[0]
+                market_events = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type = 'market_snapshot'"
+                ).fetchone()[0]
+                snapshot = connection.execute(
+                    """
+                    SELECT d.event_id, d.payload_json
+                    FROM decision_snapshots AS d
+                    JOIN events AS e ON e.id = d.event_id
+                    WHERE e.event_type = 'decision_snapshot'
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(market_rows, 0)
+        self.assertEqual(market_events, 0)
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(result.persisted["decision_snapshot"], snapshot["event_id"])
+        payload = json.loads(snapshot["payload_json"])
+        self.assertEqual(payload["schema"], "bfa_decision_snapshot_v1")
+        self.assertEqual(payload["market_snapshot_persistence"], "disabled")
+        self.assertEqual(payload["market_context"]["total_count"], 5)
+        self.assertEqual(payload["market_context"]["symbols"][0]["symbol"], "BTCUSDT")
+        self.assertEqual(payload["candidate_generation"]["fused_candidate_count"], 1)
+        self.assertEqual(payload["candidate_generation"]["top_candidates"][0]["symbol"], "BTCUSDT")
+        self.assertIn("price_change_percent", payload["candidate_generation"]["top_candidates"][0]["features"])
+
     def test_run_once_sends_reference_price_to_ai_client(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -486,6 +754,131 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.source_health["market_heat_fallback"]["status"], "used")
         self.assertEqual(result.source_health["market_heat_fallback"]["record_count"], 1)
         self.assertEqual(result.source_health["narrative_sources"]["source_counts"]["market_heat"], 1)
+
+    def test_run_once_can_trade_market_only_when_narrative_requirement_is_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "false",
+                    "BFA_AI_FALLBACK_TO_QUANT_ENABLED": "true",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "false",
+                    "BFA_LIVE_REQUIRE_NARRATIVE_EVIDENCE": "false",
+                    "BFA_LIVE_CANDIDATE_SCORE_MODE": "market_momentum",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=MultiKlineMomentumCollector(),
+                narrative_runner=EmptyNarrativeRunner(),
+                ai_client=None,
+            )
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(result.selected_symbol, "BTCUSDT")
+        self.assertEqual(result.narrative_record_count, 0)
+        self.assertEqual(result.candidate_evaluations[0]["ai"]["status"], "quant_only")
+        self.assertIn("short_interval_momentum", result.candidate_evaluations[0]["candidate_reason_codes"])
+        self.assertNotIn("narrative_heat", result.candidate_evaluations[0]["candidate_reason_codes"])
+
+    def test_run_once_can_use_high_frequency_profile_with_quant_fallback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "false",
+                    "BFA_AI_FALLBACK_TO_QUANT_ENABLED": "true",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_LIVE_QUANT_SETUP_VARIANT": "quant_setup_high_frequency_guarded",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=MultiKlineMomentumCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=None,
+            )
+
+        setup = result.candidate_evaluations[0]["setup"]
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(setup["status"], "trade")
+        self.assertEqual(setup["price_basis"]["profile"], "high_frequency_guarded")
+        self.assertEqual(result.candidate_evaluations[0]["ai"]["status"], "quant_only")
+
+    def test_run_once_preserves_quant_limit_execution_reasons_when_ai_drops_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_LIVE_QUANT_SETUP_VARIANT": "quant_setup_live_action_flow",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=MultiKlineMomentumCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=LimitReasonDroppingAiClient(),
+            )
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                row = connection.execute(
+                    """
+                    SELECT payload_json
+                    FROM order_intents
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertIsNotNone(row)
+        intent = json.loads(row["payload_json"])["intent"]
+        self.assertEqual(intent["order_type"], "LIMIT")
+        self.assertEqual(intent["time_in_force"], "GTX")
+        self.assertEqual(intent["limit_wait_seconds"], 75)
+        self.assertIn("entry_order_type:limit", intent["reason_codes"])
+        self.assertIn("entry_time_in_force:GTX", intent["reason_codes"])
+        self.assertIn("limit_entry_max_wait_seconds:75", intent["reason_codes"])
+        self.assertIn("strategy_leg:trend", intent["reason_codes"])
+        self.assertIn("regime_label:TREND", intent["reason_codes"])
+        self.assertIn("route_decision:allow", intent["reason_codes"])
+        self.assertEqual(intent["metadata"]["strategy_leg"], "trend")
+        self.assertEqual(intent["metadata"]["regime_label"], "TREND")
+        self.assertEqual(intent["metadata"]["route_decision"], "allow")
+        ai_payload = result.candidate_evaluations[0]["ai"]
+        self.assertIn(
+            "quant_setup_execution_reasons_preserved",
+            ai_payload["validation_warnings"],
+        )
 
     def test_run_once_stops_before_execution_when_openai_errors(self):
         class FailingAiClient:
@@ -850,8 +1243,118 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(len([call for call in signed_client.calls if call[0] == "cancel_algo_order"]), 2)
         first_new_algo = next(index for index, call in enumerate(signed_client.calls) if call[0] == "new_algo_order")
         first_cancel_algo = next(index for index, call in enumerate(signed_client.calls) if call[0] == "cancel_algo_order")
-        self.assertLess(first_new_algo, first_cancel_algo)
+        self.assertLess(first_cancel_algo, first_new_algo)
         self.assertEqual(result.position_adjustment_plan["plans"][0]["action"], "trail_protective_orders")
+
+    def test_live_run_once_backfills_unprotected_pending_fill_despite_normal_open_orders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                store = EventStore(connection)
+                store.insert_artifact(
+                    "order_intents",
+                    occurred_at="2026-06-20T09:00:00Z",
+                    source="execution.live",
+                    symbol="BTCUSDT",
+                    ref_id="order_intent:BTCUSDT:2026-06-20T09:00:00Z",
+                    payload={
+                        "status": "entry_order_pending",
+                        "intent": {
+                            "symbol": "BTCUSDT",
+                            "side": "BUY",
+                            "quantity": 0.2,
+                            "entry_price": 100,
+                            "stop_price": 96,
+                            "target_price": 108,
+                            "leverage": 10,
+                            "metadata": {"hold_time_minutes": 100000},
+                        },
+                    },
+                    event_type="order_intent",
+                )
+            finally:
+                connection.close()
+
+            signed_client = RecordingProtectiveSignedClient(
+                positions=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "positionAmt": "0.2",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "101",
+                        "unRealizedProfit": "0.2",
+                        "notional": "20.2",
+                        "initialMargin": "2.02",
+                        "leverage": "10",
+                    }
+                ],
+                open_orders=[
+                    {
+                        "symbol": "BTWUSDT",
+                        "status": "NEW",
+                        "type": "LIMIT",
+                        "side": "BUY",
+                        "positionSide": "LONG",
+                    }
+                ],
+            )
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "ETHUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "1",
+                    "BFA_MULTI_POSITION_ENABLED": "true",
+                    "BFA_POSITION_AUTO_MANAGEMENT_ENABLED": "false",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+                signed_client=signed_client,
+            )
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                lifecycle = connection.execute(
+                    """
+                    SELECT r.payload_json
+                    FROM risk_state
+                    AS r
+                    JOIN events AS e ON e.id = r.event_id
+                    WHERE e.event_type = 'position_lifecycle_decision'
+                    ORDER BY e.id DESC
+                    LIMIT 1
+                    """
+                ).fetchone()
+            finally:
+                connection.close()
+
+        payload = json.loads(lifecycle["payload_json"])
+        new_algo_calls = [call for call in signed_client.calls if call[0] == "new_algo_order"]
+        self.assertEqual(result.status, "entry_capacity_blocked")
+        self.assertEqual(len(new_algo_calls), 2)
+        self.assertEqual({call[1]["order_type"] for call in new_algo_calls}, {"STOP_MARKET", "TAKE_PROFIT_MARKET"})
+        self.assertFalse(payload["auto_management"]["executed"])
+        self.assertEqual(payload["position_safety"]["status"], "no_backfill_needed")
+        self.assertEqual(payload["pending_limit_watchdog"]["protected_count"], 1)
+        self.assertEqual(payload["pending_limit_watchdog"]["items"][0]["status"], "position_reconciled_protected")
+        self.assertEqual(payload["pending_limit_watchdog"]["items"][0]["action"], "place_protective_orders")
 
     def test_live_run_once_continues_when_multi_position_capacity_exists(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1328,6 +1831,100 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.source_health["manual_symbol_exclusions"]["excluded_symbols"], ["BTWUSDT"])
         self.assertNotIn("BTWUSDT", result.evaluated_symbols)
 
+    def test_run_once_auto_hot_crypto_only_excludes_tradfi_perpetuals(self):
+        class TradFiHotMarketClient(FakeMarketClient):
+            def __init__(self):
+                self.calls = []
+
+            def ticker_24hr(self, symbol=None):
+                self.calls.append(("ticker_24hr", symbol))
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {"symbol": "SNDKUSDT", "priceChangePercent": "300", "quoteVolume": "900000000", "count": 1000},
+                        {"symbol": "XAUUSDT", "priceChangePercent": "250", "quoteVolume": "800000000", "count": 1000},
+                        {"symbol": "MSTRUSDT", "priceChangePercent": "200", "quoteVolume": "700000000", "count": 1000},
+                        {"symbol": "HOTUSDT", "priceChangePercent": "8", "quoteVolume": "120000000", "count": 1000},
+                    ],
+                )
+
+            def exchange_info(self):
+                self.calls.append(("exchange_info",))
+                payload = exchange_info_payload("HOTUSDT", "SNDKUSDT", "XAUUSDT", "MSTRUSDT")
+                for item in payload["symbols"]:
+                    if item["symbol"] == "HOTUSDT":
+                        item["contractType"] = "PERPETUAL"
+                        item["underlyingType"] = "COIN"
+                        item["underlyingSubType"] = ["Layer-1"]
+                    elif item["symbol"] == "XAUUSDT":
+                        item["contractType"] = "TRADIFI_PERPETUAL"
+                        item["underlyingType"] = "COMMODITY"
+                        item["underlyingSubType"] = ["TradFi"]
+                    else:
+                        item["contractType"] = "TRADIFI_PERPETUAL"
+                        item["underlyingType"] = "EQUITY"
+                        item["underlyingSubType"] = ["TradFi"]
+                return MarketDataResponse(endpoint="/fapi/v1/exchangeInfo", params={}, payload=payload)
+
+        class HotCollector:
+            def collect_rest_snapshots(self):
+                return snapshots_for_symbol("HOTUSDT", price_change="8.0", quote_volume="120000000")
+
+        class HotNarrativeRunner:
+            def collect(self):
+                return [
+                    NormalizedNarrativeRecord(
+                        source="binance_square",
+                        source_id="square-hot",
+                        author="poster",
+                        symbol_mentions=["HOTUSDT"],
+                        text="HOTUSDT narrative",
+                        url=None,
+                        published_at="2026-06-20T09:58:00Z",
+                        collected_at="2026-06-20T10:00:00Z",
+                        engagement={"likes": 70},
+                        raw={},
+                        quality_flags=[],
+                    )
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            market_client = TradFiHotMarketClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_LIVE_AUTO_HOT_SYMBOLS": "true",
+                    "BFA_LIVE_AUTO_HOT_TOP_N": "4",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=market_client,
+                collector=HotCollector(),
+                narrative_runner=HotNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+
+        self.assertEqual(result.scan_symbols, ["HOTUSDT"])
+        self.assertEqual(result.source_health["binance_24h_ticker"]["eligible_payload_count"], 1)
+        crypto_filter = result.source_health["binance_24h_ticker"]["crypto_filter"]
+        self.assertEqual(crypto_filter["excluded_tradfi_count"], 3)
+        self.assertEqual(
+            set(crypto_filter["excluded_tradfi_symbols"]),
+            {"SNDKUSDT", "XAUUSDT", "MSTRUSDT"},
+        )
+        self.assertNotIn("SNDKUSDT", result.source_health["symbol_selection"]["selected_symbols"])
+
     def test_run_once_auto_hot_falls_back_to_market_symbols_when_empty(self):
         class EmptyHotMarketClient(FakeMarketClient):
             def __init__(self):
@@ -1556,6 +2153,64 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(ai_client.calls, 0)
         self.assertEqual(result.paper_guard["status"], "active")
         self.assertIn("BTCUSDT", result.paper_guard["symbol_blocks"])
+
+    def test_run_once_live_outcome_guard_downsizes_recent_losing_symbol_without_pre_ai_reject(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            store = EventStore(connection)
+            store.insert_artifact(
+                "outcomes",
+                occurred_at="2026-06-20T01:00:00Z",
+                source="test",
+                symbol="BTCUSDT",
+                ref_id="outcome:btc:closed",
+                event_type="trade_outcome",
+                payload={
+                    "schema": "bfa_trade_outcome_v1",
+                    "symbol": "BTCUSDT",
+                    "status": "closed",
+                    "last_trade_time": "2026-06-20T01:00:00Z",
+                    "net_realized_pnl_usdt": -0.4,
+                },
+            )
+            connection.close()
+            ai_client = FakeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                    "BFA_LIVE_OUTCOME_GUARD_ENABLED": "true",
+                    "BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES": "1",
+                    "BFA_LIVE_OUTCOME_GUARD_SYMBOL_MIN_LOSS_USDT": "0.25",
+                    "BFA_LIVE_OUTCOME_GUARD_SYMBOL_MAX_WIN_RATE": "0.34",
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+            )
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(result.candidate_count, 1)
+        self.assertEqual(result.rejected_count, 0)
+        self.assertEqual(ai_client.calls, 1)
+        self.assertEqual(result.paper_guard["status"], "active")
+        self.assertIn("BTCUSDT", result.paper_guard["symbol_blocks"])
+        self.assertIn("live_outcome_symbol_blocks_active", result.paper_guard["reasons"])
+        self.assertEqual(result.paper_guard["symbol_mode"], "downsize")
 
 
 if __name__ == "__main__":

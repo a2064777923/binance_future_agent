@@ -1,0 +1,23 @@
+[Unit]
+Description=Binance Futures Agent raw L2/depth/trade feed recorder
+Documentation=file:/opt/binance-futures-agent/app/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/binance-futures-agent/app
+EnvironmentFile=/etc/binance-futures-agent/env
+ExecStart=/usr/bin/env bash /opt/binance-futures-agent/app/deploy/record-raw-feed-loop.sh
+Restart=always
+RestartSec=5
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/binance-futures-agent/data /opt/binance-futures-agent/runtime /opt/binance-futures-agent/logs
+
+[Install]
+WantedBy=multi-user.target

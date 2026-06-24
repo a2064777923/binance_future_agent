@@ -31,6 +31,17 @@ def mark_price_stream(symbol: str) -> str:
     return f"{_stream_symbol(symbol)}@markPrice"
 
 
+def trade_stream(symbol: str) -> str:
+    return f"{_stream_symbol(symbol)}@trade"
+
+
+def depth_stream(symbol: str, speed_ms: int = 100) -> str:
+    speed = int(speed_ms)
+    if speed not in {0, 100, 250, 500}:
+        raise ValueError("depth stream speed must be one of 0, 100, 250, or 500 ms")
+    return f"{_stream_symbol(symbol)}@depth@{speed}ms"
+
+
 def book_ticker_stream(symbol: str) -> str:
     return f"{_stream_symbol(symbol)}@bookTicker"
 

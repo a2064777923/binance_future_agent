@@ -27,6 +27,13 @@ def report(*, positions=None, open_orders=None, open_algo_orders=None, protectiv
     )
 
 
+def protective_algo_orders(symbol="BNBUSDT", position_side="LONG"):
+    return [
+        {"symbol": symbol, "positionSide": position_side, "type": "STOP_MARKET", "triggerPrice": "575.0"},
+        {"symbol": symbol, "positionSide": position_side, "type": "TAKE_PROFIT_MARKET", "triggerPrice": "593.0"},
+    ]
+
+
 class PositionHoldCheckTests(unittest.TestCase):
     def setUp(self):
         self.connection = sqlite3.connect(":memory:")
@@ -36,7 +43,7 @@ class PositionHoldCheckTests(unittest.TestCase):
     def tearDown(self):
         self.connection.close()
 
-    def insert_submitted_intent(self, *, hold_time_minutes=60):
+    def insert_submitted_intent(self, *, hold_time_minutes=60, status="submitted"):
         return self.store.insert_artifact(
             "order_intents",
             occurred_at="2026-06-20T03:43:09Z",
@@ -44,7 +51,7 @@ class PositionHoldCheckTests(unittest.TestCase):
             symbol="BNBUSDT",
             ref_id="order_intent:BNBUSDT:2026-06-20T03:43:09Z",
             payload={
-                "status": "submitted",
+                "status": status,
                 "intent": {
                     "symbol": "BNBUSDT",
                     "side": "BUY",
@@ -65,10 +72,7 @@ class PositionHoldCheckTests(unittest.TestCase):
         result = position_hold_check_from_live_status(
             report(
                 positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
-                open_algo_orders=[
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders(),
             ),
             connection=self.connection,
             checked_at="2026-06-20T04:00:00Z",
@@ -88,10 +92,7 @@ class PositionHoldCheckTests(unittest.TestCase):
         result = position_hold_check_from_live_status(
             report(
                 positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
-                open_algo_orders=[
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders(),
             ),
             connection=self.connection,
             checked_at="2026-06-20T04:20:00Z",
@@ -113,6 +114,41 @@ class PositionHoldCheckTests(unittest.TestCase):
 
         self.assertTrue(result.action_required)
         self.assertEqual(result.status, "urgent_attention")
+        self.assertIn("active_position_without_confirmed_algo_protection", result.reasons)
+
+    def test_pending_entry_order_intent_matches_filled_position(self):
+        self.insert_submitted_intent(hold_time_minutes=60, status="entry_order_pending")
+
+        result = position_hold_check_from_live_status(
+            report(
+                positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
+                open_algo_orders=protective_algo_orders(),
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T04:00:00Z",
+        )
+
+        self.assertEqual(result.status, "within_hold_window")
+        self.assertEqual(result.positions[0].matching_intent.event_id, 1)
+        self.assertNotIn("active_position_without_matching_submitted_intent", result.reasons)
+
+    def test_duplicate_stop_orders_do_not_count_as_complete_protection(self):
+        self.insert_submitted_intent(hold_time_minutes=60)
+
+        result = position_hold_check_from_live_status(
+            report(
+                positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
+                open_algo_orders=[
+                    {"symbol": "BNBUSDT", "positionSide": "LONG", "type": "STOP_MARKET", "triggerPrice": "575.0"},
+                    {"symbol": "BNBUSDT", "positionSide": "LONG", "type": "STOP_MARKET", "triggerPrice": "574.0"},
+                ],
+            ),
+            connection=self.connection,
+            checked_at="2026-06-20T04:00:00Z",
+        )
+
+        self.assertEqual(result.status, "urgent_attention")
+        self.assertEqual(result.positions[0].algo_protection_count, 1)
         self.assertIn("active_position_without_confirmed_algo_protection", result.reasons)
 
     def test_missing_exchange_evidence_is_action_required(self):
@@ -142,10 +178,7 @@ class PositionHoldCheckTests(unittest.TestCase):
         hold_check = position_hold_check_from_live_status(
             report(
                 positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
-                open_algo_orders=[
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders(),
             ),
             connection=self.connection,
             checked_at="2026-06-20T04:20:00Z",
@@ -167,10 +200,7 @@ class PositionHoldCheckTests(unittest.TestCase):
         hold_check = position_hold_check_from_live_status(
             report(
                 positions=[{"symbol": "BNBUSDT", "positionAmt": "0.01", "positionSide": "LONG"}],
-                open_algo_orders=[
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                    {"symbol": "BNBUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders(),
             ),
             connection=self.connection,
             checked_at="2026-06-20T04:00:00Z",

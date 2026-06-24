@@ -42,6 +42,19 @@ def report(*, positions=None, open_orders=None, open_algo_orders=None):
     )
 
 
+def protective_algo_orders(symbol="BTCUSDT", position_side="LONG", *, stop="96", target="108"):
+    return [
+        {"symbol": symbol, "positionSide": position_side, "type": "STOP_MARKET", "triggerPrice": stop, "algoId": 11},
+        {
+            "symbol": symbol,
+            "positionSide": position_side,
+            "type": "TAKE_PROFIT_MARKET",
+            "triggerPrice": target,
+            "algoId": 12,
+        },
+    ]
+
+
 class FakeSignedClient:
     def __init__(
         self,
@@ -204,10 +217,7 @@ class PositionAdjustmentTests(unittest.TestCase):
                         "unRealizedProfit": str((mark_price - 100) * 0.2),
                     }
                 ],
-                open_algo_orders=[
-                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
-                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders(),
             ),
             connection=self.connection,
             checked_at=checked_at,
@@ -354,10 +364,7 @@ class PositionAdjustmentTests(unittest.TestCase):
                         "unRealizedProfit": "0.556",
                     },
                 ],
-                open_algo_orders=[
-                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
-                    {"symbol": "BTCUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders(),
             ),
             connection=self.connection,
             checked_at="2026-06-20T04:10:00Z",
@@ -438,10 +445,7 @@ class PositionAdjustmentTests(unittest.TestCase):
                         "unRealizedProfit": "0.1",
                     },
                 ],
-                open_algo_orders=[
-                    {"symbol": "ETHUSDT", "positionSide": "LONG"},
-                    {"symbol": "ETHUSDT", "positionSide": "LONG"},
-                ],
+                open_algo_orders=protective_algo_orders("ETHUSDT", "LONG"),
             ),
             connection=self.connection,
             checked_at="2026-06-20T04:10:00Z",
@@ -670,11 +674,14 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
             exchange_info=self.exchange_info(),
         )
 
-        self.assertEqual(report.status, "position_adjustment_submitted_cleanup_deferred")
-        self.assertTrue(report.adjustment_executed)
-        self.assertEqual(len(fake.algo_orders), 2)
+        self.assertEqual(report.status, "position_adjustment_failed")
+        self.assertFalse(report.adjustment_executed)
+        self.assertEqual(len(fake.algo_orders), 0)
         self.assertEqual(len(fake.cancelled_algo_orders), 2)
-        self.assertEqual(report.executions[0].error["message"], "protective order replacement needs follow-up")
+        self.assertEqual(
+            report.executions[0].error["message"],
+            "protective order replacement was not attempted after old order cancel failed",
+        )
         cancel_results = report.executions[0].order_response["cancel_replaced_algo_orders"]
         self.assertTrue(all("error" in item for item in cancel_results))
 

@@ -30,6 +30,7 @@ def base_env(**overrides):
         "BFA_MODE": "dry_run",
         "BFA_AI_PROVIDER": "openai",
         "BFA_OPENAI_ENABLED": "false",
+        "BFA_AI_FALLBACK_TO_QUANT_ENABLED": "false",
         "BFA_ACCOUNT_CAPITAL_USDT": "100",
         "BFA_MAX_LEVERAGE": "3",
         "BFA_MAX_POSITION_NOTIONAL_USDT": "20",
@@ -50,6 +51,22 @@ def base_env(**overrides):
         "BFA_LIVE_AUTO_HOT_TOP_N": "80",
         "BFA_LIVE_AUTO_HOT_MIN_QUOTE_VOLUME_USDT": "10000000",
         "BFA_LIVE_AUTO_HOT_MIN_ABS_PRICE_CHANGE_PERCENT": "0.5",
+        "BFA_LIVE_REQUIRE_NARRATIVE_EVIDENCE": "true",
+        "BFA_LIVE_CANDIDATE_SCORE_MODE": "balanced",
+        "BFA_LIVE_CANDIDATE_MIN_QUOTE_VOLUME_USDT": "5000000",
+        "BFA_LIVE_CANDIDATE_MAX_KLINE_RANGE_PERCENT": "20",
+        "BFA_LIVE_QUANT_SETUP_VARIANT": "quant_setup",
+        "BFA_LIVE_OUTCOME_GUARD_ENABLED": "true",
+        "BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES": "1",
+        "BFA_LIVE_OUTCOME_GUARD_SYMBOL_MIN_LOSS_USDT": "0.25",
+        "BFA_LIVE_OUTCOME_GUARD_SYMBOL_MAX_WIN_RATE": "0.34",
+        "BFA_LIVE_OUTCOME_GUARD_SYMBOL_MODE": "downsize",
+        "BFA_LIVE_OUTCOME_GUARD_SYMBOL_DOWNSIZE_MULTIPLIER": "0.55",
+        "BFA_LIVE_OUTCOME_GUARD_MIN_SIDE_OUTCOMES": "6",
+        "BFA_LIVE_OUTCOME_GUARD_SIDE_MIN_LOSS_USDT": "1.0",
+        "BFA_LIVE_OUTCOME_GUARD_SIDE_MAX_WIN_RATE": "0.45",
+        "BFA_LIVE_OUTCOME_GUARD_SIDE_MODE": "downsize",
+        "BFA_LIVE_OUTCOME_GUARD_SIDE_DOWNSIZE_MULTIPLIER": "0.65",
         "BFA_FORWARD_PAPER_SYMBOLS": "",
         "BFA_FORWARD_PAPER_AUTO_HOT_SYMBOLS": "true",
         "BFA_FORWARD_PAPER_TOP_N": "40",
@@ -69,6 +86,9 @@ def base_env(**overrides):
         "BFA_FORWARD_PAPER_GUARD_MIN_FACTOR_OUTCOMES": "30",
         "BFA_FORWARD_PAPER_GUARD_FACTOR_MIN_LOSS_USDT": "3",
         "BFA_FORWARD_PAPER_GUARD_FACTOR_MAX_WIN_RATE": "0.25",
+        "BFA_FORWARD_PAPER_GUARD_FACTOR_MODE": "block",
+        "BFA_FORWARD_PAPER_GUARD_FACTOR_DOWNSIZE_MULTIPLIER": "0.65",
+        "BFA_FORWARD_PAPER_GUARD_FACTOR_EXEMPT_REASONS": "",
         "BFA_MARKET_HEAT_NARRATIVE_ENABLED": "true",
         "BFA_MARKET_HEAT_MIN_QUOTE_VOLUME_USDT": "5000000",
         "BFA_MARKET_HEAT_MIN_PRICE_CHANGE_PERCENT": "0.3",
@@ -108,11 +128,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(market_symbols(config), PILOT_SYMBOLS)
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_SYMBOLS"), "false")
         self.assertEqual(config.get("BFA_LIVE_AUTO_HOT_TOP_N"), "80")
+        self.assertEqual(config.get("BFA_LIVE_REQUIRE_NARRATIVE_EVIDENCE"), "true")
+        self.assertEqual(config.get("BFA_LIVE_CANDIDATE_SCORE_MODE"), "balanced")
+        self.assertEqual(config.get("BFA_LIVE_QUANT_SETUP_VARIANT"), "quant_setup")
+        self.assertEqual(config.get("BFA_LIVE_OUTCOME_GUARD_ENABLED"), "true")
+        self.assertEqual(config.get("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MODE"), "downsize")
+        self.assertEqual(config.get("BFA_LIVE_OUTCOME_GUARD_SIDE_MODE"), "downsize")
         self.assertEqual(config.get_list("BFA_MANUAL_POSITION_SYMBOLS"), [])
         self.assertEqual(config.get("BFA_POSITION_AUTO_MANAGEMENT_ENABLED"), "false")
         self.assertEqual(config.get("BFA_POSITION_AUTO_MANAGEMENT_MAX_ACTIONS_PER_CYCLE"), "1")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_ENABLED"), "true")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES"), "30")
+        self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_MODE"), "block")
 
     def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))
@@ -212,6 +239,34 @@ class ConfigTests(unittest.TestCase):
 
         self.assertFalse(result.valid)
         self.assertIn("BFA_POSITION_MODE must be one_way or hedge", result.errors)
+
+    def test_invalid_forward_paper_factor_mode_fails(self):
+        config = load_config(base_env(BFA_FORWARD_PAPER_GUARD_FACTOR_MODE="panic"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_FORWARD_PAPER_GUARD_FACTOR_MODE must be block, downsize, or observe", result.errors)
+
+    def test_invalid_live_candidate_score_mode_fails(self):
+        config = load_config(base_env(BFA_LIVE_CANDIDATE_SCORE_MODE="social_only"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_LIVE_CANDIDATE_SCORE_MODE must be balanced or market_momentum", result.errors)
+
+    def test_invalid_live_outcome_guard_mode_fails(self):
+        config = load_config(base_env(BFA_LIVE_OUTCOME_GUARD_SIDE_MODE="panic"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_LIVE_OUTCOME_GUARD_SIDE_MODE must be block, downsize, or observe", result.errors)
+
+    def test_invalid_live_quant_setup_variant_fails(self):
+        config = load_config(base_env(BFA_LIVE_QUANT_SETUP_VARIANT="quant_setup_moonshot"))
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertIn("BFA_LIVE_QUANT_SETUP_VARIANT must be a known backtest variant", result.errors)
 
     def test_live_cross_margin_mode_warns_but_keeps_config_valid(self):
         config = load_config(

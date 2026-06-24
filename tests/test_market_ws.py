@@ -5,11 +5,13 @@ from pathlib import Path
 from bfa.market.binance_ws import (
     book_ticker_stream,
     combined_stream_url,
+    depth_stream,
     next_reconnect_delay,
     kline_stream,
     mark_price_stream,
     parse_market_stream_message,
     raw_stream_url,
+    trade_stream,
     ticker_stream,
     validate_public_stream,
 )
@@ -29,6 +31,12 @@ class WebSocketStreamBuilderTests(unittest.TestCase):
         self.assertEqual(kline_stream("BTCUSDT", "5m"), "btcusdt@kline_5m")
         self.assertEqual(mark_price_stream("BTCUSDT"), "btcusdt@markPrice")
         self.assertEqual(book_ticker_stream("BTCUSDT"), "btcusdt@bookTicker")
+        self.assertEqual(trade_stream("BTCUSDT"), "btcusdt@trade")
+        self.assertEqual(depth_stream("BTCUSDT", 100), "btcusdt@depth@100ms")
+        self.assertEqual(depth_stream("BTCUSDT", 0), "btcusdt@depth@0ms")
+
+        with self.assertRaises(ValueError):
+            depth_stream("BTCUSDT", 42)
 
     def test_combined_and_raw_stream_urls_use_public_stream_paths(self):
         streams = [

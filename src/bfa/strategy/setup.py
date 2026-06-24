@@ -139,6 +139,59 @@ class TradeSetupProfile:
     min_quote_volume_usdt: float | None = None
     min_abs_momentum_percent: float | None = None
     min_volume_impulse_percent: float | None = None
+    max_volatility_percent: float | None = None
+    min_directional_taker_flow_edge: float | None = None
+    require_directional_confluence: bool = False
+    min_directional_confluence: int = 0
+    block_adverse_trend_vwap: bool = False
+    block_hot_micro_reversal: bool = False
+    block_volume_fade: bool = False
+    block_spike_reversal_conflict: bool = False
+    max_adverse_micro_momentum_percent: float | None = None
+    min_rsi_for_long: float | None = None
+    max_rsi_for_short: float | None = None
+    entry_order_type: str = "market"
+    limit_entry_retrace_fraction: float = 0.0
+    limit_entry_min_offset_percent: float = 0.04
+    limit_entry_max_offset_percent: float = 0.45
+    limit_entry_max_wait_seconds: int = 0
+    min_post_cost_edge_ratio: float = 0.0
+    fee_bps: float = 4.0
+    slippage_bps: float = 5.0
+    require_mtf_alignment: bool = False
+    min_mtf_alignment_score: int = 0
+    adaptive_stop_enabled: bool = False
+    adaptive_stop_atr_multiplier: float = 1.15
+    adaptive_stop_realized_volatility_multiplier: float = 1.6
+    adaptive_target_volatility_multiplier: float = 2.0
+    time_exit_enabled: bool = True
+    time_exit_only_when_not_profitable: bool = False
+    time_exit_use_config_max_hold_only: bool = False
+    early_exit_enabled: bool = False
+    early_exit_min_seconds: int = 90
+    early_exit_min_favorable_r: float = 0.25
+    early_exit_max_adverse_r: float = 0.2
+    early_exit_min_adverse_votes: int = 2
+    early_exit_flow_edge: float = 0.02
+    require_entry_quality: bool = False
+    min_entry_quality_score: int = 0
+    require_limit_entry_quality: bool = False
+    min_limit_entry_quality_score: int = 0
+    allow_counter_signal: bool = False
+    min_counter_signal_score: int = 0
+    enable_orderly_range: bool = False
+    min_orderly_range_score: int = 0
+    orderly_range_min_width_percent: float = 0.35
+    orderly_range_max_width_percent: float = 2.4
+    orderly_range_max_trend_abs_percent: float = 0.22
+    orderly_range_max_volume_cv: float = 0.55
+    orderly_range_min_touch_count: int = 2
+    orderly_range_max_path_efficiency: float = 0.45
+    orderly_range_low_zone_percent: float = 25.0
+    orderly_range_high_zone_percent: float = 75.0
+    orderly_range_min_edge_alternations: int = 0
+    orderly_range_min_mid_cross_count: int = 0
+    orderly_range_min_width_cost_ratio: float = 0.0
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -153,12 +206,17 @@ def build_trade_setup(
     setup_profile = _setup_profile(profile)
     payload = candidate.to_dict() if hasattr(candidate, "to_dict") else dict(candidate)
     symbol = str(payload.get("symbol", "")).upper()
-    features = _mapping(payload.get("features"))
+    features = dict(_mapping(payload.get("features")))
     factor_scores = _factor_scores(payload, features)
     long_score, short_score = _direction_scores(factor_scores)
     side = _select_side(long_score, short_score)
     edge = max(long_score, short_score) - min(long_score, short_score)
     base_confidence = _confidence(edge, factor_scores)
+    side, edge, signal_diagnostics = _signal_side_adjustment(features, side, edge, setup_profile)
+    if signal_diagnostics["mode"] in {"counter_signal", "orderly_range_reversion"}:
+        base_confidence = max(base_confidence, min(0.45 + edge / 120.0, 0.82))
+    features["setup_signal_mode"] = signal_diagnostics["mode"]
+    features["setup_signal_diagnostics"] = signal_diagnostics
     factor_summary = _factor_summary(
         factors=factor_scores,
         long_score=long_score,
@@ -203,7 +261,7 @@ def build_trade_setup(
             warnings=warnings,
         )
 
-    entry = _entry_price(reference, side, volatility)
+    entry, entry_basis = _entry_price(reference, side, volatility, features, setup_profile)
     stop_distance, stop_basis = _stop_distance_percent(entry, volatility, features, side, setup_profile)
     target_distance, target_basis = _target_distance_percent(
         entry,
@@ -230,14 +288,17 @@ def build_trade_setup(
         target=target,
         side=side,
         features=features,
+        entry_basis=entry_basis,
         stop_basis=stop_basis,
         target_basis=target_basis,
+        signal_diagnostics=signal_diagnostics,
         profile=setup_profile,
         risk_limits=risk_limits,
         sizing_diagnostics=sizing_diagnostics,
     )
     warnings.extend(sizing_warnings)
     reasons = _setup_reasons(side, factor_scores, regime, warnings)
+    reasons = _dedupe([*reasons, f"signal_mode:{signal_diagnostics['mode']}", *_entry_order_reason_codes(entry_basis)])
     decision = "trade"
     if notional is None:
         decision = "pass"
@@ -252,6 +313,18 @@ def build_trade_setup(
     if target_distance / stop_distance < setup_profile.min_risk_reward:
         decision = "pass"
         reasons = _dedupe([*reasons, "risk_reward_below_profile_min"])
+    cost_rejections = _post_cost_rejections(target_distance, setup_profile)
+    if cost_rejections:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *cost_rejections])
+    signal_rejections = _signal_quality_rejections(signal_diagnostics, setup_profile)
+    if signal_rejections:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *signal_rejections])
+    limit_entry_rejections = _limit_entry_quality_rejections(entry_basis, features, side, signal_diagnostics, setup_profile)
+    if limit_entry_rejections:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *limit_entry_rejections])
     if _high_crowding(features, side):
         warnings.append("crowding_risk")
         reasons = _dedupe([*reasons, "crowding_risk"])
@@ -571,11 +644,107 @@ def _select_side(long_score: float, short_score: float) -> str:
     return "long" if long_score > short_score else "short"
 
 
-def _entry_price(reference: float, side: str, volatility: float | None) -> float:
+def _entry_price(
+    reference: float,
+    side: str,
+    volatility: float | None,
+    features: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> tuple[float, dict[str, Any]]:
+    order_type = str(profile.entry_order_type or "market").lower()
+    if order_type == "limit":
+        return _limit_entry_price(reference, side, volatility, features, profile)
     slippage_buffer = min(max((volatility or 1.0) * 0.015, 0.0005), 0.0015)
     if side == "long":
-        return reference * (1.0 + slippage_buffer)
-    return reference * (1.0 - slippage_buffer)
+        entry = reference * (1.0 + slippage_buffer)
+    else:
+        entry = reference * (1.0 - slippage_buffer)
+    return entry, {
+        "order_type": "market",
+        "anchor": "reference_with_slippage_buffer",
+        "slippage_buffer_percent": slippage_buffer * 100.0,
+        "limit_entry_max_wait_seconds": 0,
+    }
+
+
+def _limit_entry_price(
+    reference: float,
+    side: str,
+    volatility: float | None,
+    features: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> tuple[float, dict[str, Any]]:
+    min_offset = max(_float(profile.limit_entry_min_offset_percent) or 0.0, 0.0)
+    max_offset = max(_float(profile.limit_entry_max_offset_percent) or min_offset, min_offset)
+    signal_mode = str(features.get("setup_signal_mode") or "trend_follow")
+    range_low = _positive_float(features.get("range_low_price"))
+    range_high = _positive_float(features.get("range_high_price"))
+    range_entry: dict[str, float | str] | None = None
+    if signal_mode == "orderly_range_reversion" and range_low is not None and range_high is not None and range_high > range_low:
+        span = range_high - range_low
+        if side == "long" and range_low < reference:
+            price = range_low + span * 0.14
+            dynamic_offset = abs(reference - price) / reference * 100.0
+            max_offset = max(max_offset, min(dynamic_offset + 0.03, profile.orderly_range_max_width_percent))
+            range_entry = {"anchor": "range_low_reversion", "price": price}
+        elif side == "short" and range_high > reference:
+            price = range_high - span * 0.14
+            dynamic_offset = abs(reference - price) / reference * 100.0
+            max_offset = max(max_offset, min(dynamic_offset + 0.03, profile.orderly_range_max_width_percent))
+            range_entry = {"anchor": "range_high_reversion", "price": price}
+    vol_basis = max(
+        value
+        for value in (
+            volatility,
+            _float(features.get("atr_percent")),
+            _float(features.get("realized_volatility_percent")),
+            min_offset / max(_float(profile.limit_entry_retrace_fraction) or 1.0, 0.01),
+        )
+        if value is not None
+    )
+    raw_offset = vol_basis * max(_float(profile.limit_entry_retrace_fraction) or 0.0, 0.0)
+    offset = _clip(raw_offset, min_offset, max_offset)
+    default_price = reference * (1.0 - offset / 100.0) if side == "long" else reference * (1.0 + offset / 100.0)
+    candidates: list[dict[str, float | str]] = [{"anchor": "volatility_retrace", "price": default_price}]
+    vwap = _positive_float(features.get("vwap"))
+    support = _positive_float(features.get("support_price"))
+    resistance = _positive_float(features.get("resistance_price"))
+    if range_entry is not None:
+        candidates.append(range_entry)
+
+    if side == "long":
+        lower_bound = reference * (1.0 - max_offset / 100.0)
+        upper_bound = reference * (1.0 - min_offset / 100.0)
+        if vwap is not None and lower_bound <= vwap <= upper_bound:
+            candidates.append({"anchor": "vwap_pullback", "price": vwap})
+        if support is not None and lower_bound <= support <= upper_bound:
+            candidates.append({"anchor": "support_retest", "price": support})
+        selected = range_entry if range_entry is not None else max(candidates, key=lambda item: float(item["price"]))
+        entry = _clip(float(selected["price"]), lower_bound, upper_bound)
+    else:
+        lower_bound = reference * (1.0 + min_offset / 100.0)
+        upper_bound = reference * (1.0 + max_offset / 100.0)
+        if vwap is not None and lower_bound <= vwap <= upper_bound:
+            candidates.append({"anchor": "vwap_retest", "price": vwap})
+        if resistance is not None and lower_bound <= resistance <= upper_bound:
+            candidates.append({"anchor": "resistance_retest", "price": resistance})
+        selected = range_entry if range_entry is not None else min(candidates, key=lambda item: float(item["price"]))
+        entry = _clip(float(selected["price"]), lower_bound, upper_bound)
+
+    actual_offset = abs(reference - entry) / reference * 100.0
+    return entry, {
+        "order_type": "limit",
+        "anchor": str(selected["anchor"]),
+        "raw_offset_percent": raw_offset,
+        "offset_percent": actual_offset,
+        "min_offset_percent": min_offset,
+        "max_offset_percent": max_offset,
+        "volatility_basis_percent": vol_basis,
+        "limit_entry_max_wait_seconds": max(0, int(_float(profile.limit_entry_max_wait_seconds) or 0)),
+        "candidate_prices": [
+            {"anchor": str(item["anchor"]), "price": round(float(item["price"]), 8)} for item in candidates
+        ],
+    }
 
 
 def _stop_distance_percent(
@@ -586,8 +755,19 @@ def _stop_distance_percent(
     profile: TradeSetupProfile,
 ) -> tuple[float, dict[str, Any]]:
     atr = _float(features.get("atr_percent"))
+    realized_volatility = _float(features.get("realized_volatility_percent"))
     base_volatility = atr or volatility or 1.0
-    base = max(base_volatility * 1.15, 0.65)
+    if profile.adaptive_stop_enabled:
+        adaptive_candidates = [0.65]
+        if atr is not None:
+            adaptive_candidates.append(atr * max(profile.adaptive_stop_atr_multiplier, 0.1))
+        if realized_volatility is not None:
+            adaptive_candidates.append(realized_volatility * max(profile.adaptive_stop_realized_volatility_multiplier, 0.1))
+        if volatility is not None:
+            adaptive_candidates.append(volatility * 1.05)
+        base = max(adaptive_candidates)
+    else:
+        base = max(base_volatility * 1.15, 0.65)
     close_position = _float(features.get("kline_close_position_percent"))
     if side == "long" and close_position is not None and close_position >= 80:
         base *= 0.9
@@ -611,7 +791,9 @@ def _stop_distance_percent(
     capped_stop_distance = min(max(profile_adjusted, 0.45), profile.max_stop_distance_percent)
     return capped_stop_distance, {
         "anchor": anchor,
+        "adaptive_stop_enabled": profile.adaptive_stop_enabled,
         "atr_percent": atr,
+        "realized_volatility_percent": realized_volatility,
         "volatility_percent": volatility,
         "structure_distance_percent": structure_distance,
         "raw_stop_distance_percent": raw_stop_distance,
@@ -653,16 +835,30 @@ def _target_distance_percent(
         anchor = "nearest_structure_with_min_rr"
     raw_target = target
     profile_adjusted = raw_target * max(profile.target_distance_multiplier, 0.1)
-    capped_target = min(max(profile_adjusted, stop_distance * profile.min_risk_reward), 7.0)
+    max_target = 7.0
+    if profile.adaptive_stop_enabled:
+        adaptive_volatility = max(
+            value
+            for value in (
+                volatility,
+                _float(features.get("atr_percent")),
+                _float(features.get("realized_volatility_percent")),
+                stop_distance,
+            )
+            if value is not None
+        )
+        max_target = min(7.0, max(stop_distance * profile.min_risk_reward, adaptive_volatility * max(profile.adaptive_target_volatility_multiplier, 0.1)))
+    capped_target = min(max(profile_adjusted, stop_distance * profile.min_risk_reward), max_target)
     return capped_target, {
         "anchor": anchor,
+        "adaptive_target_enabled": profile.adaptive_stop_enabled,
         "reward_multiple": reward_multiple,
         "structure_distance_percent": structure_distance,
         "raw_target_distance_percent": raw_target,
         "profile_adjusted_target_distance_percent": profile_adjusted,
         "capped_target_distance_percent": capped_target,
         "min_target_distance_percent": stop_distance * profile.min_risk_reward,
-        "max_target_distance_percent": 7.0,
+        "max_target_distance_percent": max_target,
         "was_capped": capped_target != profile_adjusted,
         "profile": profile.name,
     }
@@ -756,6 +952,24 @@ def _setup_reasons(
     return _dedupe(reasons)
 
 
+def _entry_order_reason_codes(entry_basis: Mapping[str, Any]) -> list[str]:
+    order_type = str(entry_basis.get("order_type") or "market").strip().lower()
+    if order_type != "limit":
+        return ["entry_order_type:market"]
+    wait_seconds = int(_float(entry_basis.get("limit_entry_max_wait_seconds")) or 45)
+    return [
+        "entry_order_type:limit",
+        "entry_time_in_force:GTX",
+        f"limit_entry_max_wait_seconds:{max(wait_seconds, 1)}",
+        *([f"limit_entry_anchor:{entry_basis.get('anchor')}"] if entry_basis.get("anchor") else []),
+        *(
+            [f"limit_entry_offset_percent:{round(float(offset), 6)}"]
+            if (offset := _float(entry_basis.get("offset_percent"))) is not None
+            else []
+        ),
+    ]
+
+
 def _hold_minutes(edge: float, volatility: float | None) -> int:
     if volatility is not None and volatility >= 3.0:
         return 10
@@ -804,8 +1018,10 @@ def _price_basis(
     target: float,
     side: str,
     features: Mapping[str, Any],
+    entry_basis: Mapping[str, Any],
     stop_basis: Mapping[str, Any],
     target_basis: Mapping[str, Any],
+    signal_diagnostics: Mapping[str, Any],
     profile: TradeSetupProfile,
     risk_limits: RiskLimits,
     sizing_diagnostics: Mapping[str, Any],
@@ -814,7 +1030,9 @@ def _price_basis(
     target_distance = abs(target - entry) / entry * 100.0
     risk_reward = target_distance / stop_distance if stop_distance > 0 else None
     return {
-        "model": "expected_market_entry_structure_stop_target_v1",
+        "model": "limit_entry_structure_stop_target_v1"
+        if str(entry_basis.get("order_type") or "").lower() == "limit"
+        else "expected_market_entry_structure_stop_target_v1",
         "profile": profile.name,
         "side": side,
         "reference_price": reference,
@@ -830,8 +1048,14 @@ def _price_basis(
         "ema_spread_percent": _float(features.get("ema_spread_percent")),
         "rsi": _float(features.get("rsi")),
         "indicator_sample_size": _float(features.get("indicator_sample_size")),
+        "entry_basis": _rounded_mapping(entry_basis),
+        "limit_entry_quality": _limit_entry_quality_diagnostics(entry_basis, features, side, profile),
         "stop_basis": dict(stop_basis),
         "target_basis": dict(target_basis),
+        "exit_policy": _exit_policy_basis(profile),
+        "signal_diagnostics": _rounded_mapping(signal_diagnostics),
+        "post_cost_edge": _post_cost_diagnostics(target_distance, profile),
+        "mtf_alignment": _mtf_alignment_diagnostics(features, side, profile),
         "risk_reward_ratio": round(risk_reward, 4) if risk_reward is not None else None,
         "stop_distance_percent": round(stop_distance, 4),
         "target_distance_percent": round(target_distance, 4),
@@ -864,6 +1088,8 @@ def _spike_reversal_reference(features: Mapping[str, Any]) -> dict[str, Any] | N
 
 def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> list[str]:
     rejections: list[str] = []
+    signal_mode = str(features.get("setup_signal_mode") or "trend_follow")
+    is_range_reversion = signal_mode == "orderly_range_reversion"
     if side.lower() in {item.lower() for item in profile.disabled_sides}:
         rejections.append("side_disabled_by_profile")
     if symbol.upper() in {item.upper() for item in profile.excluded_symbols}:
@@ -872,7 +1098,7 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
     if sample_size < profile.min_indicator_sample_size:
         rejections.append("indicator_sample_below_profile_min")
     trend = _float(features.get("ema_spread_percent"))
-    if profile.require_trend_alignment and trend is not None:
+    if profile.require_trend_alignment and trend is not None and not is_range_reversion:
         if side == "long" and trend <= 0:
             rejections.append("trend_not_aligned")
         if side == "short" and trend >= 0:
@@ -890,16 +1116,575 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
     if min_quote_volume is not None and (quote_volume is None or quote_volume < min_quote_volume):
         rejections.append("quote_volume_below_profile_min")
     min_momentum = _float(profile.min_abs_momentum_percent)
-    if min_momentum is not None and _abs_momentum(features) < min_momentum:
+    if min_momentum is not None and not is_range_reversion and _abs_momentum(features) < min_momentum:
         rejections.append("momentum_below_profile_min")
     min_volume_impulse = _float(profile.min_volume_impulse_percent)
     volume_impulse = _float(features.get("kline_quote_volume_change_percent"))
-    if min_volume_impulse is not None:
+    if min_volume_impulse is not None and not is_range_reversion:
         if volume_impulse is None:
             rejections.append("missing_volume_impulse")
-        elif abs(volume_impulse) < min_volume_impulse:
+        elif volume_impulse < min_volume_impulse:
             rejections.append("volume_impulse_below_profile_min")
+    max_volatility = _float(profile.max_volatility_percent)
+    volatility = _volatility_percent(features)
+    if max_volatility is not None:
+        if volatility is None:
+            rejections.append("missing_volatility")
+        elif volatility > max_volatility:
+            rejections.append("volatility_above_profile_max")
+    min_flow_edge = _float(profile.min_directional_taker_flow_edge)
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    if min_flow_edge is not None and not is_range_reversion:
+        if taker_ratio is None:
+            rejections.append("missing_directional_taker_flow")
+        elif side == "long" and taker_ratio < 1.0 + min_flow_edge:
+            rejections.append("taker_flow_not_aligned")
+        elif side == "short" and taker_ratio > 1.0 - min_flow_edge:
+            rejections.append("taker_flow_not_aligned")
+    if profile.block_adverse_trend_vwap and not is_range_reversion and _adverse_trend_vwap(features, side):
+        rejections.append("adverse_trend_vwap_alignment")
+    adverse_micro = _float(profile.max_adverse_micro_momentum_percent)
+    micro_momentum = _float(features.get("kline_micro_momentum_percent"))
+    if adverse_micro is not None and micro_momentum is not None and not is_range_reversion:
+        limit = abs(adverse_micro)
+        if side == "long" and micro_momentum < -limit:
+            rejections.append("micro_momentum_against_side")
+        if side == "short" and micro_momentum > limit:
+            rejections.append("micro_momentum_against_side")
+    min_rsi_for_long = _float(profile.min_rsi_for_long)
+    max_rsi_for_short = _float(profile.max_rsi_for_short)
+    if min_rsi_for_long is not None and rsi is not None and side == "long" and rsi < min_rsi_for_long and not is_range_reversion:
+        rejections.append("rsi_below_long_profile_min")
+    if max_rsi_for_short is not None and rsi is not None and side == "short" and rsi > max_rsi_for_short and not is_range_reversion:
+        rejections.append("rsi_above_short_profile_max")
+    if profile.block_hot_micro_reversal and not is_range_reversion and _hot_micro_reversal(features, side):
+        rejections.append("hot_move_micro_reversal")
+    if profile.block_volume_fade and not is_range_reversion and _volume_fade_against_trade(features, side):
+        rejections.append("volume_fade_against_trade")
+    if profile.block_spike_reversal_conflict and not is_range_reversion:
+        rejections.extend(_spike_reversal_conflict_rejections(features, side))
+    min_confluence = int(_float(profile.min_directional_confluence) or 0)
+    if not is_range_reversion and (profile.require_directional_confluence or min_confluence > 0):
+        required = max(min_confluence, 1)
+        confluence = _directional_confluence_score(features, side)
+        if confluence < required:
+            rejections.append(f"directional_confluence_below_profile_min:{confluence}/{required}")
+    min_mtf = int(_float(profile.min_mtf_alignment_score) or 0)
+    if not is_range_reversion and (profile.require_mtf_alignment or min_mtf > 0):
+        required = max(min_mtf, 1)
+        mtf = _mtf_alignment_diagnostics(features, side, profile)
+        if not mtf["available"]:
+            rejections.append("missing_mtf_confirmation")
+        elif int(mtf["score"]) < required:
+            rejections.append(f"mtf_alignment_below_profile_min:{mtf['score']}/{required}")
     return _dedupe(rejections)
+
+
+def _post_cost_rejections(target_distance_percent: float, profile: TradeSetupProfile) -> list[str]:
+    diagnostics = _post_cost_diagnostics(target_distance_percent, profile)
+    minimum = _float(profile.min_post_cost_edge_ratio) or 0.0
+    if minimum <= 0:
+        return []
+    ratio = _float(diagnostics.get("target_to_cost_ratio"))
+    if ratio is None or ratio < minimum:
+        return ["post_cost_edge_below_profile_min"]
+    return []
+
+
+def _post_cost_diagnostics(target_distance_percent: float, profile: TradeSetupProfile) -> dict[str, Any]:
+    fee_bps = max(_float(profile.fee_bps) or 0.0, 0.0)
+    slippage_bps = max(_float(profile.slippage_bps) or 0.0, 0.0)
+    minimum = _float(profile.min_post_cost_edge_ratio) or 0.0
+    round_trip_cost_percent = 2.0 * (fee_bps + slippage_bps) / 100.0
+    ratio = target_distance_percent / round_trip_cost_percent if round_trip_cost_percent > 0 else None
+    return {
+        "target_distance_percent": round(target_distance_percent, 8),
+        "fee_bps_per_side": fee_bps,
+        "slippage_bps_per_side": slippage_bps,
+        "round_trip_cost_percent": round(round_trip_cost_percent, 8),
+        "target_to_cost_ratio": round(ratio, 8) if ratio is not None else None,
+        "min_post_cost_edge_ratio": minimum,
+        "passed": True if minimum <= 0 else ratio is not None and ratio >= minimum,
+    }
+
+
+def _signal_quality_rejections(signal_diagnostics: Mapping[str, Any], profile: TradeSetupProfile) -> list[str]:
+    mode = str(signal_diagnostics.get("mode") or "trend_follow")
+    if mode in {"counter_signal", "orderly_range_reversion"}:
+        return []
+    if not profile.require_entry_quality:
+        return []
+    required = max(1, int(_float(profile.min_entry_quality_score) or 1))
+    entry_quality = _mapping(signal_diagnostics.get("entry_quality"))
+    score = int(_float(entry_quality.get("score")) or 0)
+    if score < required:
+        return [f"entry_quality_below_profile_min:{score}/{required}"]
+    return []
+
+
+def _limit_entry_quality_rejections(
+    entry_basis: Mapping[str, Any],
+    features: Mapping[str, Any],
+    side: str,
+    signal_diagnostics: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> list[str]:
+    if not profile.require_limit_entry_quality:
+        return []
+    if str(signal_diagnostics.get("mode") or "trend_follow") != "trend_follow":
+        return []
+    required = max(1, int(_float(profile.min_limit_entry_quality_score) or 1))
+    diagnostics = _limit_entry_quality_diagnostics(entry_basis, features, side, profile)
+    score = int(_float(diagnostics.get("score")) or 0)
+    if score < required:
+        return [f"limit_entry_quality_below_profile_min:{score}/{required}"]
+    return []
+
+
+def _limit_entry_quality_diagnostics(
+    entry_basis: Mapping[str, Any],
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> dict[str, Any]:
+    if side not in {"long", "short"}:
+        return {"side": side, "score": 0, "max_score": 0, "checks": []}
+    order_type = str(entry_basis.get("order_type") or "market").lower()
+    anchor = str(entry_basis.get("anchor") or "")
+    actual_offset = _float(entry_basis.get("offset_percent"))
+    min_offset = max(_float(entry_basis.get("min_offset_percent")) or profile.limit_entry_min_offset_percent, 0.0)
+    max_offset = max(_float(entry_basis.get("max_offset_percent")) or profile.limit_entry_max_offset_percent, min_offset)
+    vol_basis = max(_float(entry_basis.get("volatility_basis_percent")) or 0.0, min_offset)
+    close_position = _float(features.get("kline_close_position_percent"))
+    candidates = entry_basis.get("candidate_prices") if isinstance(entry_basis.get("candidate_prices"), list) else []
+    candidate_anchors = {str(item.get("anchor") or "") for item in candidates if isinstance(item, Mapping)}
+    structural_anchors = {
+        "vwap_pullback",
+        "vwap_retest",
+        "support_retest",
+        "resistance_retest",
+        "range_low_reversion",
+        "range_high_reversion",
+    }
+    has_structural_candidate = bool(candidate_anchors & structural_anchors)
+    selected_structural = anchor in structural_anchors
+    pullback_floor = max(min_offset, min(max_offset, vol_basis * 0.06))
+    anti_chase_floor = max(min_offset, min(max_offset, 0.08))
+    if close_position is None:
+        avoids_late_extreme = True
+    elif side == "long":
+        avoids_late_extreme = close_position <= 92.0 or (actual_offset or 0.0) >= max(anti_chase_floor, 0.12)
+    else:
+        avoids_late_extreme = close_position >= 8.0 or (actual_offset or 0.0) >= max(anti_chase_floor, 0.12)
+    checks = [
+        {"name": "limit_order", "passed": order_type == "limit", "value": order_type},
+        {"name": "offset_available", "passed": actual_offset is not None, "value": actual_offset},
+        {
+            "name": "pullback_not_chasing",
+            "passed": actual_offset is not None and actual_offset >= pullback_floor,
+            "value": actual_offset,
+        },
+        {
+            "name": "offset_within_bounds",
+            "passed": actual_offset is not None and min_offset <= actual_offset <= max_offset,
+            "value": actual_offset,
+        },
+        {
+            "name": "structural_anchor_or_enough_pullback",
+            "passed": selected_structural or has_structural_candidate or (actual_offset is not None and actual_offset >= anti_chase_floor),
+            "value": anchor,
+        },
+        {"name": "avoids_late_extreme", "passed": avoids_late_extreme, "value": close_position},
+    ]
+    score = sum(1 for item in checks if item["passed"])
+    return {
+        "side": side,
+        "anchor": anchor,
+        "score": score,
+        "max_score": len(checks),
+        "offset_percent": round(actual_offset, 8) if actual_offset is not None else None,
+        "pullback_floor_percent": round(pullback_floor, 8),
+        "anti_chase_floor_percent": round(anti_chase_floor, 8),
+        "candidate_anchors": sorted(item for item in candidate_anchors if item),
+        "checks": _normalised_checks(checks),
+    }
+
+
+def _exit_policy_basis(profile: TradeSetupProfile) -> dict[str, Any]:
+    return {
+        "time_exit_enabled": bool(profile.time_exit_enabled),
+        "time_exit_only_when_not_profitable": bool(profile.time_exit_only_when_not_profitable),
+        "time_exit_use_config_max_hold_only": bool(profile.time_exit_use_config_max_hold_only),
+        "early_exit_enabled": bool(profile.early_exit_enabled),
+        "early_exit_min_seconds": max(1, int(_float(profile.early_exit_min_seconds) or 1)),
+        "early_exit_min_favorable_r": max(_float(profile.early_exit_min_favorable_r) or 0.0, 0.0),
+        "early_exit_max_adverse_r": max(_float(profile.early_exit_max_adverse_r) or 0.0, 0.0),
+        "early_exit_min_adverse_votes": max(1, int(_float(profile.early_exit_min_adverse_votes) or 1)),
+        "early_exit_flow_edge": max(_float(profile.early_exit_flow_edge) or 0.0, 0.0),
+    }
+
+
+def _signal_side_adjustment(
+    features: Mapping[str, Any],
+    selected_side: str,
+    edge: float,
+    profile: TradeSetupProfile,
+) -> tuple[str, float, dict[str, Any]]:
+    entry_quality = _entry_quality_diagnostics(features, selected_side, profile)
+    counter_side = "short" if selected_side == "long" else "long" if selected_side == "short" else "flat"
+    counter_signal = _counter_signal_diagnostics(features, counter_side, profile)
+    orderly_range = _orderly_range_diagnostics(features, profile)
+    diagnostics: dict[str, Any] = {
+        "mode": "trend_follow",
+        "original_side": selected_side,
+        "selected_side": selected_side,
+        "entry_quality": entry_quality,
+        "counter_signal": counter_signal,
+        "orderly_range": orderly_range,
+    }
+
+    if profile.enable_orderly_range and orderly_range["score"] >= max(1, int(_float(profile.min_orderly_range_score) or 1)):
+        range_side = str(orderly_range.get("side") or "flat")
+        if range_side in {"long", "short"}:
+            adjusted_edge = max(edge, profile.min_edge + float(orderly_range["score"]))
+            diagnostics.update({"mode": "orderly_range_reversion", "selected_side": range_side, "edge_adjustment": adjusted_edge - edge})
+            return range_side, adjusted_edge, diagnostics
+
+    if (
+        profile.allow_counter_signal
+        and selected_side in {"long", "short"}
+        and counter_side in {"long", "short"}
+        and counter_signal["score"] >= max(1, int(_float(profile.min_counter_signal_score) or 1))
+        and entry_quality["score"] < max(1, int(_float(profile.min_entry_quality_score) or 1))
+    ):
+        adjusted_edge = max(edge, profile.min_edge + float(counter_signal["score"]))
+        diagnostics.update({"mode": "counter_signal", "selected_side": counter_side, "edge_adjustment": adjusted_edge - edge})
+        return counter_side, adjusted_edge, diagnostics
+
+    return selected_side, edge, diagnostics
+
+
+def _entry_quality_diagnostics(features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> dict[str, Any]:
+    if side not in {"long", "short"}:
+        return {"side": side, "score": 0, "max_score": 0, "checks": []}
+    flow_edge = max(_float(profile.min_directional_taker_flow_edge) or 0.02, 0.0)
+    checks = _direction_checks(features, side, flow_edge=flow_edge)
+    score = sum(1 for item in checks if item["passed"])
+    return {
+        "side": side,
+        "score": score,
+        "max_score": len(checks),
+        "checks": _normalised_checks(checks),
+    }
+
+
+def _counter_signal_diagnostics(features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> dict[str, Any]:
+    if side not in {"long", "short"}:
+        return {"side": side, "score": 0, "max_score": 0, "checks": []}
+    flow_edge = max(_float(profile.min_directional_taker_flow_edge) or 0.02, 0.0)
+    checks = _direction_checks(features, side, flow_edge=flow_edge)
+    mtf = _mtf_alignment_diagnostics(features, side, profile)
+    if mtf["available"]:
+        checks.append({"name": "counter_mtf_alignment", "passed": int(mtf["score"]) >= 3, "value": mtf["score"]})
+    score = sum(1 for item in checks if item["passed"])
+    return {
+        "side": side,
+        "score": score,
+        "max_score": len(checks),
+        "checks": _normalised_checks(checks),
+    }
+
+
+def _direction_checks(features: Mapping[str, Any], side: str, *, flow_edge: float) -> list[dict[str, Any]]:
+    trend = _float(features.get("ema_spread_percent"))
+    reference = _float(features.get("reference_price"))
+    vwap = _float(features.get("vwap"))
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    window = _float(features.get("kline_momentum_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    taker_change = _float(features.get("taker_buy_sell_ratio_change"))
+    close_position = _float(features.get("kline_close_position_percent"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    vwap_delta = _percent_delta(vwap, reference) if vwap is not None and reference is not None else None
+
+    if side == "long":
+        return [
+            {"name": "ema_trend", "passed": trend is not None and trend >= 0.08, "value": trend},
+            {"name": "micro_momentum", "passed": micro is not None and micro >= 0.05, "value": micro},
+            {"name": "window_momentum", "passed": window is not None and window >= 0.25, "value": window},
+            {"name": "vwap_side", "passed": vwap_delta is not None and vwap_delta >= 0.0, "value": vwap_delta},
+            {"name": "taker_flow", "passed": taker_ratio is not None and taker_ratio >= 1.0 + flow_edge, "value": taker_ratio},
+            {"name": "taker_acceleration", "passed": taker_change is not None and taker_change >= -0.02, "value": taker_change},
+            {"name": "close_position", "passed": close_position is not None and close_position >= 45.0, "value": close_position},
+            {"name": "volume_not_fading", "passed": volume_change is not None and volume_change >= -15.0, "value": volume_change},
+        ]
+    return [
+        {"name": "ema_trend", "passed": trend is not None and trend <= -0.08, "value": trend},
+        {"name": "micro_momentum", "passed": micro is not None and micro <= -0.05, "value": micro},
+        {"name": "window_momentum", "passed": window is not None and window <= -0.25, "value": window},
+        {"name": "vwap_side", "passed": vwap_delta is not None and vwap_delta <= 0.0, "value": vwap_delta},
+        {"name": "taker_flow", "passed": taker_ratio is not None and taker_ratio <= 1.0 - flow_edge, "value": taker_ratio},
+        {"name": "taker_acceleration", "passed": taker_change is not None and taker_change <= 0.02, "value": taker_change},
+        {"name": "close_position", "passed": close_position is not None and close_position <= 55.0, "value": close_position},
+        {"name": "volume_not_fading", "passed": volume_change is not None and volume_change >= -15.0, "value": volume_change},
+    ]
+
+
+def _orderly_range_diagnostics(features: Mapping[str, Any], profile: TradeSetupProfile) -> dict[str, Any]:
+    reference = _positive_float(features.get("reference_price"))
+    width = _float(features.get("range_width_percent"))
+    trend = abs(_float(features.get("ema_spread_percent")) or 0.0)
+    volume_cv = _float(features.get("range_volume_cv"))
+    lower_touches = int(_float(features.get("range_lower_touch_count")) or 0)
+    upper_touches = int(_float(features.get("range_upper_touch_count")) or 0)
+    path_efficiency = _float(features.get("range_path_efficiency"))
+    edge_alternations = int(_float(features.get("range_edge_alternation_count")) or 0)
+    mid_cross_count = int(_float(features.get("range_mid_cross_count")) or 0)
+    close_position = _float(features.get("range_close_position_percent"))
+    if close_position is None:
+        close_position = _float(features.get("kline_close_position_percent"))
+    round_trip_cost_percent = 2.0 * (max(_float(profile.fee_bps) or 0.0, 0.0) + max(_float(profile.slippage_bps) or 0.0, 0.0)) / 100.0
+    width_cost_ratio = width / round_trip_cost_percent if width is not None and round_trip_cost_percent > 0 else None
+    range_side = "flat"
+    if close_position is not None:
+        if close_position <= profile.orderly_range_low_zone_percent:
+            range_side = "long"
+        elif close_position >= profile.orderly_range_high_zone_percent:
+            range_side = "short"
+    checks = [
+        {
+            "name": "range_width_tradeable",
+            "passed": width is not None
+            and profile.orderly_range_min_width_percent <= width <= profile.orderly_range_max_width_percent,
+            "value": width,
+        },
+        {
+            "name": "trend_flat_enough",
+            "passed": trend <= profile.orderly_range_max_trend_abs_percent,
+            "value": trend,
+        },
+        {
+            "name": "volume_stable",
+            "passed": volume_cv is not None and volume_cv <= profile.orderly_range_max_volume_cv,
+            "value": volume_cv,
+        },
+        {
+            "name": "two_sided_touches",
+            "passed": lower_touches >= profile.orderly_range_min_touch_count
+            and upper_touches >= profile.orderly_range_min_touch_count,
+            "value": min(lower_touches, upper_touches),
+        },
+        {
+            "name": "path_choppy_not_trending",
+            "passed": path_efficiency is not None and path_efficiency <= profile.orderly_range_max_path_efficiency,
+            "value": path_efficiency,
+        },
+        {
+            "name": "edges_alternate_cleanly",
+            "passed": edge_alternations >= profile.orderly_range_min_edge_alternations,
+            "value": edge_alternations,
+        },
+        {
+            "name": "range_crosses_midline",
+            "passed": mid_cross_count >= profile.orderly_range_min_mid_cross_count,
+            "value": mid_cross_count,
+        },
+        {
+            "name": "range_width_covers_cost",
+            "passed": profile.orderly_range_min_width_cost_ratio <= 0
+            or (width_cost_ratio is not None and width_cost_ratio >= profile.orderly_range_min_width_cost_ratio),
+            "value": width_cost_ratio,
+        },
+        {
+            "name": "price_at_range_edge",
+            "passed": range_side in {"long", "short"},
+            "value": close_position,
+        },
+        {
+            "name": "reference_available",
+            "passed": reference is not None,
+            "value": reference,
+        },
+    ]
+    score = sum(1 for item in checks if item["passed"])
+    return {
+        "side": range_side,
+        "score": score,
+        "max_score": len(checks),
+        "checks": _normalised_checks(checks),
+    }
+
+
+def _normalised_checks(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": str(item["name"]),
+            "passed": bool(item["passed"]),
+            "value": round(float(item["value"]), 8) if isinstance(item["value"], float) else item["value"],
+        }
+        for item in checks
+    ]
+
+
+def _mtf_alignment_diagnostics(features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> dict[str, Any]:
+    del profile
+    checks: list[dict[str, Any]] = []
+    trend = _float(features.get("mtf_15m_ema_spread_percent"))
+    momentum = _float(features.get("mtf_15m_momentum_percent"))
+    micro = _float(features.get("mtf_15m_micro_momentum_percent"))
+    reference = _float(features.get("mtf_15m_reference_price"))
+    vwap = _float(features.get("mtf_15m_vwap"))
+    taker_ratio = _float(features.get("mtf_15m_taker_buy_sell_ratio"))
+    close_position = _float(features.get("mtf_15m_close_position_percent"))
+
+    if side == "long":
+        checks.append({"name": "15m_ema_trend", "passed": trend is not None and trend >= 0.05, "value": trend})
+        checks.append({"name": "15m_momentum", "passed": momentum is not None and momentum >= 0.12, "value": momentum})
+        checks.append({"name": "15m_micro_momentum", "passed": micro is not None and micro >= -0.05, "value": micro})
+        checks.append({"name": "15m_vwap_side", "passed": reference is not None and vwap is not None and reference >= vwap, "value": _percent_delta(vwap, reference) if reference is not None and vwap is not None else None})
+        checks.append({"name": "15m_taker_flow", "passed": taker_ratio is not None and taker_ratio >= 1.0, "value": taker_ratio})
+        checks.append({"name": "15m_close_position", "passed": close_position is not None and close_position >= 45.0, "value": close_position})
+    elif side == "short":
+        checks.append({"name": "15m_ema_trend", "passed": trend is not None and trend <= -0.05, "value": trend})
+        checks.append({"name": "15m_momentum", "passed": momentum is not None and momentum <= -0.12, "value": momentum})
+        checks.append({"name": "15m_micro_momentum", "passed": micro is not None and micro <= 0.05, "value": micro})
+        checks.append({"name": "15m_vwap_side", "passed": reference is not None and vwap is not None and reference <= vwap, "value": _percent_delta(vwap, reference) if reference is not None and vwap is not None else None})
+        checks.append({"name": "15m_taker_flow", "passed": taker_ratio is not None and taker_ratio <= 1.0, "value": taker_ratio})
+        checks.append({"name": "15m_close_position", "passed": close_position is not None and close_position <= 55.0, "value": close_position})
+
+    available = any(item["value"] is not None for item in checks)
+    score = sum(1 for item in checks if item["passed"])
+    return {
+        "available": available,
+        "side": side,
+        "score": score,
+        "max_score": len(checks),
+        "checks": [
+            {
+                "name": str(item["name"]),
+                "passed": bool(item["passed"]),
+                "value": round(float(item["value"]), 8) if isinstance(item["value"], float) else item["value"],
+            }
+            for item in checks
+        ],
+    }
+
+
+def _adverse_trend_vwap(features: Mapping[str, Any], side: str) -> bool:
+    trend = _float(features.get("ema_spread_percent"))
+    reference = _float(features.get("reference_price"))
+    vwap = _float(features.get("vwap"))
+    if trend is None or reference is None or vwap is None or vwap <= 0:
+        return False
+    vwap_delta = ((reference - vwap) / vwap) * 100.0
+    if side == "long":
+        return trend < 0 and vwap_delta < 0
+    return trend > 0 and vwap_delta > 0
+
+
+def _hot_micro_reversal(features: Mapping[str, Any], side: str) -> bool:
+    change_24h = _float(features.get("price_change_percent"))
+    window = _float(features.get("kline_momentum_percent"))
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    if change_24h is None or micro is None:
+        return False
+    window_value = window or 0.0
+    if side == "long":
+        return (change_24h >= 8.0 or window_value >= 1.2) and micro < -0.05
+    return (change_24h <= -8.0 or window_value <= -1.2) and micro > 0.05
+
+
+def _volume_fade_against_trade(features: Mapping[str, Any], side: str) -> bool:
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    momentum = _float(features.get("kline_micro_momentum_percent"))
+    if momentum is None:
+        momentum = _float(features.get("kline_momentum_percent"))
+    if volume_change is None or momentum is None:
+        return False
+    if volume_change >= -20.0:
+        return False
+    if side == "long":
+        return momentum <= 0.15
+    return momentum >= -0.15
+
+
+def _spike_reversal_conflict_rejections(features: Mapping[str, Any], side: str) -> list[str]:
+    signal = str(features.get("spike_reversal_signal") or "").lower()
+    if signal not in {"long", "short"}:
+        return []
+    if signal != side:
+        return ["spike_reversal_against_side"]
+
+    trend = _float(features.get("ema_spread_percent"))
+    reference = _float(features.get("reference_price"))
+    vwap = _float(features.get("vwap"))
+    window = _float(features.get("kline_momentum_percent"))
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    close_position = _float(features.get("kline_close_position_percent"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    rsi = _float(features.get("rsi"))
+    vwap_delta = ((reference - vwap) / vwap) * 100.0 if reference is not None and vwap is not None and vwap > 0 else None
+
+    if side == "long":
+        countertrend = (
+            (trend is not None and trend <= -0.2)
+            or (window is not None and window <= -0.8)
+            or (vwap_delta is not None and vwap_delta <= -0.2)
+            or (rsi is not None and rsi < 40.0)
+        )
+        confirmed = (
+            (micro is not None and micro >= 0.2)
+            and (close_position is not None and close_position >= 60.0)
+            and (volume_change is not None and volume_change >= 10.0)
+            and (taker_ratio is not None and taker_ratio >= 1.05)
+        )
+        return ["unconfirmed_countertrend_spike_reversal"] if countertrend and not confirmed else []
+
+    countertrend = (
+        (trend is not None and trend >= 0.2)
+        or (window is not None and window >= 0.8)
+        or (vwap_delta is not None and vwap_delta >= 0.2)
+        or (rsi is not None and rsi > 60.0)
+    )
+    confirmed = (
+        (micro is not None and micro <= -0.2)
+        and (close_position is not None and close_position <= 40.0)
+        and (volume_change is not None and volume_change >= 10.0)
+        and (taker_ratio is not None and taker_ratio <= 0.95)
+    )
+    return ["unconfirmed_countertrend_spike_reversal"] if countertrend and not confirmed else []
+
+
+def _directional_confluence_score(features: Mapping[str, Any], side: str) -> int:
+    score = 0
+    trend = _float(features.get("ema_spread_percent"))
+    reference = _float(features.get("reference_price"))
+    vwap = _float(features.get("vwap"))
+    window = _float(features.get("kline_momentum_percent"))
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    rsi = _float(features.get("rsi"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+
+    if side == "long":
+        score += int(trend is not None and trend >= 0.1)
+        score += int(reference is not None and vwap is not None and vwap > 0 and reference >= vwap)
+        score += int(window is not None and window >= 0.35)
+        score += int(micro is not None and micro >= 0.0)
+        score += int(taker_ratio is not None and taker_ratio >= 1.02)
+        score += int(rsi is not None and rsi >= 45.0)
+        score += int(volume_change is not None and volume_change >= 0.0)
+        return score
+
+    score += int(trend is not None and trend <= -0.1)
+    score += int(reference is not None and vwap is not None and vwap > 0 and reference <= vwap)
+    score += int(window is not None and window <= -0.35)
+    score += int(micro is not None and micro <= 0.0)
+    score += int(taker_ratio is not None and taker_ratio <= 0.98)
+    score += int(rsi is not None and rsi <= 55.0)
+    score += int(volume_change is not None and volume_change >= 0.0)
+    return score
 
 
 def _setup_profile(profile: TradeSetupProfile | Mapping[str, Any] | None) -> TradeSetupProfile:
@@ -1132,6 +1917,12 @@ def _positive_float(value: Any) -> float | None:
     if parsed is None or parsed <= 0:
         return None
     return parsed
+
+
+def _percent_delta(start: float | None, end: float | None) -> float | None:
+    if start is None or end is None or start <= 0:
+        return None
+    return ((end - start) / start) * 100.0
 
 
 def _clip(value: float, low: float, high: float) -> float:

@@ -12,6 +12,7 @@ from bfa.market.binance_rest import BinanceFuturesRestClient
 
 
 INTERVAL_MS = {
+    "1s": 1_000,
     "1m": 60_000,
     "3m": 180_000,
     "5m": 300_000,

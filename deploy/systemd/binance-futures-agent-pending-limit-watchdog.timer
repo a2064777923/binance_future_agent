@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Binance Futures Agent pending-limit watchdog every 10 seconds
+
+[Timer]
+OnBootSec=25s
+OnUnitActiveSec=10s
+AccuracySec=1s
+Persistent=false
+Unit=binance-futures-agent-pending-limit-watchdog.service
+
+[Install]
+WantedBy=timers.target

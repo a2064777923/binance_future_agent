@@ -7,6 +7,10 @@ This project deploys into an isolated server prefix:
 - Health unit: `/etc/systemd/system/binance-futures-agent.service`
 - Live runner unit: `/etc/systemd/system/binance-futures-agent-live.service`
 - Live timer: `/etc/systemd/system/binance-futures-agent-live.timer`
+- Position sentinel unit: `/etc/systemd/system/binance-futures-agent-position-sentinel.service`
+- Position sentinel timer: `/etc/systemd/system/binance-futures-agent-position-sentinel.timer`
+- Pending-limit watchdog unit: `/etc/systemd/system/binance-futures-agent-pending-limit-watchdog.service`
+- Pending-limit watchdog timer: `/etc/systemd/system/binance-futures-agent-pending-limit-watchdog.timer`
 - Forward-paper unit: `/etc/systemd/system/binance-futures-agent-paper.service`
 - Forward-paper timer: `/etc/systemd/system/binance-futures-agent-paper.timer`
 
@@ -90,6 +94,17 @@ spent from the account. For example, 20 USDT notional at 20x leverage is roughly
 The live runner records `estimated_initial_margin_usdt` on order intents so the
 two numbers stay visible.
 
+The final order size is the smallest cap left after all sizing gates. In live
+mode the common reducers are `BFA_MAX_MARGIN_PER_POSITION_USDT`,
+`BFA_MAX_MARGIN_FRACTION`, `BFA_MAX_EFFECTIVE_NOTIONAL_USDT`,
+`BFA_MAX_PORTFOLIO_MARGIN_USDT`, `BFA_MAX_PORTFOLIO_MARGIN_FRACTION`, stop-risk
+distance, exchange min-notional rounding, open/manual exposure pressure, and the
+adaptive sizing governor. This is why a trade can show only 0.6-2 USDT initial
+margin even when the configured account capital is larger: notional is divided
+by leverage after those caps. If this is too small, raise the margin/portfolio
+caps and governor ceiling together; raising leverage alone does not necessarily
+raise notional.
+
 Keep the kill-switch path configured. Creating that file stops future live
 orders:
 
@@ -129,6 +144,58 @@ Live activation evidence can be summarized without placing orders:
 take-profit evidence, or a protective-order failure triggered the kill-switch
 and emergency close path. `lva05_complete=false` means no such live-entry
 evidence exists yet.
+
+## Data Retention
+
+Live should keep `BFA_PERSIST_MARKET_SNAPSHOTS=false`. The runner still uses
+fresh REST market snapshots for selection and scoring, but it does not write
+every snapshot into both `events` and `market_snapshots`. Leaving this enabled
+can grow the SQLite database by gigabytes in a few days because each collection
+cycle writes high-volume market payloads twice, once as a generic event and once
+as a category row.
+
+Keep `BFA_PERSIST_DECISION_SNAPSHOTS=true` when raw market snapshots are
+disabled. Each cycle then writes one compact `decision_snapshots` artifact with
+symbol selection health, market-source counts, per-symbol ticker/kline/flow/OI
+summaries, candidate rankings, micro-grid health, and rejection counts. This is
+small enough for live retention while preserving the evidence needed for later
+strategy debugging.
+
+Preview retention before deleting rows:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops db-maintenance \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite \
+  --clean-raw-feed
+```
+
+Apply retention without shrinking the database file:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops db-maintenance \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite \
+  --execute --batch-size 5000 --max-delete-rows 25000 --clean-raw-feed
+```
+
+The normal hourly unit is intentionally incremental: it reports the full stale
+snapshot backlog, but only deletes up to `BFA_DB_MAINTENANCE_MAX_DELETE_ROWS`
+market-snapshot rows per run in batches of `BFA_DB_MAINTENANCE_BATCH_SIZE`.
+This avoids multi-million-row deletes creating huge WAL files beside live
+trading. Re-run maintenance or let the timer catch up gradually.
+
+Enable hourly retention:
+
+```bash
+systemctl enable --now binance-futures-agent-db-maintenance.timer
+systemctl list-timers 'binance-futures-agent-db-maintenance*' --no-pager
+```
+
+`--vacuum` physically shrinks `agent.sqlite`, but it can take time and lock the
+database. Stop live, paper, sentinel, watchdog, and raw-feed services first, run
+one maintenance command with `--execute --vacuum --clean-raw-feed`, then restart
+the timers/services that should continue running.
 
 ## Systemd Smoke
 
@@ -238,6 +305,104 @@ fallback, and candidate allowlisting. This only widens scanning: `agent run-once
 --top-n`, deterministic setup gates, AI overlay or quant fallback, risk caps,
 and one-order-per-cycle behavior still apply. The default is `false`; when
 disabled or empty, the runner falls back to `BFA_MARKET_SYMBOLS`.
+
+### Fast Position Sentinel
+
+The live cycle runs every two minutes, which is too slow for post-fill
+protective maintenance. The position sentinel is a separate high-frequency
+oneshot:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops position-sentinel \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+```
+
+With `--execute` and `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true`, it may
+backfill missing stop-loss/take-profit algo orders or replace existing
+protective orders when a profitable position shows rising reversal risk:
+
+```bash
+systemctl enable --now binance-futures-agent-position-sentinel.timer
+systemctl list-timers 'binance-futures-agent-position-sentinel*' --no-pager
+```
+
+The sentinel deliberately ignores unrelated normal open orders while checking
+already-filled positions, because a pending limit order elsewhere must not block
+backfilling protection on a newly filled position. It still requires live mode,
+Binance credentials, exchange symbol filters, a matching submitted intent, and
+agent-managed position evidence.
+
+The reversal-aware trailing path is not a fixed "small profit means breakeven"
+rule. The sentinel scores the active position using target progress, R multiple,
+recent same-direction or opposite short return, volume ratio, and recent range.
+Only when the position has meaningful favorable progress and the reversal score
+crosses `BFA_POSITION_SENTINEL_REVERSAL_THRESHOLD` will it convert a normal
+hold/watch review into a `trail_protective_orders` plan. It does not auto full
+close positions; the automatic action allowlist remains limited to protective
+backfill and protective-order replacement.
+
+`BFA_POST_ONLY_REPRICE_ENABLED=true` makes `GTX` limit entries retry after
+Binance `-5022` maker rejection. For a long entry, each retry moves the price
+down by `BFA_POST_ONLY_REPRICE_TICKS`; for a short entry it moves the price up.
+Retries are capped by `BFA_POST_ONLY_REPRICE_MAX_ATTEMPTS`. Every attempt is
+stored in the exchange response so rejected maker entries can be audited later.
+
+### Live Rejection Triage
+
+Use SQLite to group recent live results:
+
+```bash
+sqlite3 /opt/binance-futures-agent/data/agent.sqlite \
+  "select json_extract(payload_json,'$.status') status,
+          json_extract(payload_json,'$.risk.reason_codes') reasons,
+          count(*) n
+     from order_intents
+    group by status,reasons
+    order by n desc;"
+```
+
+Common rejection roots observed during live pilot:
+
+- `-5022` post-only rejection: the limit price would immediately take liquidity.
+  Reprice attempts are recorded under `entry_order.post_only_reprice`.
+- `-4028` leverage invalid: that symbol does not accept the requested leverage;
+  the executor downshifts through 25/20/15/12/10/8/5/3/2/1 where possible.
+- `-4168` margin mode conflict: Multi-Assets mode can reject isolated-margin
+  changes. Use a margin mode compatible with the account setting.
+- `-4411` TradFi-Perps agreement required: exclude these symbols or complete the
+  exchange-side agreement intentionally.
+- `-4509` protective algo placement with no active position: old filled pending
+  limits must be reconciled against current same-direction position risk before
+  placing TP/SL. The pending-limit watchdog resolves filled-but-flat records
+  without placing protective orders.
+
+### Pending-Limit Watchdog
+
+Limit entries can fill between two live cycles. The pending-limit watchdog scans
+unresolved `entry_order_pending` limit intents and reconciles them against
+Binance order status and current position risk:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops pending-limit-watchdog \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+```
+
+Without `--execute`, this command is observe-only. With `--execute` and
+`BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED=true`, it immediately backfills
+missing `STOP_MARKET` and `TAKE_PROFIT_MARKET` close-position algo orders for a
+filled pending entry, then persists the reconciliation evidence. The timer runs
+independently from the two-minute live strategy cycle:
+
+```bash
+systemctl enable --now binance-futures-agent-pending-limit-watchdog.timer
+systemctl list-timers 'binance-futures-agent-pending-limit-watchdog*' --no-pager
+```
+
+This service does not open new positions. It only protects pending limit entries
+that the agent already wrote to the event store, and it skips symbols listed in
+`BFA_MANUAL_POSITION_SYMBOLS`.
 
 ## Forward-Paper Recorder
 

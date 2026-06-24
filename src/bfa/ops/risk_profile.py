@@ -101,6 +101,35 @@ PROFILE_30U_10X_MULTI_DYNAMIC = {
     "BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED": "true",
 }
 
+PROFILE_100U_30X_MULTI_DYNAMIC = {
+    "BFA_ACCOUNT_CAPITAL_USDT": "100",
+    "BFA_MAX_LEVERAGE": "30",
+    "BFA_MAX_POSITION_NOTIONAL_USDT": "180",
+    "BFA_MAX_RISK_PER_TRADE_USDT": "0.8",
+    "BFA_MAX_DAILY_LOSS_USDT": "4",
+    "BFA_MAX_OPEN_POSITIONS": "5",
+    "BFA_DYNAMIC_POSITION_SIZING_ENABLED": "true",
+    "BFA_MAX_MARGIN_PER_POSITION_USDT": "6",
+    "BFA_MAX_MARGIN_FRACTION": "0.10",
+    "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "180",
+    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "45",
+    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "0.45",
+    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "450",
+    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "240",
+    "BFA_MULTI_POSITION_ENABLED": "true",
+    "BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED": "true",
+    "BFA_ADAPTIVE_SIZING_MIN_MULTIPLIER": "0.25",
+    "BFA_ADAPTIVE_SIZING_MAX_MULTIPLIER": "1.20",
+    "BFA_HIGH_LEVERAGE_THRESHOLD": "8",
+    "BFA_HIGH_LEVERAGE_MIN_STOP_DISTANCE_PERCENT": "0.20",
+    "BFA_HIGH_LEVERAGE_MAX_STOP_TO_LIQUIDATION_RATIO": "0.55",
+    "BFA_HIGH_LEVERAGE_MAX_VOLATILITY_PERCENT": "9",
+    "BFA_HIGH_LEVERAGE_BLOCK_VOLATILITY_PERCENT": "14",
+    "BFA_MIN_LIQUIDITY_QUOTE_VOLUME_USDT": "5000000",
+    "BFA_STRONG_LIQUIDITY_QUOTE_VOLUME_USDT": "50000000",
+    "BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED": "true",
+}
+
 
 @dataclass(frozen=True)
 class RiskProfileDiffItem:
@@ -251,8 +280,10 @@ def target_profile_values(profile: str, *, allow_two_positions: bool = False) ->
         target = dict(PROFILE_30U_8X_DYNAMIC)
     elif profile == "30u_10x_multi_dynamic":
         target = dict(PROFILE_30U_10X_MULTI_DYNAMIC)
+    elif profile == "100u_30x_multi_dynamic":
+        target = dict(PROFILE_100U_30X_MULTI_DYNAMIC)
     else:
-        raise ValueError("profile must be 30u_8x_dynamic or 30u_10x_multi_dynamic")
+        raise ValueError("profile must be 30u_8x_dynamic, 30u_10x_multi_dynamic, or 100u_30x_multi_dynamic")
     if allow_two_positions:
         target["BFA_MAX_OPEN_POSITIONS"] = str(max(int(target["BFA_MAX_OPEN_POSITIONS"]), 2))
         target["BFA_MULTI_POSITION_ENABLED"] = "true"

@@ -16,6 +16,8 @@ class StrategyConfig:
     min_quote_volume: float = 1_000_000.0
     max_kline_range_percent: float = 20.0
     require_market_confirmation: bool = True
+    require_narrative_evidence: bool = True
+    score_mode: str = "balanced"
     max_position_notional_usdt: float | None = None
     paper_guard: Any | None = None
     spike_reversal_enabled: bool = True
@@ -123,7 +125,7 @@ def _reject_reasons(
     reasons: list[str] = []
     if item.symbol not in allowed_symbols:
         reasons.append("symbol_not_allowed")
-    if item.mention_count <= 0:
+    if config.require_narrative_evidence and item.mention_count <= 0:
         reasons.append("no_narrative_evidence")
     if config.require_market_confirmation and not item.market_event_ids:
         reasons.append("missing_market_confirmation")
@@ -149,6 +151,9 @@ def _score_candidate(item: SymbolFeatures, config: StrategyConfig) -> CandidateS
         + len(item.authors) * 4.0
         + min(item.engagement_score / 10.0, 20.0)
     )
+    if config.score_mode == "market_momentum":
+        return _score_market_momentum_candidate(item, config, narrative_score=narrative_score)
+
     market_score = 0.0
     reason_codes: list[str] = []
     if item.price_change_percent is not None:
@@ -189,6 +194,83 @@ def _score_candidate(item: SymbolFeatures, config: StrategyConfig) -> CandidateS
 
     quality_penalty = len(item.quality_notes) * 2.0
     total_score = round(max(narrative_score + market_score - quality_penalty, 0.0), 4)
+    return CandidateSignal(
+        symbol=item.symbol,
+        score=total_score,
+        narrative_score=round(narrative_score, 4),
+        market_score=round(market_score, 4),
+        reason_codes=_dedupe(reason_codes),
+        data_quality_notes=list(item.quality_notes),
+        source_event_ids=list(item.narrative_event_ids),
+        market_event_ids=list(item.market_event_ids),
+        generated_at=config.generated_at,
+        features=item.to_dict(),
+    )
+
+
+def _score_market_momentum_candidate(
+    item: SymbolFeatures,
+    config: StrategyConfig,
+    *,
+    narrative_score: float,
+) -> CandidateSignal:
+    market_score = 0.0
+    reason_codes: list[str] = []
+    directional_values = [
+        item.price_change_percent,
+        item.kline_momentum_percent,
+        item.kline_micro_momentum_percent,
+    ]
+    abs_momentum = max((abs(value) for value in directional_values if value is not None), default=0.0)
+    signed_momentum = next((value for value in directional_values if value is not None), 0.0)
+    market_score += min(abs_momentum * 5.0, 35.0)
+    if abs_momentum >= 0.5:
+        reason_codes.append("short_interval_momentum")
+    if signed_momentum > 0:
+        reason_codes.append("directional_bias_long")
+    elif signed_momentum < 0:
+        reason_codes.append("directional_bias_short")
+
+    if item.quote_volume is not None:
+        market_score += min(item.quote_volume / 2_000_000.0, 25.0)
+        if item.quote_volume >= config.min_quote_volume:
+            reason_codes.append("liquidity_ok")
+    if item.open_interest_value is not None:
+        market_score += min(item.open_interest_value / 1_500_000.0, 18.0)
+        reason_codes.append("open_interest_value")
+    elif item.open_interest is not None:
+        market_score += min(item.open_interest / 150_000.0, 12.0)
+        reason_codes.append("open_interest")
+    if item.taker_buy_sell_ratio is not None:
+        flow_edge = item.taker_buy_sell_ratio - 1.0
+        market_score += min(abs(flow_edge) * 25.0, 16.0)
+        if item.taker_buy_sell_ratio >= 1.05:
+            reason_codes.append("taker_buy_bias")
+        elif item.taker_buy_sell_ratio <= 0.95:
+            reason_codes.append("taker_sell_bias")
+    if item.kline_quote_volume_change_percent is not None:
+        market_score += min(abs(item.kline_quote_volume_change_percent) / 4.0, 18.0)
+        if abs(item.kline_quote_volume_change_percent) >= 10.0:
+            reason_codes.append("volume_impulse")
+    if item.kline_range_percent is not None:
+        if item.kline_range_percent <= config.max_kline_range_percent:
+            market_score += max(8.0 - item.kline_range_percent / 3.0, 0.0)
+            reason_codes.append("volatility_checked")
+        else:
+            market_score -= min(item.kline_range_percent, 20.0)
+    if (
+        config.max_position_notional_usdt is not None
+        and item.min_executable_notional is not None
+        and item.min_executable_notional <= config.max_position_notional_usdt
+    ):
+        reason_codes.append("pilot_tradable")
+    if item.mention_count > 0:
+        reason_codes.append("narrative_heat")
+    if len(item.sources) > 1:
+        reason_codes.append("source_diversity")
+
+    quality_penalty = len(item.quality_notes) * 1.25
+    total_score = round(max(market_score + min(narrative_score, 12.0) - quality_penalty, 0.0), 4)
     return CandidateSignal(
         symbol=item.symbol,
         score=total_score,

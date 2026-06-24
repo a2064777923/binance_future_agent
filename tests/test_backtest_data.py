@@ -91,6 +91,14 @@ class BacktestDataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fetch_historical_klines(FakeClient([]), symbols=["BTCUSDT"], interval="7m")
 
+    def test_one_second_interval_is_supported_by_local_interval_map(self):
+        client = FakeClient([[kline(1_700_000_000_000)]])
+
+        rows = fetch_historical_klines(client, symbols=["BTCUSDT"], interval="1s", limit=1)
+
+        self.assertEqual(len(rows["BTCUSDT"]), 1)
+        self.assertEqual(client.calls[0]["interval"], "1s")
+
 
 if __name__ == "__main__":
     unittest.main()

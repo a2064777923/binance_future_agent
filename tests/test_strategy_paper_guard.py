@@ -131,6 +131,61 @@ class ForwardPaperGuardTests(unittest.TestCase):
         merged = merge_guard_profile({"name": "selective"}, guard)
         self.assertIn("taker_flow_acceleration", merged["blocked_factor_reasons"])
 
+    def test_factor_downsize_mode_keeps_factor_out_of_setup_hard_blocks(self):
+        rows = [
+            ("BTWUSDT", -0.3, "long"),
+            ("BTWUSDT", -0.25, "long"),
+            ("BTWUSDT", -0.2, "long"),
+            ("SOLUSDT", 0.2, "long"),
+        ]
+        connection = self.make_db(rows)
+        try:
+            guard = build_forward_paper_guard(
+                connection,
+                ForwardPaperGuardConfig(
+                    min_total_outcomes=4,
+                    min_symbol_outcomes=99,
+                    min_factor_outcomes=3,
+                    factor_min_loss_usdt=0.5,
+                    factor_max_win_rate=0.3,
+                    factor_mode="downsize",
+                    factor_downsize_multiplier=0.55,
+                ),
+            )
+        finally:
+            connection.close()
+
+        self.assertTrue(guard.active)
+        self.assertEqual(guard.factor_mode, "downsize")
+        self.assertIn("taker_flow_acceleration", guard.factor_blocks)
+        merged = merge_guard_profile({"name": "selective"}, guard)
+        self.assertNotIn("blocked_factor_reasons", merged)
+
+    def test_factor_exempt_reasons_are_not_blocked(self):
+        rows = [
+            ("BTWUSDT", -0.3, "long"),
+            ("BTWUSDT", -0.25, "long"),
+            ("BTWUSDT", -0.2, "long"),
+            ("SOLUSDT", 0.2, "long"),
+        ]
+        connection = self.make_db(rows)
+        try:
+            guard = build_forward_paper_guard(
+                connection,
+                ForwardPaperGuardConfig(
+                    min_total_outcomes=4,
+                    min_symbol_outcomes=99,
+                    min_factor_outcomes=3,
+                    factor_min_loss_usdt=0.5,
+                    factor_max_win_rate=0.3,
+                    factor_exempt_reasons=("taker_flow_acceleration",),
+                ),
+            )
+        finally:
+            connection.close()
+
+        self.assertNotIn("taker_flow_acceleration", guard.factor_blocks)
+
 
 if __name__ == "__main__":
     unittest.main()

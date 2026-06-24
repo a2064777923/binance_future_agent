@@ -218,8 +218,140 @@ class ExecutionSizingTests(unittest.TestCase):
         self.assertIsNone(result.final_notional_usdt)
         self.assertIn("stop_too_close_to_liquidation_for_high_leverage", result.reason_codes)
 
+    def test_forward_paper_factor_downsize_mode_reduces_notional_without_blocking(self):
+        config = load_config(
+            {
+                "BFA_ACCOUNT_CAPITAL_USDT": "100",
+                "BFA_MAX_LEVERAGE": "10",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+            }
+        )
+        paper_guard = type(
+            "PaperGuard",
+            (),
+            {
+                "active": True,
+                "symbol_blocks": {},
+                "side_blocks": {},
+                "factor_blocks": {"24h_momentum": object()},
+                "factor_mode": "downsize",
+                "factor_downsize_multiplier": 0.5,
+            },
+        )()
 
-def _setup(*, notional: float, edge: float, confidence: float, stop_distance: float) -> dict:
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(
+                notional=120,
+                edge=50,
+                confidence=0.82,
+                stop_distance=1.0,
+                reasons=["quant_long_setup", "24h_momentum"],
+            ),
+            candidate=_candidate(quote_volume=80_000_000, volatility=1.0),
+            risk_state=RiskState(account_available_balance_usdt=80),
+            paper_guard=paper_guard,
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertLess(result.final_notional_usdt, 120)
+        self.assertIn("adaptive_downsized", result.reason_codes)
+        self.assertIn("forward_paper_factor_downsize:24h_momentum", result.warnings)
+
+    def test_forward_paper_side_downsize_mode_reduces_notional_without_blocking(self):
+        config = load_config(
+            {
+                "BFA_ACCOUNT_CAPITAL_USDT": "100",
+                "BFA_MAX_LEVERAGE": "10",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+            }
+        )
+        paper_guard = type(
+            "PaperGuard",
+            (),
+            {
+                "active": True,
+                "symbol_blocks": {},
+                "side_blocks": {"long": object()},
+                "factor_blocks": {},
+                "side_mode": "downsize",
+                "side_downsize_multiplier": 0.4,
+            },
+        )()
+
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(notional=120, edge=50, confidence=0.82, stop_distance=1.0),
+            candidate=_candidate(quote_volume=80_000_000, volatility=1.0),
+            risk_state=RiskState(account_available_balance_usdt=80),
+            paper_guard=paper_guard,
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertLess(result.final_notional_usdt, 120)
+        self.assertIn("adaptive_downsized", result.reason_codes)
+        self.assertIn("forward_paper_side_downsize:long", result.warnings)
+
+    def test_forward_paper_factor_observe_mode_records_warning_without_downsizing(self):
+        config = load_config(
+            {
+                "BFA_ACCOUNT_CAPITAL_USDT": "100",
+                "BFA_MAX_LEVERAGE": "10",
+                "BFA_MAX_POSITION_NOTIONAL_USDT": "500",
+                "BFA_MAX_EFFECTIVE_NOTIONAL_USDT": "500",
+                "BFA_MAX_RISK_PER_TRADE_USDT": "5",
+                "BFA_MAX_PORTFOLIO_MARGIN_USDT": "100",
+                "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+            }
+        )
+        paper_guard = type(
+            "PaperGuard",
+            (),
+            {
+                "active": True,
+                "symbol_blocks": {},
+                "side_blocks": {},
+                "factor_blocks": {"24h_momentum": object()},
+                "factor_mode": "observe",
+                "factor_downsize_multiplier": 0.5,
+            },
+        )()
+
+        result = apply_adaptive_sizing_governor(
+            config,
+            setup=_setup(
+                notional=120,
+                edge=50,
+                confidence=0.82,
+                stop_distance=1.0,
+                reasons=["quant_long_setup", "24h_momentum"],
+            ),
+            candidate=_candidate(quote_volume=80_000_000, volatility=1.0),
+            risk_state=RiskState(account_available_balance_usdt=80),
+            paper_guard=paper_guard,
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertGreaterEqual(result.final_notional_usdt, 120)
+        self.assertIn("forward_paper_factor_observed:24h_momentum", result.warnings)
+
+
+def _setup(
+    *,
+    notional: float,
+    edge: float,
+    confidence: float,
+    stop_distance: float,
+    reasons: list[str] | None = None,
+) -> dict:
     return {
         "symbol": "SOLUSDT",
         "decision": "trade",
@@ -244,7 +376,7 @@ def _setup(*, notional: float, edge: float, confidence: float, stop_distance: fl
                 "stop_before_liquidation": True,
             },
         },
-        "reasons": ["quant_long_setup"],
+        "reasons": reasons or ["quant_long_setup"],
         "warnings": [],
     }
 

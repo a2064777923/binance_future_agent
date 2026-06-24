@@ -1,9 +1,9 @@
 [Unit]
-Description=Run Binance Futures Agent automated trading cycle every five minutes
+Description=Run Binance Futures Agent automated trading cycle every two minutes
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=2min
 AccuracySec=30s
 Persistent=false
 Unit=binance-futures-agent-live.service

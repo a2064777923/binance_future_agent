@@ -11,6 +11,7 @@ SCHEMA_VERSION = 1
 CATEGORY_TABLES = (
     "narratives",
     "market_snapshots",
+    "decision_snapshots",
     "candidates",
     "trade_setups",
     "ai_decisions",

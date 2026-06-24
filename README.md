@@ -54,6 +54,11 @@ repository, not from adjacent projects. Do not import from `F:\stock`.
 Local secrets belong in `.env`, which is ignored by git. `.env.example` documents
 variable names only.
 
+For another machine or agent taking over development, start with
+`docs/agent-handoff.md`. It summarizes the current architecture, server paths,
+live safety rules, and the exact local verification commands without including
+any secrets.
+
 Phases 1-8 implement the isolated project foundation, public market data,
 narrative ingestion, event-store replay, hot-coin candidate scoring,
 AI-provider structured decision validation, risk-gated Binance execution, and

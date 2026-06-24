@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from bfa.ai.decision import validate_decision_payload
 from bfa.ai.schema import RiskLimits, context_from_candidate
@@ -38,6 +39,14 @@ class FakeSignedClient:
         self.calls.append(("new_algo_order", kwargs))
         return {"algoId": 456, "status": "NEW", **kwargs}
 
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return []
+
+    def cancel_algo_order(self, **kwargs):
+        self.calls.append(("cancel_algo_order", kwargs))
+        return {"algoStatus": "CANCELED", **kwargs}
+
     def test_order(self, **kwargs):
         self.calls.append(("test_order", kwargs))
         return {}
@@ -45,6 +54,81 @@ class FakeSignedClient:
     def account(self):
         self.calls.append(("account",))
         return {"availableBalance": self.available_balance}
+
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        return {"status": "FILLED", "executedQty": str(kwargs.get("quantity", "0.2")), "avgPrice": "100"}
+
+    def cancel_order(self, **kwargs):
+        self.calls.append(("cancel_order", kwargs))
+        return {"status": "CANCELED", **kwargs}
+
+
+class LimitFilledSignedClient(FakeSignedClient):
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        return {"status": "FILLED", "executedQty": "0.2", "avgPrice": "100"}
+
+
+class LimitExpiredSignedClient(FakeSignedClient):
+    def __init__(self, *, available_balance="100"):
+        super().__init__(available_balance=available_balance)
+        self.cancelled = False
+
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        if self.cancelled:
+            return {"status": "CANCELED", "executedQty": "0", "avgPrice": "0"}
+        return {"status": "NEW", "executedQty": "0", "avgPrice": "0"}
+
+    def cancel_order(self, **kwargs):
+        self.calls.append(("cancel_order", kwargs))
+        self.cancelled = True
+        return {"status": "CANCELED", **kwargs}
+
+
+class LimitUnknownFilledPositionSignedClient(FakeSignedClient):
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/order",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2013,
+            binance_message="Order does not exist.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return [
+            {
+                "symbol": symbol or "BTCUSDT",
+                "positionAmt": "0.2",
+                "positionSide": "LONG",
+                "entryPrice": "100",
+                "markPrice": "100.5",
+            }
+        ]
+
+
+class PostOnlyRejectThenAcceptSignedClient(FakeSignedClient):
+    def new_order(self, **kwargs):
+        self.calls.append(("new_order", kwargs))
+        if len([call for call in self.calls if call[0] == "new_order"]) == 1:
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/order",
+                params=kwargs,
+                status_code=400,
+                binance_code=-5022,
+                binance_message="Due to the order could not be executed as maker, the Post Only order will be rejected.",
+                headers={},
+            )
+        return {"orderId": 234, "status": "NEW", **kwargs}
+
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        return {"status": "FILLED", "executedQty": "0.2", "avgPrice": "99.8"}
 
 
 class MarginFailingSignedClient(FakeSignedClient):
@@ -60,6 +144,25 @@ class MarginFailingSignedClient(FakeSignedClient):
         )
 
 
+class InvalidHighLeverageSignedClient(FakeSignedClient):
+    def __init__(self, *, available_balance="100", accepted_leverage=20):
+        super().__init__(available_balance=available_balance)
+        self.accepted_leverage = accepted_leverage
+
+    def change_initial_leverage(self, symbol, *, leverage):
+        self.calls.append(("leverage", symbol, leverage))
+        if leverage > self.accepted_leverage:
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/leverage",
+                params={"symbol": symbol, "leverage": str(leverage)},
+                status_code=400,
+                binance_code=-4028,
+                binance_message=f"Leverage {leverage} is not valid",
+                headers={},
+            )
+        return {"symbol": symbol, "leverage": leverage}
+
+
 class EntryFailingSignedClient(FakeSignedClient):
     def new_order(self, **kwargs):
         self.calls.append(("new_order", kwargs))
@@ -71,6 +174,47 @@ class EntryFailingSignedClient(FakeSignedClient):
             binance_message="Order's position side does not match user's setting.",
             headers={},
         )
+
+
+class ConflictingProtectiveOrderSignedClient(FakeSignedClient):
+    def __init__(self, *, available_balance="100"):
+        super().__init__(available_balance=available_balance)
+        self._protective_attempts = 0
+
+    def new_algo_order(self, **kwargs):
+        self.calls.append(("new_algo_order", kwargs))
+        self._protective_attempts += 1
+        if self._protective_attempts == 1:
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/algoOrder",
+                params=kwargs,
+                status_code=400,
+                binance_code=-4130,
+                binance_message="An open stop or take profit order with GTE and closePosition in the direction is existing.",
+                headers={},
+            )
+        return {"algoId": 456 + self._protective_attempts, "status": "NEW", **kwargs}
+
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return [
+            {
+                "algoId": 111,
+                "symbol": symbol or "BTCUSDT",
+                "side": "SELL",
+                "positionSide": "LONG",
+                "orderType": "STOP_MARKET",
+                "closePosition": True,
+            },
+            {
+                "algoId": 112,
+                "symbol": symbol or "BTCUSDT",
+                "side": "SELL",
+                "positionSide": "LONG",
+                "orderType": "TAKE_PROFIT_MARKET",
+                "closePosition": True,
+            },
+        ]
 
 
 class AccountFailingSignedClient(FakeSignedClient):
@@ -252,6 +396,56 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(fake_client.calls[1], ("margin", "BTCUSDT", "CROSSED"))
         self.assertEqual(fake_client.calls[2], ("leverage", "BTCUSDT", 3))
 
+    def test_live_downshifts_invalid_exchange_leverage_before_order(self):
+        fake_client = InvalidHighLeverageSignedClient(accepted_leverage=20)
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_MAX_LEVERAGE="30",
+                BFA_MAX_POSITION_NOTIONAL_USDT="120",
+                BFA_MAX_PORTFOLIO_MARGIN_USDT="12",
+                BFA_MAX_PORTFOLIO_NOTIONAL_USDT="320",
+                BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT="180",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+            risk_limits=RiskLimits(
+                account_capital_usdt=100,
+                max_leverage=30,
+                max_position_notional_usdt=120,
+                max_risk_per_trade_usdt=1,
+                max_daily_loss_usdt=3,
+                max_open_positions=2,
+            ),
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(notional_usdt=20.0, reasons=["entry_order_type:limit"]),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(account_available_balance_usdt=100),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "submitted")
+        self.assertTrue(result.submitted)
+        self.assertEqual(
+            [call for call in fake_client.calls if call[0] == "leverage"],
+            [
+                ("leverage", "BTCUSDT", 30),
+                ("leverage", "BTCUSDT", 25),
+                ("leverage", "BTCUSDT", 20),
+            ],
+        )
+        self.assertIsNotNone(result.intent)
+        self.assertEqual(result.intent.leverage, 20)
+        self.assertIn("exchange_leverage_downshifted:30_to_20", result.intent.reason_codes)
+        self.assertEqual(result.intent.metadata["requested_leverage"], 30)
+        self.assertEqual(result.intent.metadata["exchange_effective_leverage"], 20)
+        self.assertEqual(result.exchange_response["margin_setup"]["leverage"]["effective_leverage"], 20)
+        self.assertEqual(result.exchange_response["entry_order"]["order_type"], "LIMIT")
+
     def test_live_hedge_position_mode_sends_position_side(self):
         fake_client = FakeSignedClient()
         engine = ExecutionEngine(
@@ -414,6 +608,249 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
         self.assertIn("notional_below_min", result.risk.reason_codes)
         self.assertEqual(fake_client.calls, [])
+
+    def test_live_limit_entry_uses_post_only_price_and_places_protection_after_fill(self):
+        fake_client = LimitFilledSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:1",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "submitted")
+        self.assertTrue(result.submitted)
+        self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order", "query_order", "new_algo_order", "new_algo_order"])
+        entry_call = fake_client.calls[3][1]
+        self.assertEqual(entry_call["order_type"], "LIMIT")
+        self.assertEqual(entry_call["price"], 100.0)
+        self.assertEqual(entry_call["time_in_force"], "GTX")
+        self.assertEqual(result.intent.quantity, 0.2)
+        self.assertEqual(result.intent.entry_price, 100.0)
+
+    def test_intent_metadata_preserves_regime_route_fields(self):
+        engine = ExecutionEngine(config=self.config())
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "regime_label:RANGE",
+                    "route_decision:allow",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(result.intent.metadata["strategy_leg"], "micro_grid")
+        self.assertEqual(result.intent.metadata["regime_label"], "RANGE")
+        self.assertEqual(result.intent.metadata["route_decision"], "allow")
+
+    def test_execution_metadata_preserves_latency_telemetry(self):
+        engine = ExecutionEngine(config=self.config())
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "regime_label:RANGE",
+                    "route_decision:allow",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+            telemetry={
+                "signal_time_ms": 1_700_000_000_000,
+                "signal_to_candidate_ms": 1200,
+                "ai_latency": {"duration_ms": 0, "bypassed": True},
+            },
+        )
+
+        self.assertEqual(result.status, "dry_run")
+        latency = result.intent.metadata["latency"]
+        self.assertEqual(latency["signal_to_candidate_ms"], 1200)
+        self.assertEqual(latency["ai_latency"]["bypassed"], True)
+        self.assertIn("execution_run_started_at_ms", latency)
+
+    def test_live_limit_entry_cancels_when_not_filled_and_skips_protection(self):
+        fake_client = LimitExpiredSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        with patch("bfa.execution.executor.time.monotonic", side_effect=[0.0, 2.0]):
+            result = engine.run(
+                symbol="BTCUSDT",
+                validation=self.validation(
+                    reasons=[
+                        "strategy_leg:micro_grid",
+                        "entry_order_type:limit",
+                        "entry_time_in_force:GTX",
+                        "limit_entry_max_wait_seconds:1",
+                    ]
+                ),
+                decided_at="2026-06-20T10:00:00Z",
+                risk_state=RiskState(),
+                filters=self.filters(),
+            )
+
+        self.assertEqual(result.status, "entry_order_expired_canceled")
+        self.assertFalse(result.submitted)
+        self.assertIn("entry_order_expired_canceled", result.risk.reason_codes)
+        self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order", "query_order", "cancel_order", "query_order"])
+        self.assertNotIn("new_algo_order", [call[0] for call in fake_client.calls])
+
+    def test_live_limit_entry_unknown_state_reconciles_position_and_places_protection(self):
+        fake_client = LimitUnknownFilledPositionSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_POSITION_MODE="hedge",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:1",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "entry_order_reconciled_from_position")
+        self.assertTrue(result.submitted)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            ["account", "margin", "leverage", "new_order", "query_order", "position_risk", "new_algo_order", "new_algo_order"],
+        )
+        self.assertEqual(result.intent.quantity, 0.2)
+        self.assertEqual(result.intent.entry_price, 100.0)
+        self.assertIn("limit_entry_reconciled_from_position", result.intent.reason_codes)
+        self.assertEqual(result.exchange_response["limit_entry_position_reconcile"]["status"], "position_found")
+        self.assertEqual(result.exchange_response["stop_loss_order"]["order_type"], "STOP_MARKET")
+        self.assertEqual(result.exchange_response["take_profit_order"]["order_type"], "TAKE_PROFIT_MARKET")
+
+    def test_live_post_only_entry_reprices_after_maker_reject(self):
+        fake_client = PostOnlyRejectThenAcceptSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_POST_ONLY_REPRICE_TICKS="2",
+                BFA_POST_ONLY_REPRICE_MAX_ATTEMPTS="3",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:1",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "submitted")
+        entry_calls = [call[1] for call in fake_client.calls if call[0] == "new_order"]
+        self.assertEqual(len(entry_calls), 2)
+        self.assertEqual(entry_calls[0]["price"], 100.0)
+        self.assertEqual(entry_calls[1]["price"], 99.8)
+        self.assertEqual(entry_calls[1]["new_client_order_id"], "bfa-btcusdt-20260620100000-r1")
+        self.assertIn("post_only_repriced_attempt:2", result.intent.reason_codes)
+        self.assertEqual(result.intent.entry_price, 99.8)
+        reprice = result.exchange_response["entry_order"]["post_only_reprice"]
+        self.assertTrue(reprice["enabled"])
+        self.assertEqual([attempt["status"] for attempt in reprice["attempts"]], ["rejected", "accepted"])
+
+    def test_live_replaces_conflicting_close_position_algo_orders_before_fail_closed(self):
+        fake_client = ConflictingProtectiveOrderSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_POSITION_MODE="hedge",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "submitted")
+        self.assertTrue(result.submitted)
+        self.assertNotIn("kill_switch_activated", result.exchange_response)
+        self.assertEqual(result.exchange_response["protective_error"]["code"], -4130)
+        self.assertEqual(
+            result.exchange_response["protective_recovery"]["reason"],
+            "existing_close_position_algo_conflict",
+        )
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            [
+                "account",
+                "margin",
+                "leverage",
+                "new_order",
+                "new_algo_order",
+                "open_algo_orders",
+                "cancel_algo_order",
+                "cancel_algo_order",
+                "new_algo_order",
+                "new_algo_order",
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -172,6 +172,9 @@ class BacktestMatrixTests(unittest.TestCase):
                 step_bars=4,
                 variants=(
                     "quant_setup",
+                    "quant_setup_hf_profit_guarded",
+                    "quant_setup_high_frequency_flow_guarded",
+                    "quant_setup_high_frequency_guarded",
                     "quant_setup_selective",
                     "quant_setup_selective_guarded",
                     "quant_setup_loss_recalibrated",
@@ -184,15 +187,26 @@ class BacktestMatrixTests(unittest.TestCase):
             payload["matrix_config"]["variants"],
             [
                 "quant_setup",
+                "quant_setup_hf_profit_guarded",
+                "quant_setup_high_frequency_flow_guarded",
+                "quant_setup_high_frequency_guarded",
                 "quant_setup_selective",
                 "quant_setup_selective_guarded",
                 "quant_setup_loss_recalibrated",
             ],
         )
         self.assertIn("quant_setup", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_hf_profit_guarded", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_high_frequency_flow_guarded", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_high_frequency_guarded", payload["promotion"]["variants"])
         self.assertIn("quant_setup_selective", payload["promotion"]["variants"])
         self.assertIn("quant_setup_selective_guarded", payload["promotion"]["variants"])
         self.assertIn("quant_setup_loss_recalibrated", payload["promotion"]["variants"])
+
+    def test_hot_backtest_matrix_suite_default_includes_high_frequency_variant(self):
+        self.assertIn("quant_setup_hf_profit_guarded", BacktestMatrixSuiteConfig().variants)
+        self.assertIn("quant_setup_high_frequency_flow_guarded", BacktestMatrixSuiteConfig().variants)
+        self.assertIn("quant_setup_high_frequency_guarded", BacktestMatrixSuiteConfig().variants)
 
     def test_hot_backtest_matrix_suite_runs_multiple_universe_presets(self):
         client = FakeClient()

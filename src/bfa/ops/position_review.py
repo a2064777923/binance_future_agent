@@ -33,6 +33,9 @@ class PositionReviewItem:
     hold_elapsed_fraction: float | None = None
     elapsed_minutes: float | None = None
     hold_time_minutes: int | None = None
+    strategy_leg: str | None = None
+    regime_label: str | None = None
+    route_decision: str | None = None
     algo_protection_count: int = 0
     algo_orders: list[dict[str, Any]] = field(default_factory=list)
     matching_intent_event_id: int | None = None
@@ -56,6 +59,9 @@ class PositionReviewItem:
             "hold_elapsed_fraction": self.hold_elapsed_fraction,
             "elapsed_minutes": self.elapsed_minutes,
             "hold_time_minutes": self.hold_time_minutes,
+            "strategy_leg": self.strategy_leg,
+            "regime_label": self.regime_label,
+            "route_decision": self.route_decision,
             "algo_protection_count": self.algo_protection_count,
             "algo_orders": [dict(order) for order in self.algo_orders],
             "matching_intent_event_id": self.matching_intent_event_id,
@@ -170,6 +176,9 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
             hold_elapsed_fraction=metrics["hold_elapsed_fraction"],
             elapsed_minutes=position.elapsed_minutes,
             hold_time_minutes=position.matching_intent.hold_time_minutes if position.matching_intent else None,
+            strategy_leg=position.matching_intent.strategy_leg if position.matching_intent else None,
+            regime_label=position.matching_intent.regime_label if position.matching_intent else None,
+            route_decision=position.matching_intent.route_decision if position.matching_intent else None,
             algo_protection_count=position.algo_protection_count,
             algo_orders=[dict(order) for order in position.algo_orders],
             matching_intent_event_id=position.matching_intent.event_id if position.matching_intent else None,
@@ -179,7 +188,7 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
     recommendation = "hold"
     urgency = "normal"
 
-    if position.algo_protection_count <= 0:
+    if position.algo_protection_count < 2:
         recommendation = "close_review"
         urgency = "urgent"
         reasons.append("unprotected_position")
@@ -228,6 +237,9 @@ def _review_item(position: PositionHoldItem, *, manual_symbols: set[str] | None 
         hold_elapsed_fraction=metrics["hold_elapsed_fraction"],
         elapsed_minutes=position.elapsed_minutes,
         hold_time_minutes=position.matching_intent.hold_time_minutes if position.matching_intent else None,
+        strategy_leg=position.matching_intent.strategy_leg if position.matching_intent else None,
+        regime_label=position.matching_intent.regime_label if position.matching_intent else None,
+        route_decision=position.matching_intent.route_decision if position.matching_intent else None,
         algo_protection_count=position.algo_protection_count,
         algo_orders=[dict(order) for order in position.algo_orders],
         matching_intent_event_id=position.matching_intent.event_id if position.matching_intent else None,

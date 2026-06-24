@@ -282,9 +282,19 @@ def apply_adaptive_sizing_governor(
         _float_or_none(config.get("BFA_ADAPTIVE_SIZING_MIN_MULTIPLIER")) or 0.25,
         _float_or_none(config.get("BFA_ADAPTIVE_SIZING_MAX_MULTIPLIER")) or 1.15,
     )
-    expansion_allowed = components.get("signal_quality", 0.0) >= 1.0 and multiplier >= 0.95
+    guard_downsize_active = (
+        components.get("outcome_health", 1.0) < 1.0
+        and any("_downsize:" in warning for warning in component_warnings)
+    )
+    expansion_allowed = (
+        components.get("signal_quality", 0.0) >= 1.0
+        and multiplier >= 0.95
+        and not guard_downsize_active
+    )
     if expansion_allowed:
         target_notional = min(hard_cap, max(base_notional, hard_cap * multiplier))
+    elif guard_downsize_active:
+        target_notional = min(hard_cap, base_notional * multiplier)
     else:
         target_notional = min(base_notional, hard_cap * multiplier)
     min_executable = _positive_float(features.get("min_executable_notional"))
@@ -315,6 +325,7 @@ def apply_adaptive_sizing_governor(
         {
             "raw_multiplier": round(raw_multiplier, 8),
             "bounded_multiplier": round(multiplier, 8),
+            "guard_downsize_active": guard_downsize_active,
             "expansion_allowed": expansion_allowed,
             "target_notional_before_rounding_usdt": target_notional,
             "min_executable_notional": min_executable,
@@ -413,6 +424,7 @@ def _governor_components(
             config,
             price_basis=price_basis,
             liquidation=liquidation,
+            setup_payload=setup_payload,
             stop_distance_percent=stop_distance_percent,
             max_leverage=max_leverage,
             warnings=warnings,
@@ -498,6 +510,7 @@ def _stop_liquidation_multiplier(
     *,
     price_basis: Mapping[str, Any],
     liquidation: Mapping[str, Any],
+    setup_payload: Mapping[str, Any],
     stop_distance_percent: float | None,
     max_leverage: float,
     warnings: list[str],
@@ -507,9 +520,12 @@ def _stop_liquidation_multiplier(
         warnings.append("adaptive_missing_stop_distance")
         return 0.75
     min_stop = _float_or_none(config.get("BFA_HIGH_LEVERAGE_MIN_STOP_DISTANCE_PERCENT")) or 0.35
-    if stop_distance_percent < min_stop:
+    micro_grid = _is_micro_grid_setup(setup_payload, price_basis)
+    if stop_distance_percent < min_stop and not micro_grid:
         blocks.append("stop_distance_too_tight_for_high_leverage")
         return 0.0
+    if stop_distance_percent < min_stop and micro_grid:
+        warnings.append("adaptive_micro_grid_tight_stop_allowed")
     threshold = _float_or_none(config.get("BFA_HIGH_LEVERAGE_THRESHOLD")) or 8.0
     if max_leverage < threshold:
         return 1.0
@@ -532,6 +548,14 @@ def _stop_liquidation_multiplier(
         warnings.append("adaptive_low_risk_reward_downsize")
         return 0.80
     return 1.0
+
+
+def _is_micro_grid_setup(setup_payload: Mapping[str, Any], price_basis: Mapping[str, Any]) -> bool:
+    if str(setup_payload.get("regime") or "").startswith("micro_grid"):
+        return True
+    if str(price_basis.get("profile") or "") == "micro_grid_v5f_live":
+        return True
+    return any(str(reason) == "strategy_leg:micro_grid" for reason in setup_payload.get("reasons", []) or [])
 
 
 def _manual_margin_multiplier(
@@ -579,18 +603,62 @@ def _outcome_health_multiplier(
     symbol_blocks = getattr(paper_guard, "symbol_blocks", {}) or {}
     side_blocks = getattr(paper_guard, "side_blocks", {}) or {}
     if symbol in symbol_blocks:
+        mode = _guard_mode_for(paper_guard, "symbol", symbol)
+        if mode == "observe":
+            warnings.append(f"forward_paper_symbol_observed:{symbol}")
+            return 1.0
+        if mode == "downsize":
+            warnings.append(f"forward_paper_symbol_downsize:{symbol}")
+            return _clip(
+                _float_or_none(getattr(paper_guard, "symbol_downsize_multiplier", None)) or 0.65,
+                0.1,
+                1.0,
+            )
         blocks.append(f"forward_paper_symbol_block:{symbol}")
         return 0.0
     if side in side_blocks:
+        mode = _guard_mode_for(paper_guard, "side", side)
+        if mode == "observe":
+            warnings.append(f"forward_paper_side_observed:{side}")
+            return 1.0
+        if mode == "downsize":
+            warnings.append(f"forward_paper_side_downsize:{side}")
+            return _clip(
+                _float_or_none(getattr(paper_guard, "side_downsize_multiplier", None)) or 0.65,
+                0.1,
+                1.0,
+            )
         blocks.append(f"forward_paper_side_block:{side}")
         return 0.0
     factor_blocks = getattr(paper_guard, "factor_blocks", {}) or {}
     setup_reasons = {str(reason) for reason in setup_payload.get("reasons", [])}
     blocked_factors = sorted(setup_reasons & set(factor_blocks))
     if blocked_factors:
+        mode = str(getattr(paper_guard, "factor_mode", "block") or "block").lower()
+        if mode == "observe":
+            warnings.extend(f"forward_paper_factor_observed:{reason}" for reason in blocked_factors)
+            return 1.0
+        if mode == "downsize":
+            warnings.extend(f"forward_paper_factor_downsize:{reason}" for reason in blocked_factors)
+            return _clip(
+                _float_or_none(getattr(paper_guard, "factor_downsize_multiplier", None)) or 0.65,
+                0.1,
+                1.0,
+            )
         blocks.extend(f"forward_paper_factor_block:{reason}" for reason in blocked_factors)
         return 0.0
     return 1.0
+
+
+def _guard_mode_for(paper_guard: Any, group: str, name: str) -> str:
+    method_name = f"{group}_mode_for"
+    method = getattr(paper_guard, method_name, None)
+    if callable(method):
+        value = method(name)
+    else:
+        value = getattr(paper_guard, f"{group}_mode", "block")
+    normalized = str(value or "block").strip().lower()
+    return normalized if normalized in {"block", "downsize", "observe"} else "block"
 
 
 def _portfolio_remaining_margin(config: AppConfig, risk_state: RiskState | None) -> float | None:

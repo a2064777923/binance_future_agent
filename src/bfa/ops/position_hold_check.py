@@ -26,6 +26,9 @@ class PositionHoldIntent:
     stop_price: float | None = None
     target_price: float | None = None
     hold_time_minutes: int | None = None
+    strategy_leg: str | None = None
+    regime_label: str | None = None
+    route_decision: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +42,9 @@ class PositionHoldIntent:
             "stop_price": self.stop_price,
             "target_price": self.target_price,
             "hold_time_minutes": self.hold_time_minutes,
+            "strategy_leg": self.strategy_leg,
+            "regime_label": self.regime_label,
+            "route_decision": self.route_decision,
         }
 
 
@@ -317,7 +323,7 @@ def _time_exit_item_reasons(position: PositionHoldItem) -> list[str]:
     reasons: list[str] = []
     if not position.overdue:
         reasons.append("hold_time_not_expired")
-    if position.algo_protection_count <= 0:
+    if position.algo_protection_count < 2:
         reasons.append("active_position_without_confirmed_algo_protection")
     if position.matching_intent is None:
         reasons.append("active_position_without_matching_submitted_intent")
@@ -356,11 +362,11 @@ def _position_item(
     position_side = _position_side(position, amount)
     intent = _latest_unclosed_submitted_intent(connection, symbol=symbol, position_side=position_side)
     matching_algo_orders = _matching_algo_orders(open_algo_orders, symbol=symbol, position_side=position_side)
-    protection_count = len(matching_algo_orders)
+    protection_count = _protective_order_type_count(matching_algo_orders)
     reasons: list[str] = []
     elapsed: float | None = None
     overdue = False
-    if protection_count <= 0:
+    if protection_count < 2:
         reasons.append("active_position_without_confirmed_algo_protection")
     if intent is None:
         reasons.append("active_position_without_matching_submitted_intent")
@@ -404,7 +410,7 @@ def _latest_unclosed_submitted_intent(
     ).fetchall()
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
-        if payload.get("status") != "submitted":
+        if payload.get("status") not in _OPEN_POSITION_INTENT_STATUSES:
             continue
         event_id = int(row["event_id"])
         if _has_closed_outcome_for_event(connection, event_id):
@@ -416,6 +422,7 @@ def _latest_unclosed_submitted_intent(
             continue
         metadata = intent_payload.get("metadata")
         metadata_payload = metadata if isinstance(metadata, Mapping) else {}
+        reason_codes = _string_list(intent_payload.get("reason_codes"))
         return PositionHoldIntent(
             event_id=event_id,
             occurred_at=str(row["occurred_at"]),
@@ -427,6 +434,9 @@ def _latest_unclosed_submitted_intent(
             stop_price=_float_or_none(intent_payload.get("stop_price")),
             target_price=_float_or_none(intent_payload.get("target_price")),
             hold_time_minutes=_int_or_none(metadata_payload.get("hold_time_minutes")),
+            strategy_leg=_first_text(metadata_payload.get("strategy_leg"), _reason_value(reason_codes, "strategy_leg")),
+            regime_label=_first_text(metadata_payload.get("regime_label"), _reason_value(reason_codes, "regime_label")),
+            route_decision=_first_text(metadata_payload.get("route_decision"), _reason_value(reason_codes, "route_decision")),
         )
     return None
 
@@ -444,13 +454,21 @@ def _has_closed_outcome_for_event(connection: sqlite3.Connection, event_id: int)
     return row is not None
 
 
+_OPEN_POSITION_INTENT_STATUSES = {
+    "submitted",
+    "entry_order_pending",
+    "entry_order_partial_filled_protected",
+    "protective_order_failed_open",
+}
+
+
 def _matching_algo_order_count(
     open_algo_orders: list[Any],
     *,
     symbol: str,
     position_side: str | None,
 ) -> int:
-    return len(_matching_algo_orders(open_algo_orders, symbol=symbol, position_side=position_side))
+    return _protective_order_type_count(_matching_algo_orders(open_algo_orders, symbol=symbol, position_side=position_side))
 
 
 def _matching_algo_orders(
@@ -470,6 +488,19 @@ def _matching_algo_orders(
             continue
         matches.append(dict(order))
     return matches
+
+
+def _protective_order_type_count(open_algo_orders: list[dict[str, Any]]) -> int:
+    types = set()
+    for order in open_algo_orders:
+        order_type = str(order.get("type") or order.get("orderType") or "").upper()
+        if "TAKE_PROFIT" in order_type:
+            types.add("TAKE_PROFIT")
+        elif "STOP" in order_type:
+            types.add("STOP")
+    if not types and len(open_algo_orders) >= 2:
+        return 2
+    return len(types)
 
 
 def _position_side(position: Mapping[str, Any], amount: float) -> str | None:
@@ -514,6 +545,28 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        text = str(value).strip() if value is not None else ""
+        if text:
+            return text
+    return None
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _reason_value(reason_codes: list[str], prefix: str) -> str | None:
+    marker = f"{prefix}:"
+    for reason in reason_codes:
+        if reason.startswith(marker):
+            return reason.split(":", 1)[1].strip() or None
+    return None
 
 
 def _float_or_zero(value: Any) -> float:

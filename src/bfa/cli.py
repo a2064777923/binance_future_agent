@@ -41,6 +41,7 @@ from bfa.narrative.collector import NarrativeCollectionRunner
 from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.health import run_health_checks
+from bfa.ops.kill_switch import build_kill_switch_clearance_report
 from bfa.ops.exposure_clearance import build_exposure_clearance_report
 from bfa.ops.exposure_status import build_exposure_status_report
 from bfa.ops.forward_paper import run_forward_paper
@@ -57,13 +58,17 @@ from bfa.ops.operator_resume_decision import (
     build_operator_resume_decision_packet,
     build_operator_resume_decision_packet_from_readiness,
 )
+from bfa.ops.pending_limit_watchdog import build_pending_limit_watchdog_report
 from bfa.ops.pilot_learning_packet import build_pilot_learning_packet_report
+from bfa.ops.post_trade_path import build_post_trade_path_report
 from bfa.ops.position_adjustment import (
     build_position_adjustment_execute_report,
     build_position_adjustment_plan_report,
 )
 from bfa.ops.position_hold_check import build_position_hold_check_report, build_time_exit_plan_report
 from bfa.ops.position_review import build_position_review_report
+from bfa.ops.position_sentinel import build_position_sentinel_report
+from bfa.ops.db_maintenance import build_db_maintenance_report
 from bfa.ops.risk_profile import apply_risk_profile, build_risk_profile_plan
 from bfa.ops.risk_change_check import build_risk_change_check_report
 from bfa.ops.resume_check import build_resume_check_report
@@ -462,6 +467,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="with --reconcile, persist idempotent fills/outcomes for closed trades",
     )
 
+    post_trade_path = ops_subparsers.add_parser(
+        "post-trade-path",
+        help="read-only post-entry kline path attribution for live outcomes",
+    )
+    post_trade_path.add_argument("--env-file", help="optional env file to load before environment overrides")
+    post_trade_path.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    post_trade_path.add_argument("--symbol", help="optional symbol filter, e.g. SOLUSDT")
+    post_trade_path.add_argument("--interval", default="1m", help="post-entry kline interval")
+    post_trade_path.add_argument("--lookahead-minutes", type=int, default=120, help="minutes after entry to inspect")
+    post_trade_path.add_argument("--latest-limit", type=int, default=20, help="number of recent live outcomes to inspect")
+
     live_cycle_explainability = ops_subparsers.add_parser(
         "live-cycle-explainability",
         help="read-only explanation of recent live trade and no-trade cycles with ledger cadence",
@@ -845,6 +861,60 @@ def _build_parser() -> argparse.ArgumentParser:
         help="fail closed when the live systemd service is currently active",
     )
 
+    position_sentinel = ops_subparsers.add_parser(
+        "position-sentinel",
+        help="fast active-position sentinel for protective backfill and reversal-aware trailing",
+    )
+    position_sentinel.add_argument("--env-file", help="optional env file to load before environment overrides")
+    position_sentinel.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    position_sentinel.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    position_sentinel.add_argument(
+        "--execute",
+        action="store_true",
+        help="execute allowed sentinel actions when BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true",
+    )
+
+    pending_limit_watchdog = ops_subparsers.add_parser(
+        "pending-limit-watchdog",
+        help="fast pending-limit fill reconciler for immediate protective TP/SL backfill",
+    )
+    pending_limit_watchdog.add_argument("--env-file", help="optional env file to load before environment overrides")
+    pending_limit_watchdog.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    pending_limit_watchdog.add_argument("--now", help="optional ISO timestamp for deterministic checks")
+    pending_limit_watchdog.add_argument(
+        "--max-items",
+        type=int,
+        help="maximum unresolved pending limit intents to check this run",
+    )
+    pending_limit_watchdog.add_argument(
+        "--execute",
+        action="store_true",
+        help="backfill protective orders when BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED=true",
+    )
+
+    kill_switch_clearance = ops_subparsers.add_parser(
+        "kill-switch-clearance",
+        help="preview or clear kill-switch only after all exchange positions have SL and TP",
+    )
+    kill_switch_clearance.add_argument("--env-file", help="optional env file to load before environment overrides")
+    kill_switch_clearance.add_argument("--execute", action="store_true", help="archive the active kill-switch if eligible")
+
+    db_maintenance = ops_subparsers.add_parser(
+        "db-maintenance",
+        help="preview or apply SQLite market snapshot and raw-feed retention maintenance",
+    )
+    db_maintenance.add_argument("--env-file", help="optional env file to load before environment overrides")
+    db_maintenance.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
+    db_maintenance.add_argument("--retention-hours", type=float, help="market snapshot retention window")
+    db_maintenance.add_argument("--raw-feed-dir", help="raw-feed directory; defaults to BFA_RAW_FEED_DIR")
+    db_maintenance.add_argument("--raw-feed-retention-hours", type=float, help="raw-feed gzip retention window")
+    db_maintenance.add_argument("--batch-size", type=int, help="rows per SQLite retention delete batch")
+    db_maintenance.add_argument("--max-delete-rows", type=int, help="maximum market snapshot rows to delete per run")
+    db_maintenance.add_argument("--clean-raw-feed", action="store_true", help="include raw-feed retention cleanup")
+    db_maintenance.add_argument("--execute", action="store_true", help="delete old rows/files; omit for dry-run preview")
+    db_maintenance.add_argument("--vacuum", action="store_true", help="run VACUUM after DB retention deletion")
+    db_maintenance.add_argument("--now", help="optional ISO timestamp for deterministic previews")
+
     time_exit_plan = ops_subparsers.add_parser(
         "time-exit-plan",
         help="read-only plan for closing positions that exceeded AI hold-time guidance",
@@ -1112,7 +1182,7 @@ def _build_parser() -> argparse.ArgumentParser:
     matrix_suite.add_argument("--step-bars", type=int, default=36, help="bars to move between windows")
     matrix_suite.add_argument(
         "--variants",
-        default="quant_setup_selective,quant_setup_selective_guarded,quant_setup_loss_recalibrated",
+        default="quant_setup_high_frequency_flow_guarded,quant_setup_high_frequency_guarded,quant_setup_selective,quant_setup_selective_guarded,quant_setup_loss_recalibrated",
         help="comma-separated variants; see backtest run --help for names",
     )
     matrix_suite.add_argument(
@@ -1671,6 +1741,18 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 1 if report.status == "ledger_blocked" else 0
+    if args.ops_command == "post-trade-path":
+        report = build_post_trade_path_report(
+            config,
+            client=_build_client(config, client_factory),
+            db_path=args.db or config.get("BFA_DB_PATH"),
+            symbol=args.symbol,
+            interval=args.interval,
+            lookahead_minutes=args.lookahead_minutes,
+            latest_limit=args.latest_limit,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.status == "path_ready" else 1
     if args.ops_command == "live-cycle-explainability":
         report = build_live_cycle_explainability_report(
             config,
@@ -1941,6 +2023,55 @@ def _run_ops(
         )
         print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
         return 0 if report.adjustment_executed else 1
+    if args.ops_command == "position-sentinel":
+        report = build_position_sentinel_report(
+            config,
+            db_path=args.db,
+            now=args.now,
+            signed_client=_build_signed_client(config, signed_client_factory),
+            market_client=_build_client(config, client_factory),
+            execute=args.execute,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.status not in {"sentinel_blocked", "sentinel_execution_blocked"} else 1
+    if args.ops_command == "pending-limit-watchdog":
+        report = build_pending_limit_watchdog_report(
+            config,
+            db_path=args.db,
+            checked_at=args.now,
+            max_items=args.max_items,
+            signed_client=_build_signed_client(config, signed_client_factory),
+            execute=args.execute,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.status not in {
+            "pending_limit_watchdog_blocked",
+            "pending_limit_watchdog_protection_failed",
+        } else 1
+    if args.ops_command == "kill-switch-clearance":
+        report = build_kill_switch_clearance_report(
+            config,
+            signed_client=_build_signed_client(config, signed_client_factory),
+            execute=args.execute,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0 if report.eligible or not report.kill_switch_active else 1
+    if args.ops_command == "db-maintenance":
+        report = build_db_maintenance_report(
+            config,
+            db_path=args.db,
+            retention_hours=args.retention_hours,
+            execute=args.execute,
+            vacuum=args.vacuum,
+            batch_size=args.batch_size,
+            max_delete_rows=args.max_delete_rows,
+            raw_feed_dir=args.raw_feed_dir,
+            raw_feed_retention_hours=args.raw_feed_retention_hours,
+            clean_raw_feed=args.clean_raw_feed,
+            now=args.now,
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True), file=stdout)
+        return 0
     if args.ops_command == "time-exit-plan":
         report = build_time_exit_plan_report(
             config,

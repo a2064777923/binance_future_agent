@@ -70,11 +70,15 @@ def intent_from_ai_decision(
         leverage=int(risk_limits.max_leverage),
         mode=mode.value,
         decided_at=decided_at,
+        order_type=_entry_order_type(decision.reasons),
+        time_in_force=_entry_time_in_force(decision.reasons),
+        limit_wait_seconds=_entry_limit_wait_seconds(decision.reasons),
         reason_codes=list(decision.reasons),
         metadata={
             "ai_confidence": decision.confidence,
             "ai_side": decision.side,
             "hold_time_minutes": decision.hold_time_minutes,
+            **_route_metadata_from_reasons(decision.reasons),
         },
     )
     if filter_rejections:
@@ -111,10 +115,12 @@ def evaluate_risk(
         reasons.append("daily_loss_cap_reached")
     if not multi_position_enabled(config) and risk_state.active_positions >= 1:
         reasons.append("multi_position_disabled")
-    if risk_state.active_positions >= risk_limits.max_open_positions:
+    if risk_state.active_positions >= _effective_max_open_positions(intent, risk_limits, config):
         reasons.append("max_open_positions_reached")
     if _duplicate_exposure(intent, risk_state):
         reasons.append("duplicate_symbol_direction_exposure")
+    if _same_symbol_opposite_exposure(intent, risk_state) and not _same_symbol_opposite_positions_enabled(config):
+        reasons.append("same_symbol_opposite_exposure_blocked")
     if _portfolio_margin_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_MARGIN_USDT"):
         reasons.append("portfolio_margin_cap_reached")
     portfolio_margin_fraction_cap = _float_config(config, "BFA_ACCOUNT_CAPITAL_USDT") * _float_config(
@@ -132,10 +138,7 @@ def evaluate_risk(
         warnings.append("manual_margin_pressure_included")
     if _portfolio_notional_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_NOTIONAL_USDT"):
         reasons.append("portfolio_notional_cap_reached")
-    if _same_direction_notional_after_entry(intent, risk_state) > _float_config(
-        config,
-        "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT",
-    ):
+    if _same_direction_notional_after_entry(intent, risk_state) > _effective_same_direction_notional_cap(intent, config):
         reasons.append("same_direction_notional_cap_reached")
     if risk_state.cooldown_until and now < risk_state.cooldown_until:
         reasons.append("cooldown_active")
@@ -169,6 +172,51 @@ def _order_side(decision: AiTradeDecision) -> str:
     raise ValueError(f"unsupported trade side: {decision.side}")
 
 
+def _entry_order_type(reasons: list[str]) -> str:
+    values = _reason_values(reasons)
+    order_type = values.get("entry_order_type", "market").strip().upper()
+    if order_type == "LIMIT":
+        return "LIMIT"
+    return "MARKET"
+
+
+def _entry_time_in_force(reasons: list[str]) -> str | None:
+    if _entry_order_type(reasons) != "LIMIT":
+        return None
+    values = _reason_values(reasons)
+    return values.get("entry_time_in_force", "GTX").strip().upper() or "GTX"
+
+
+def _entry_limit_wait_seconds(reasons: list[str]) -> int | None:
+    if _entry_order_type(reasons) != "LIMIT":
+        return None
+    values = _reason_values(reasons)
+    try:
+        parsed = int(float(values.get("limit_entry_max_wait_seconds", "45")))
+    except (TypeError, ValueError):
+        parsed = 45
+    return max(1, min(parsed, 90))
+
+
+def _reason_values(reasons: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for reason in reasons:
+        if ":" not in reason:
+            continue
+        key, value = reason.split(":", 1)
+        values[key] = value
+    return values
+
+
+def _route_metadata_from_reasons(reasons: list[str]) -> dict[str, str]:
+    values = _reason_values(reasons)
+    return {
+        key: str(values[key]).strip()
+        for key in ("strategy_leg", "regime_label", "route_decision")
+        if key in values and str(values[key]).strip()
+    }
+
+
 def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
     for exposure in risk_state.active_exposures:
@@ -177,6 +225,48 @@ def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
         if symbol == intent.symbol.upper() and direction == intended_direction:
             return True
     return False
+
+
+def _same_symbol_opposite_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
+    intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+    opposite_direction = "SHORT" if intended_direction == "LONG" else "LONG"
+    for exposure in risk_state.active_exposures:
+        symbol = str(exposure.get("symbol", "")).upper()
+        direction = str(exposure.get("direction", "")).upper()
+        if symbol == intent.symbol.upper() and direction == opposite_direction:
+            return True
+    return False
+
+
+def _same_symbol_opposite_positions_enabled(config: AppConfig) -> bool:
+    return str(config.get("BFA_ALLOW_SAME_SYMBOL_OPPOSITE_POSITIONS")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _effective_max_open_positions(intent: OrderIntent, risk_limits: RiskLimits, config: AppConfig) -> int:
+    max_open = int(risk_limits.max_open_positions)
+    if _is_micro_grid_intent(intent):
+        max_open += max(_int_config(config, "BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS"), 0)
+    return max_open
+
+
+def _effective_same_direction_notional_cap(intent: OrderIntent, config: AppConfig) -> float:
+    cap = _float_config(config, "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT")
+    if _is_micro_grid_intent(intent):
+        cap += max(_float_config(config, "BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT"), 0.0)
+    return cap
+
+
+def _is_micro_grid_intent(intent: OrderIntent) -> bool:
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    leg = str(metadata.get("strategy_leg") or "").strip().lower()
+    regime = str(metadata.get("regime_label") or "").strip().upper()
+    reasons = [str(reason).strip().lower() for reason in intent.reason_codes]
+    return leg == "micro_grid" or regime == "RANGE" or any(reason == "strategy_leg:micro_grid" for reason in reasons)
 
 
 def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
@@ -198,6 +288,13 @@ def _same_direction_notional_after_entry(intent: OrderIntent, risk_state: RiskSt
 
 def _float_config(config: AppConfig, key: str) -> float:
     return _float_or_zero(config.get(key))
+
+
+def _int_config(config: AppConfig, key: str) -> int:
+    try:
+        return int(config.get(key))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _float_or_zero(value) -> float:

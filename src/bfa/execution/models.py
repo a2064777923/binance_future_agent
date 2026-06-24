@@ -19,6 +19,8 @@ class OrderIntent:
     mode: str
     decided_at: str
     order_type: str = "MARKET"
+    time_in_force: str | None = None
+    limit_wait_seconds: int | None = None
     reduce_only: bool = False
     reason_codes: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -43,6 +45,8 @@ class OrderIntent:
             "mode": self.mode,
             "decided_at": self.decided_at,
             "order_type": self.order_type,
+            "time_in_force": self.time_in_force,
+            "limit_wait_seconds": self.limit_wait_seconds,
             "reduce_only": self.reduce_only,
             "reason_codes": list(self.reason_codes),
             "metadata": dict(self.metadata),

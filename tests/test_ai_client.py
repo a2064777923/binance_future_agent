@@ -70,6 +70,11 @@ class AiClientTests(unittest.TestCase):
         self.assertEqual(response.response_id, "resp_1")
         self.assertEqual(json.loads(response.output_text)["decision"], "pass")
 
+    def test_decision_instructions_require_adversarial_entry_and_stop_audit(self):
+        self.assertIn("adversarial overlay", DECISION_INSTRUCTIONS)
+        self.assertIn("entry/stop-quality risk", DECISION_INSTRUCTIONS)
+        self.assertIn("price below VWAP with EMA trend down", DECISION_INSTRUCTIONS)
+
     def test_create_decision_honors_short_timeout_and_token_cap(self):
         transport = FakeTransport((200, {"id": "resp_1", "output_text": '{"decision":"pass"}'}, {}))
         client = OpenAIResponsesClient(

@@ -27,6 +27,9 @@ class ForwardPaperGuardConfig:
     min_factor_outcomes: int = 30
     factor_min_loss_usdt: float = 3.0
     factor_max_win_rate: float = 0.25
+    factor_mode: str = "block"
+    factor_downsize_multiplier: float = 0.65
+    factor_exempt_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -66,31 +69,50 @@ class ForwardPaperGuard:
     reasons: list[str]
     variant: str
     interval: str
+    factor_mode: str = "block"
+    factor_downsize_multiplier: float = 0.65
+    symbol_mode: str = "block"
+    symbol_downsize_multiplier: float = 0.65
+    side_mode: str = "block"
+    side_downsize_multiplier: float = 0.65
+    factor_exempt_reasons: tuple[str, ...] = ()
+    reason_prefix: str = "forward_paper"
     summary: dict[str, Any] = field(default_factory=dict)
     symbol_blocks: dict[str, GuardGroupStats] = field(default_factory=dict)
     side_blocks: dict[str, GuardGroupStats] = field(default_factory=dict)
     factor_blocks: dict[str, GuardGroupStats] = field(default_factory=dict)
+    symbol_modes: dict[str, str] = field(default_factory=dict)
+    side_modes: dict[str, str] = field(default_factory=dict)
 
     @property
     def active(self) -> bool:
         return self.enabled and self.status == "active"
 
     def blocks_symbol(self, symbol: str) -> bool:
-        return symbol.upper() in self.symbol_blocks
+        normalized = symbol.upper()
+        return normalized in self.symbol_blocks and self.symbol_mode_for(normalized) == "block"
+
+    def symbol_mode_for(self, symbol: str) -> str:
+        return _guard_mode(self.symbol_modes.get(symbol.upper()) or self.symbol_mode)
+
+    def side_mode_for(self, side: str) -> str:
+        return _guard_mode(self.side_modes.get(side.lower()) or self.side_mode)
 
     def symbol_reasons(self, symbol: str) -> list[str]:
         normalized = symbol.upper()
         if normalized not in self.symbol_blocks:
             return []
-        return [f"forward_paper_symbol_block:{normalized}"]
+        return [f"{self.reason_prefix}_symbol_block:{normalized}"]
 
     def setup_profile_overrides(self) -> dict[str, Any]:
         if not self.active:
             return {}
         overrides: dict[str, Any] = {}
         if self.side_blocks:
-            overrides["disabled_sides"] = sorted(self.side_blocks)
-        if self.factor_blocks:
+            disabled_sides = sorted(side for side in self.side_blocks if self.side_mode_for(side) == "block")
+            if disabled_sides:
+                overrides["disabled_sides"] = disabled_sides
+        if self.factor_blocks and self.factor_mode == "block":
             overrides["blocked_factor_reasons"] = sorted(self.factor_blocks)
         return overrides
 
@@ -102,10 +124,20 @@ class ForwardPaperGuard:
             "reasons": list(self.reasons),
             "variant": self.variant,
             "interval": self.interval,
+            "factor_mode": self.factor_mode,
+            "factor_downsize_multiplier": self.factor_downsize_multiplier,
+            "symbol_mode": self.symbol_mode,
+            "symbol_downsize_multiplier": self.symbol_downsize_multiplier,
+            "side_mode": self.side_mode,
+            "side_downsize_multiplier": self.side_downsize_multiplier,
+            "factor_exempt_reasons": list(self.factor_exempt_reasons),
+            "reason_prefix": self.reason_prefix,
             "summary": dict(self.summary),
             "symbol_blocks": {key: value.to_dict() for key, value in self.symbol_blocks.items()},
             "side_blocks": {key: value.to_dict() for key, value in self.side_blocks.items()},
             "factor_blocks": {key: value.to_dict() for key, value in self.factor_blocks.items()},
+            "symbol_modes": dict(self.symbol_modes),
+            "side_modes": dict(self.side_modes),
         }
 
 
@@ -125,6 +157,9 @@ def guard_config_from_app(config) -> ForwardPaperGuardConfig:
         min_factor_outcomes=int(config.get("BFA_FORWARD_PAPER_GUARD_MIN_FACTOR_OUTCOMES")),
         factor_min_loss_usdt=float(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_MIN_LOSS_USDT")),
         factor_max_win_rate=float(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_MAX_WIN_RATE")),
+        factor_mode=(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_MODE") or "block").strip().lower(),
+        factor_downsize_multiplier=float(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_DOWNSIZE_MULTIPLIER")),
+        factor_exempt_reasons=tuple(_csv_values(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_EXEMPT_REASONS"))),
     )
 
 
@@ -174,6 +209,7 @@ def build_forward_paper_guard(
     factor_blocks = {
         name: stats
         for name, stats in factor_groups.items()
+        if name not in config.factor_exempt_reasons
         if _loss_block(
             stats,
             min_outcomes=config.min_factor_outcomes,
@@ -218,6 +254,49 @@ def merge_guard_profile(profile: Mapping[str, Any] | None, guard: ForwardPaperGu
     return merged
 
 
+def combine_guards(*guards: ForwardPaperGuard | None) -> ForwardPaperGuard | None:
+    active_guards = [guard for guard in guards if guard is not None and guard.active]
+    if not active_guards:
+        return next((guard for guard in guards if guard is not None), None)
+    if len(active_guards) == 1:
+        return active_guards[0]
+    symbol_blocks: dict[str, GuardGroupStats] = {}
+    side_blocks: dict[str, GuardGroupStats] = {}
+    factor_blocks: dict[str, GuardGroupStats] = {}
+    symbol_modes: dict[str, str] = {}
+    side_modes: dict[str, str] = {}
+    reasons: list[str] = []
+    summaries: dict[str, Any] = {}
+    for guard in active_guards:
+        symbol_blocks.update(guard.symbol_blocks)
+        side_blocks.update(guard.side_blocks)
+        factor_blocks.update(guard.factor_blocks)
+        symbol_modes.update({key: guard.symbol_mode_for(key) for key in guard.symbol_blocks})
+        side_modes.update({key: guard.side_mode_for(key) for key in guard.side_blocks})
+        reasons.extend(guard.reasons)
+        summaries[guard.reason_prefix] = guard.to_dict()
+    return ForwardPaperGuard(
+        status="active",
+        enabled=True,
+        reasons=_dedupe(reasons),
+        variant="+".join(guard.variant for guard in active_guards),
+        interval="+".join(guard.interval for guard in active_guards),
+        factor_mode="block",
+        factor_downsize_multiplier=min(guard.factor_downsize_multiplier for guard in active_guards),
+        symbol_mode="block",
+        symbol_downsize_multiplier=min(guard.symbol_downsize_multiplier for guard in active_guards),
+        side_mode="block",
+        side_downsize_multiplier=min(guard.side_downsize_multiplier for guard in active_guards),
+        reason_prefix="combined_guard",
+        summary={"guards": summaries},
+        symbol_blocks=symbol_blocks,
+        side_blocks=side_blocks,
+        factor_blocks=factor_blocks,
+        symbol_modes=symbol_modes,
+        side_modes=side_modes,
+    )
+
+
 def _guard(
     config: ForwardPaperGuardConfig,
     *,
@@ -234,6 +313,9 @@ def _guard(
         reasons=reasons,
         variant=config.variant,
         interval=config.interval,
+        factor_mode=config.factor_mode,
+        factor_downsize_multiplier=config.factor_downsize_multiplier,
+        factor_exempt_reasons=config.factor_exempt_reasons,
         summary=summary or {},
         symbol_blocks=symbol_blocks or {},
         side_blocks=side_blocks or {},
@@ -443,3 +525,20 @@ def _int_or_zero(value: Any) -> int:
 
 def _truthy(value: str) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _csv_values(value: str) -> list[str]:
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
+def _guard_mode(value: str | None) -> str:
+    normalized = str(value or "block").strip().lower()
+    return normalized if normalized in {"block", "downsize", "observe"} else "block"
+
+
+def _dedupe(values: Iterable[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped

@@ -749,6 +749,93 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(payload["exchange_evidence"]["account"]["available_balance"], "30")
 
+    def test_ops_pending_limit_watchdog_observes_filled_limit_without_execution(self):
+        class FakeSignedClient:
+            def __init__(self):
+                self.algo_orders = []
+
+            def query_order(self, **kwargs):
+                return {
+                    "symbol": kwargs.get("symbol"),
+                    "status": "FILLED",
+                    "executedQty": "0.2",
+                    "avgPrice": "100",
+                }
+
+            def position_risk(self, symbol=None):
+                return [
+                    {
+                        "symbol": symbol or "BTCUSDT",
+                        "positionAmt": "0.2",
+                        "positionSide": "LONG",
+                        "entryPrice": "100",
+                        "markPrice": "100.5",
+                    }
+                ]
+
+            def open_algo_orders(self, symbol=None):
+                return []
+
+            def new_algo_order(self, **kwargs):
+                self.algo_orders.append(kwargs)
+                return {"algoId": 1, **kwargs}
+
+        fake_signed = FakeSignedClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            try:
+                store = EventStore(connection)
+                persist_order_intent(
+                    store,
+                    intent=OrderIntent(
+                        symbol="BTCUSDT",
+                        side="BUY",
+                        quantity=0.2,
+                        notional_usdt=20.0,
+                        entry_price=100.0,
+                        stop_price=96.0,
+                        target_price=108.0,
+                        leverage=10,
+                        mode="live",
+                        decided_at="2026-06-20T09:00:00Z",
+                        order_type="LIMIT",
+                        time_in_force="GTX",
+                        metadata={"client_order_id": "bfa-btc-pending-1"},
+                    ),
+                    status="entry_order_pending",
+                    risk=RiskDecision(True, ["risk_accepted"]),
+                )
+            finally:
+                connection.close()
+
+            code, stdout, stderr = self.invoke(
+                "ops",
+                "pending-limit-watchdog",
+                "--db",
+                str(db_path),
+                "--now",
+                "2026-06-20T09:00:05Z",
+                env={
+                    "BFA_MODE": "live",
+                    "BFA_DB_PATH": str(db_path),
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                },
+                signed_client_factory=lambda _config: fake_signed,
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["schema"], "bfa_pending_limit_watchdog_v1")
+        self.assertEqual(payload["status"], "pending_limit_watchdog_action_ready")
+        self.assertFalse(payload["execution_enabled"])
+        self.assertFalse(payload["action_taken"])
+        self.assertEqual(payload["items"][0]["status"], "filled_unprotected")
+        self.assertEqual(fake_signed.algo_orders, [])
+
     def test_ops_trade_trace_reconstructs_decision_flow(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2397,6 +2484,82 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(payload["config"]["setup_profile"]["name"], "selective")
 
+    def test_backtest_quant_setup_high_frequency_guarded_variant_emits_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset = root / "klines.json"
+            rows = []
+            price = 100.0
+            closes = [102.0, 101.0, 103.0, 102.0, 104.0, 103.0, 105.0, 106.0] * 3
+            for index, close in enumerate(closes):
+                rows.append(
+                    test_kline(
+                        1_700_000_000_000 + index * 300_000,
+                        open_price=str(price),
+                        high=str(max(price, close) * 1.012),
+                        low=str(min(price, close) * 0.997),
+                        close=str(close),
+                    )
+                )
+                price = close
+            dataset.write_text(
+                json.dumps({"schema": "bfa_klines_v1", "interval": "5m", "symbols": {"BTCUSDT": rows}}),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "run",
+                "--input",
+                str(dataset),
+                "--variant",
+                "quant_setup_high_frequency_guarded",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["config"]["setup_profile"]["name"], "high_frequency_guarded")
+        self.assertTrue(payload["config"]["trailing_stop_enabled"])
+
+    def test_backtest_quant_setup_high_frequency_flow_guarded_variant_emits_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dataset = root / "klines.json"
+            rows = []
+            price = 100.0
+            closes = [102.0, 101.0, 103.0, 102.0, 104.0, 103.0, 105.0, 106.0] * 3
+            for index, close in enumerate(closes):
+                rows.append(
+                    test_kline(
+                        1_700_000_000_000 + index * 300_000,
+                        open_price=str(price),
+                        high=str(max(price, close) * 1.012),
+                        low=str(min(price, close) * 0.997),
+                        close=str(close),
+                    )
+                )
+                price = close
+            dataset.write_text(
+                json.dumps({"schema": "bfa_klines_v1", "interval": "5m", "symbols": {"BTCUSDT": rows}}),
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = self.invoke(
+                "backtest",
+                "run",
+                "--input",
+                str(dataset),
+                "--variant",
+                "quant_setup_high_frequency_flow_guarded",
+            )
+
+        payload = json.loads(stdout)
+        self.assertEqual(code, 0)
+        self.assertEqual(stderr, "")
+        self.assertEqual(payload["config"]["setup_profile"]["name"], "high_frequency_flow_guarded")
+        self.assertTrue(payload["config"]["trailing_stop_enabled"])
+
     def test_backtest_quant_setup_selective_guarded_variant_emits_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2518,8 +2681,6 @@ class CliTests(unittest.TestCase):
                 "8",
                 "--step-bars",
                 "4",
-                "--variants",
-                "quant_setup_selective,quant_setup_loss_recalibrated",
                 "--universe-presets",
                 "broad,momentum",
                 "--output",
@@ -2533,6 +2694,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(stderr, "")
         self.assertEqual(payload["schema"], "bfa_hot_backtest_matrix_suite_v1")
         self.assertEqual([item["preset"] for item in payload["matrices"]], ["broad", "momentum"])
+        self.assertIn("quant_setup_high_frequency_flow_guarded", payload["suite_config"]["variants"])
+        self.assertIn("quant_setup_high_frequency_flow_guarded", payload["promotion"]["variants"])
+        self.assertIn("quant_setup_high_frequency_guarded", payload["suite_config"]["variants"])
+        self.assertIn("quant_setup_high_frequency_guarded", payload["promotion"]["variants"])
         self.assertIn("quant_setup_loss_recalibrated", payload["promotion"]["variants"])
         self.assertTrue(wrote_output)
 
