@@ -186,6 +186,20 @@ class MicroGridProfile:
     # width gate also adapts: low vol demands a tighter minimum width
     vol_regime_low_min_width_mult: float = 0.6
     vol_regime_high_max_width_mult: float = 1.3
+    # --- dynamic spike-depth entry prediction (偵察 + 計算掛單點位) ---
+    # Instead of posting at a fixed fraction of the span, scout recent spike
+    # depth (max excursion from local mean over a lookback) and post the
+    # passive entry at that predicted depth. Volatility clusters (lag-1 autocorr
+    # ~0.36 on real data), so recent spike depth is a usable predictor of where
+    # the next wick will reach. This lets the leg挂深一點 when the market is
+    # spiking and挂淺/不做 when it is dead.
+    spike_depth_entry_enabled: bool = True
+    spike_depth_lookback_seconds: int = 300  # scout last 5 min of spike depth
+    spike_depth_min_percent: float = 0.15   # below this the market is too dead to bother
+    spike_depth_max_percent: float = 4.0    # cap to avoid posting absurdly deep
+    spike_depth_entry_fraction: float = 0.85  # post at 85% of predicted depth (don't catch the exact tip)
+    spike_depth_stop_fraction: float = 1.3   # stop beyond the predicted depth
+    spike_depth_target_fraction: float = 0.5  # target: capture half the spike back toward center
     trailing_activate_fraction: float = 2.20
     trailing_lock_fraction: float = 0.35
     trailing_giveback_fraction: float = 0.90
@@ -289,6 +303,9 @@ class MicroGridState:
     bollinger_width_percent: float = 0.0
     reservation_price: float = 0.0
     reservation_skew_percent: float = 0.0
+    # scouted recent spike depth (max excursion from local mean, %), used by
+    # the dynamic spike-depth entry predictor to post at predicted wick depth.
+    recent_spike_depth_percent: float = 0.0
     long_entry_edge_fraction: float = 0.04
     short_entry_edge_fraction: float = 0.04
     long_stop_span_fraction: float = 0.20
@@ -1528,6 +1545,7 @@ def build_micro_grid_state(
         long_pullback_quality=float(pullback["long_pullback_quality"]),
         short_pullback_quality=float(pullback["short_pullback_quality"]),
         pullback_model_reason=str(pullback["pullback_model_reason"]),
+        recent_spike_depth_percent=recent_spike_depth_percent(structure_window, profile),
     )
     return state, []
 
@@ -1567,6 +1585,33 @@ def state_rejection_reasons(state: MicroGridState, profile: MicroGridProfile) ->
     if state.trend_pause:
         reasons.append(f"trend_pause_{state.trend_direction}")
     return reasons
+
+
+def recent_spike_depth_percent(window: list[BacktestBar], profile: "MicroGridProfile") -> float:
+    """Scout the max price excursion from local mean over the lookback.
+
+    This is the 偵察 step: measure how deep recent wicks reached, so the entry
+    can be posted at that predicted depth instead of a fixed span fraction.
+    Returns a percent of price (e.g. 1.5 = 1.5% spike). 0.0 if unavailable.
+    """
+    lookback = max(60, int(profile.spike_depth_lookback_seconds))
+    chunk = window[-lookback:]
+    if len(chunk) < 30:
+        return 0.0
+    closes = [b.close for b in chunk if b.close > 0]
+    if len(closes) < 30:
+        return 0.0
+    mean = sum(closes) / len(closes)
+    if mean <= 0:
+        return 0.0
+    # max excursion using highs/lows (captures wicks, not just closes)
+    max_dev = 0.0
+    for b in chunk:
+        if b.high > 0:
+            max_dev = max(max_dev, abs(b.high - mean) / mean * 100.0)
+        if b.low > 0:
+            max_dev = max(max_dev, abs(b.low - mean) / mean * 100.0)
+    return max_dev
 
 
 def classify_vol_regime(instantaneous_vol_percent: float, profile: "MicroGridProfile") -> tuple[float, float, float] | None:
@@ -1640,6 +1685,29 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         sell_target_fraction *= target_mult
         buy_hold_seconds = max(int(buy_hold_seconds * hold_mult), 1)
         sell_hold_seconds = max(int(sell_hold_seconds * hold_mult), 1)
+    # --- dynamic spike-depth entry (偵察近期插針深度 -> 計算掛單點位) ---
+    # Post the passive entry at the predicted next-wick depth, derived from
+    # the scouted recent spike depth. This replaces the fixed span-fraction
+    # entry with a volatility-adapted depth: 挂深一點 when the market is
+    # spiking, skip (fall back to band edge) when dead. Stop/target are also
+    # rescaled to the predicted depth so the geometry is internally consistent.
+    if profile.spike_depth_entry_enabled and state.recent_spike_depth_percent >= profile.spike_depth_min_percent:
+        spike_pct = clamp(state.recent_spike_depth_percent, 0.0, profile.spike_depth_max_percent) / 100.0
+        # predicted depth as a fraction of span (so it composes with the grid layer math)
+        width_frac = state.width_percent / 100.0
+        if width_frac > 0:
+            depth_in_span = spike_pct / width_frac
+            # entry at 85% of predicted depth beyond the band edge (negative edge = outside)
+            spike_entry_edge = -depth_in_span * profile.spike_depth_entry_fraction
+            spike_stop_frac = depth_in_span * profile.spike_depth_stop_fraction
+            spike_target_frac = depth_in_span * profile.spike_depth_target_fraction
+            # only override if it posts deeper (more passive) than the current edge
+            buy_edge_fraction = min(buy_edge_fraction, spike_entry_edge)
+            sell_edge_fraction = min(sell_edge_fraction, spike_entry_edge)
+            buy_stop_fraction = max(buy_stop_fraction, spike_stop_frac)
+            sell_stop_fraction = max(sell_stop_fraction, spike_stop_frac)
+            buy_target_fraction = max(buy_target_fraction, spike_target_frac)
+            sell_target_fraction = max(sell_target_fraction, spike_target_frac)
     if profile.dynamic_level_planner_enabled:
         long_plan = dynamic_level_plan(
             "long",

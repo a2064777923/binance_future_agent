@@ -312,6 +312,7 @@ class MicroGridResearchScriptTests(unittest.TestCase):
                     wick_ev_min_fills=2,
                     wick_ev_confidence_z=0.0,
                     wick_ev_walk_forward_enabled=False,
+                    spike_depth_entry_enabled=False,
                     wick_min_samples=2,
                 ),
             )
