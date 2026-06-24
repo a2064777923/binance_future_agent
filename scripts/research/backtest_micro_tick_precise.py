@@ -31,6 +31,50 @@ _spec.loader.exec_module(research)
 AGG_CACHE = Path(r"D:/教青垃圾系統/binance/aggTrades-cache")
 NOTIONAL_USDT = 20.0
 
+# ML wick filter (A): loaded lazily
+_WICK_MODEL = None
+_WICK_FEATURES = [
+    "width_percent", "stable_width_percent", "instantaneous_vol",
+    "recent_spike_depth", "close_position", "turn_count", "edge_alternation_count",
+    "reversal_response_rate", "path_efficiency", "drift_to_width",
+    "recent_path_efficiency", "recent_drift_to_width", "amplitude_percent",
+    "bollinger_width_percent", "center_cross_count", "score",
+    "long_pullback_quality", "short_pullback_quality",
+    "stochastic_k", "stochastic_slope", "triple_ema_bias",
+    "entry_taker_buy_ratio",
+]
+
+
+def load_wick_filter(model_path="data/research/wick_filter_v1.txt", threshold=0.45):
+    global _WICK_MODEL
+    if _WICK_MODEL is None:
+        try:
+            import lightgbm as lgb
+            _WICK_MODEL = lgb.Booster(model_file=model_path)
+        except Exception:
+            _WICK_MODEL = False  # disabled
+    return _WICK_MODEL, threshold
+
+
+def wick_filter_verdict(state, threshold):
+    """Return True if the ML wick filter accepts this setup."""
+    model = _WICK_MODEL
+    if not model:
+        return True, 0.5
+    row = []
+    for k in _WICK_FEATURES:
+        v = getattr(state, k, None)
+        if v is None:
+            v = 0.0
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            v = 0.0
+        row.append(v if v == v else 0.0)
+    import numpy as np
+    proba = float(model.predict(np.array([row], dtype=float))[0])
+    return proba >= threshold, proba
+
 
 def ticks_to_seconds(symbol: str, ticks: list) -> list:
     """Aggregate ticks into 1-second OHLC bars (for state computation)."""
@@ -67,7 +111,7 @@ def ticks_to_seconds(symbol: str, ticks: list) -> list:
     return bars
 
 
-def run_day(symbol: str, day: date, profile, tick_source) -> dict:
+def run_day(symbol: str, day: date, profile, tick_source, *, use_wick_filter=False, wick_threshold=0.45) -> dict:
     """Run micro-grid across one day with tick-precise fills."""
     # load the full day's ticks, build 1s bars for state
     stream = tick_source.load_day(day)
@@ -99,6 +143,11 @@ def run_day(symbol: str, day: date, profile, tick_source) -> dict:
             valid.append(o)
         if not valid:
             continue
+        # A: ML wick filter — reject low-confidence wick setups
+        if use_wick_filter:
+            accepted, proba = wick_filter_verdict(state, wick_threshold)
+            if not accepted:
+                continue
         best = max(valid, key=lambda o: o.size_weight)
         # tick-precise fill: get the tick slice for this order's window
         order_ticks = tick_source.stream_for_order(chunk, best, profile)
