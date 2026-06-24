@@ -37,10 +37,10 @@ It does not market-close positions for this protection path. It only asks `posit
 
 ## Profiles
 
-Micro-grid/range positions use earlier and tighter protection:
+Micro-grid/range positions use fast protection, but loss-control trailing is only allowed after post-entry evidence. MFE is scoped to bars after the matched entry intent, so pre-entry spikes are not counted as profit for the active position.
 
-- `BFA_POSITION_SENTINEL_MICRO_MIN_PROFIT_R=0.08`
-- `BFA_POSITION_SENTINEL_MICRO_MIN_TARGET_PROGRESS=0.22`
+- `BFA_POSITION_SENTINEL_MICRO_MIN_PROFIT_R=0.18`
+- `BFA_POSITION_SENTINEL_MICRO_MIN_TARGET_PROGRESS=0.35`
 - `BFA_POSITION_SENTINEL_MICRO_REVERSAL_THRESHOLD=0.46`
 - `BFA_POSITION_SENTINEL_MICRO_VOLUME_FADE_RATIO=0.82`
 - `BFA_POSITION_SENTINEL_MICRO_ADVERSE_RETURN_PERCENT=0.04`
@@ -54,7 +54,10 @@ Micro-grid/range positions use earlier and tighter protection:
 - `BFA_POSITION_SENTINEL_MICRO_INVALIDATION_ADVERSE_R=0.18`
 - `BFA_POSITION_SENTINEL_MICRO_INVALIDATION_DIRECTION_ALIGNMENT=0.25`
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_LOCK_R=0.0`
-- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_GIVEBACK_R=0.08`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_GIVEBACK_R=0.18`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_SECONDS=90`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_GIVEBACK_R=0.35`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_HARD_ADVERSE_R=0.55`
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_TARGET_EXTENSION_R=0.08`
 
 Trend positions use wider protection to avoid closing too often:

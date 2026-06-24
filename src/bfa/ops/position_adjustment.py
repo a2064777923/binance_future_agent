@@ -983,6 +983,8 @@ def _trail_prices(
     overrides = _sentinel_trailing_overrides(item.reasons)
     lock_r = max(overrides.get("lock_r", lock_r), 0.0)
     giveback_r = max(overrides.get("giveback_r", giveback_r), 0.0)
+    if loss_control_activation:
+        giveback_r = max(giveback_r, overrides.get("min_giveback_r", 0.0))
     target_extension_r = max(overrides.get("target_extension_r", target_extension_r), 0.0)
     # Bug fix: lock_r=0 places the stop exactly at entry (break-even), but
     # fees+slippage on exit make break-even a guaranteed small loss. The lock
@@ -1062,6 +1064,7 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
     mapping = {
         "sentinel_lock_r": "lock_r",
         "sentinel_giveback_r": "giveback_r",
+        "sentinel_min_giveback_r": "min_giveback_r",
         "sentinel_target_extension_r": "target_extension_r",
     }
     for reason in reasons:

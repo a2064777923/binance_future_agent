@@ -116,12 +116,12 @@ class PositionSentinelTests(unittest.TestCase):
         self.db_path = Path(self.tmp.name) / "agent.sqlite"
         self._insert_intent()
 
-    def _insert_intent(self, *, metadata=None, reasons=None):
+    def _insert_intent(self, *, metadata=None, reasons=None, occurred_at="2026-06-20T03:43:09Z"):
         connection = sqlite3.connect(self.db_path)
         store = EventStore(connection)
         store.insert_artifact(
             "order_intents",
-            occurred_at="2026-06-20T03:43:09Z",
+            occurred_at=occurred_at,
             source="execution.live",
             symbol="BTCUSDT",
             ref_id="order_intent:BTCUSDT:2026-06-20T03:43:09Z",
@@ -326,7 +326,40 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertGreater(order_plan.stop_price, 96)
         self.assertLess(order_plan.stop_price, 100.05)
 
-    def test_micro_grid_invalidated_small_loss_tightens_stop_without_waiting_for_profit(self):
+    def test_micro_grid_early_invalidation_waits_for_confirmation(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(
+            occurred_at="2026-06-20T03:59:30Z",
+            metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
+        )
+        fake_signed = FakeSignedClient(mark_price="99.2")
+        market = FakeMarketClient(
+            closes=[101.2, 101.0, 100.8, 100.6, 100.2, 99.7, 99.4, 99.2],
+            volumes=[10, 10, 10, 10, 18, 22, 25, 28],
+            high_offset=0.08,
+            low_offset=0.16,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "observe")
+        self.assertIn("setup_invalidated_exit_pressure", report.reversal_signals[0].reasons)
+        self.assertIn("loss_control_waiting_for_confirmation", report.reversal_signals[0].reasons)
+        self.assertNotIn("recent_mfe_threshold_met", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_no_allowed_action")
+        self.assertEqual(fake_signed.algo_orders, [])
+
+    def test_micro_grid_invalidated_hard_adverse_after_observation_tightens_stop(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmp.name) / "agent.sqlite"
@@ -334,9 +367,9 @@ class PositionSentinelTests(unittest.TestCase):
             metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
             reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
         )
-        fake_signed = FakeSignedClient(mark_price="99.2")
+        fake_signed = FakeSignedClient(mark_price="97.5")
         market = FakeMarketClient(
-            closes=[100.0, 99.9, 99.75, 99.6, 99.45, 99.35, 99.25, 99.2],
+            closes=[100.0, 99.4, 99.0, 98.6, 98.2, 97.9, 97.7, 97.5],
             volumes=[10, 10, 10, 10, 18, 22, 25, 28],
             high_offset=0.08,
             low_offset=0.16,
@@ -353,11 +386,13 @@ class PositionSentinelTests(unittest.TestCase):
 
         self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
         self.assertIn("setup_invalidated_exit_pressure", report.reversal_signals[0].reasons)
+        self.assertIn("loss_control_ready", report.reversal_signals[0].reasons)
         order_plan = report.execution.executions[0].order_plan
         self.assertIn("sentinel_loss_control", order_plan.reason_codes)
         self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
+        self.assertIn("sentinel_min_giveback_r:0.35", order_plan.reason_codes)
         self.assertGreater(order_plan.stop_price, 96)
-        self.assertLess(order_plan.stop_price, 99.2)
+        self.assertLess(order_plan.stop_price, 97.5)
 
 
 if __name__ == "__main__":
