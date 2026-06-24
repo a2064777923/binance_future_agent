@@ -166,6 +166,26 @@ class MicroGridProfile:
     dynamic_hold_enabled: bool = True
     dynamic_hold_min_seconds: int = 120
     dynamic_hold_multiplier: float = 2.5
+    # --- volatility regime adaptive scaling (偵察/快進快出/動態適配) ---
+    # The micro leg's stop/target/hold were fixed scalars of the span, which
+    # made it either get stopped by noise in high vol or sit dead in low vol.
+    # These three vol-regime thresholds (on instantaneous_vol_percent) bucket
+    # the regime and apply multipliers so the leg adapts: high vol widens the
+    # stop (avoid noise stops) and shortens hold (fast in/out); low vol
+    # tightens the width gate (no dead-water entries).
+    vol_regime_enabled: bool = True
+    vol_regime_low_threshold: float = 0.05    # %/s below this = low vol
+    vol_regime_high_threshold: float = 0.15   # %/s above this = high vol
+    # multipliers applied to stop/target/hold per regime (1.0 = no change)
+    vol_regime_low_stop_mult: float = 0.80
+    vol_regime_low_target_mult: float = 0.70
+    vol_regime_low_hold_mult: float = 0.60
+    vol_regime_high_stop_mult: float = 1.25
+    vol_regime_high_target_mult: float = 1.40
+    vol_regime_high_hold_mult: float = 0.45  # fast in/out when volatile
+    # width gate also adapts: low vol demands a tighter minimum width
+    vol_regime_low_min_width_mult: float = 0.6
+    vol_regime_high_max_width_mult: float = 1.3
     trailing_activate_fraction: float = 2.20
     trailing_lock_fraction: float = 0.35
     trailing_giveback_fraction: float = 0.90
@@ -1514,7 +1534,17 @@ def build_micro_grid_state(
 
 def state_rejection_reasons(state: MicroGridState, profile: MicroGridProfile) -> list[str]:
     reasons: list[str] = []
-    if not (profile.min_width_percent <= state.width_percent <= profile.max_width_percent):
+    # Width gate adapts to vol regime: low vol demands a tighter min width so
+    # the leg does not post dead-water entries; high vol allows wider ranges.
+    min_width = profile.min_width_percent
+    max_width = profile.max_width_percent
+    vol_regime = classify_vol_regime(state.instantaneous_vol_percent, profile)
+    if profile.vol_regime_enabled and vol_regime is not None:
+        if state.instantaneous_vol_percent < profile.vol_regime_low_threshold:
+            min_width = profile.min_width_percent * profile.vol_regime_low_min_width_mult
+        elif state.instantaneous_vol_percent > profile.vol_regime_high_threshold:
+            max_width = profile.max_width_percent * profile.vol_regime_high_max_width_mult
+    if not (min_width <= state.width_percent <= max_width):
         reasons.append("width_outside_profile")
     if profile.round_trip_cost_percent > 0 and state.width_percent / profile.round_trip_cost_percent < profile.min_width_cost_ratio:
         reasons.append("width_does_not_cover_cost")
@@ -1537,6 +1567,37 @@ def state_rejection_reasons(state: MicroGridState, profile: MicroGridProfile) ->
     if state.trend_pause:
         reasons.append(f"trend_pause_{state.trend_direction}")
     return reasons
+
+
+def classify_vol_regime(instantaneous_vol_percent: float, profile: "MicroGridProfile") -> tuple[float, float, float] | None:
+    """Return (stop_mult, target_mult, hold_mult) for the current vol regime.
+
+    The micro leg's geometry was fixed scalars of the span; this lets it adapt:
+      - low vol:  tighter stop/target, shorter hold (avoid dead-water entries)
+      - high vol: wider stop (avoid noise stops), wider target, much shorter
+                  hold (fast in/out before a directional break)
+    Returns None when vol-regime scaling is disabled or vol is unavailable.
+    """
+    if not profile.vol_regime_enabled:
+        return None
+    if not isinstance(instantaneous_vol_percent, (int, float)):
+        return None
+    vol = float(instantaneous_vol_percent)
+    if vol != vol:  # NaN
+        return None
+    if vol < profile.vol_regime_low_threshold:
+        return (
+            profile.vol_regime_low_stop_mult,
+            profile.vol_regime_low_target_mult,
+            profile.vol_regime_low_hold_mult,
+        )
+    if vol > profile.vol_regime_high_threshold:
+        return (
+            profile.vol_regime_high_stop_mult,
+            profile.vol_regime_high_target_mult,
+            profile.vol_regime_high_hold_mult,
+        )
+    return (1.0, 1.0, 1.0)  # mid regime: no scaling
 
 
 def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProfile) -> list[GridOrder]:
@@ -1567,6 +1628,18 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         sell_entry = max(sell_entry, state.upper_price - span * entry_fraction)
     buy_edge_fraction = reservation_adjusted_edge_fraction("long", edge_fraction_for_price("long", buy_entry, state), state, profile)
     sell_edge_fraction = reservation_adjusted_edge_fraction("short", edge_fraction_for_price("short", sell_entry, state), state, profile)
+    # --- volatility regime adaptive scaling (偵察 + 動態適配 + 快進快出) ---
+    # Bucket the instantaneous vol into low/mid/high and rescale stop/target/hold
+    # so the leg is not stopped by noise in high vol nor dead in low vol.
+    vol_regime = classify_vol_regime(state.instantaneous_vol_percent, profile)
+    if profile.vol_regime_enabled and vol_regime is not None:
+        stop_mult, target_mult, hold_mult = vol_regime
+        buy_stop_fraction *= stop_mult
+        sell_stop_fraction *= stop_mult
+        buy_target_fraction *= target_mult
+        sell_target_fraction *= target_mult
+        buy_hold_seconds = max(int(buy_hold_seconds * hold_mult), 1)
+        sell_hold_seconds = max(int(sell_hold_seconds * hold_mult), 1)
     if profile.dynamic_level_planner_enabled:
         long_plan = dynamic_level_plan(
             "long",
