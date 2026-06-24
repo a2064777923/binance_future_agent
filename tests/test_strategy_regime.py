@@ -106,6 +106,66 @@ class StrategyRegimeRouterTests(unittest.TestCase):
         self.assertEqual(candidate.features["regime_label"], RANGE)
         self.assertTrue(route_allows_candidate(candidate))
 
+    def test_micro_grid_wick_reversal_can_trade_width_expansion(self):
+        candidate = annotate_candidate(
+            self.candidate(
+                "AVAXUSDT",
+                88.0,
+                {
+                    "strategy_leg": "micro_grid",
+                    "micro_grid_side": "short",
+                    "micro_grid_score": 0.72,
+                    "micro_grid_state": {
+                        "path_efficiency": 0.12,
+                        "edge_alternation_count": 3,
+                        "reversal_response_rate": 0.58,
+                        "width_percent": 1.05,
+                        "stable_width_percent": 0.42,
+                        "drift_to_width": 0.62,
+                        "wick_opportunity": True,
+                        "close_position_percent": 78.0,
+                        "short_reversal_ready": True,
+                        "short_reversal_reason": "ready",
+                        "short_entry_reversal_fraction": 0.18,
+                        "short_entry_continuation_fraction": 0.04,
+                        "short_pullback_quality": 0.32,
+                        "entry_taker_buy_ratio": 0.58,
+                    },
+                },
+            ),
+            shadow_only=False,
+        )
+
+        self.assertEqual(candidate.features["regime_label"], RANGE)
+        self.assertIn("range_micro_grid_short_wick_reversal_opportunity", candidate.features["regime_reason_codes"])
+        self.assertEqual(candidate.features["route_decision"], "allow")
+        self.assertTrue(route_allows_candidate(candidate))
+
+    def test_micro_grid_width_expansion_without_wick_still_routes_to_chop(self):
+        candidate = annotate_candidate(
+            self.candidate(
+                "AVAXUSDT",
+                88.0,
+                {
+                    "strategy_leg": "micro_grid",
+                    "micro_grid_side": "short",
+                    "micro_grid_state": {
+                        "path_efficiency": 0.12,
+                        "edge_alternation_count": 3,
+                        "reversal_response_rate": 0.58,
+                        "width_percent": 1.05,
+                        "stable_width_percent": 0.42,
+                        "drift_to_width": 0.62,
+                        "wick_opportunity": False,
+                    },
+                },
+            ),
+            shadow_only=False,
+        )
+
+        self.assertEqual(candidate.features["regime_label"], CHOP)
+        self.assertEqual(candidate.features["route_decision"], "skip_chop")
+
     def test_fusion_enforced_keeps_only_regime_allowed_leg_for_symbol(self):
         normal = annotate_candidate(
             self.candidate(
