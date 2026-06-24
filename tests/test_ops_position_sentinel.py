@@ -290,7 +290,7 @@ class PositionSentinelTests(unittest.TestCase):
         order_plan = report.execution.executions[0].order_plan
         self.assertIn("sentinel_profit_protection", order_plan.reason_codes)
         self.assertIn("trailing_activated_by_target_progress", order_plan.reason_codes)
-        self.assertIn("trailing_lock_r:0.1", order_plan.reason_codes)
+        self.assertIn("trailing_lock_r:0.18", order_plan.reason_codes)
         self.assertGreater(order_plan.stop_price, 100)
 
     def test_micro_grid_stagnation_uses_loss_control_trailing(self):
