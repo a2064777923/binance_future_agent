@@ -30,6 +30,16 @@ control of downside.
 
 ## Requirements
 
+### Post-GSD Handoff Note
+
+Formal GSD phase records currently end at v1.27 Phase 70, but the live strategy
+continued to change afterward. Before using this project file as current
+implementation context, read `.planning/POST-GSD-LIVE-ITERATIONS.md`. Current
+`main` includes post-GSD regime routing, micro-grid/scalping live flow,
+raw-feed auto-hot collection, pending-limit watchdog, position sentinel, DB
+maintenance, and protective order replacement hardening that are newer than the
+Phase 70 artifacts.
+
 ### Validated
 
 - Phase 1 validated the isolated repository at `F:\binance_futures_agent`.
@@ -314,6 +324,8 @@ control of downside.
   block unsafe setups and require explicit evidence before raising risk.
 - [x] Deploy v1.27 server canary evidence without touching unrelated server
   projects or managing manual `BTWUSDT`.
+- [x] Document post-GSD live iterations so future agents do not mistake
+  v1.27 Phase 70 artifacts for the latest strategy state.
 
 ### Out of Scope
 
@@ -888,6 +900,7 @@ remains paused.
 | Explain live cycles before widening scanners | Broader hot-symbol scanning should be built on a report that explains submitted, skipped, AI-pass, risk-blocked, and manual-symbol cycles. | Phase 66 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
 | Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current live server caps are 45 USDT configured capital, 10x leverage, 500 USDT per-position/effective notional, 60 bot-managed open positions, 0.7 USDT per-trade risk, and 2 USDT daily loss. Manual `BTWUSDT` is excluded from bot management. | v1.27 shipped |
+| Post-GSD changes need their own handoff layer | Several live fixes and strategy changes were made after Phase 70 without formal GSD phase artifacts. | `.planning/POST-GSD-LIVE-ITERATIONS.md` is now required reading before future planning |
 
 ## Evolution
 
@@ -909,4 +922,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-21 after Phase 70 completion.*
+*Last updated: 2026-06-24 after post-GSD live iteration handoff update.*

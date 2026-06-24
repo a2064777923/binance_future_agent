@@ -6,6 +6,11 @@
 
 ## Milestones
 
+> **Handoff warning:** Formal GSD planning currently ends at v1.27 Phase 70, but
+> live strategy and ops work continued afterward. Read
+> `.planning/POST-GSD-LIVE-ITERATIONS.md` before using this roadmap as current
+> implementation context.
+
 - ✅ **v1.0 Dry-Run Binance Futures Agent** — Phases 1-8, shipped 2026-06-19
   ([archive](milestones/v1.0-ROADMAP.md)).
 
@@ -313,6 +318,9 @@ under current live pilot conditions.
 
 ## Next Step
 
-Start a new milestone with `$gsd-new-milestone`. The immediate focus should be
-observing v1.27 live outcomes and calibrating guard strictness from current
-server evidence.
+Start a new milestone with `$gsd-new-milestone` after reading
+`.planning/POST-GSD-LIVE-ITERATIONS.md`. The immediate focus should be
+consolidating the post-GSD live strategy work into a formal v1.28 plan:
+regime-router enforcement, trend/scalping separation, micro-grid fill quality,
+pending-fill protection, sentinel exits, raw-feed/DB retention, and current-code
+backtest/live attribution.

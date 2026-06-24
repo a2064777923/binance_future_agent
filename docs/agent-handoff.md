@@ -11,9 +11,13 @@ private env files, API keys, passwords, and SSH keys must stay outside git.
 3. `docs/deployment.md` - server deployment and operations runbook.
 4. `docs/live-scalping-ops.md` - live scalping/raw-feed operational notes.
 5. `docs/position-profit-protection.md` - active position protection logic.
+6. `.planning/POST-GSD-LIVE-ITERATIONS.md` - post-GSD live strategy changes
+   that are newer than the formal Phase 70 artifacts.
 
 The planning history lives under `.planning/`. It is useful for context, but
-new work should be grounded in the current code and tests first.
+new work should be grounded in the current code and tests first. The formal GSD
+phase history currently ends at v1.27 Phase 70; later live iterations are
+summarized in `.planning/POST-GSD-LIVE-ITERATIONS.md`.
 
 ## Local Setup
 

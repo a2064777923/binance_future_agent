@@ -404,3 +404,52 @@
 | Tiny-account futures constraints shape the product | Binance filters, notional-vs-margin, spread, and fees drive sizing | Keep tradability filters and staged backtests before further scaling |
 | Live resume needs a single decision surface | v1.23 combines matrix, paper, server, exchange/manual exposure, profile, and confirmation gates; v1.24 adds the operator decision packet; v1.25 adds the confirmation-gated resume plan/apply path; v1.26 adds the pilot learning packet | Use operator packets and pilot learning packets before formal profile/risk changes, even when the live timer is already running |
 | Manual positions need first-class isolation | ETH/ETHUSDT, BTWUSDT, and NEARUSDT evidence showed how quickly manual and bot exposure can mix | Keep manual symbols explicit and exclude them from bot-managed reduction/entry decisions; verify every packet still classifies `BTWUSDT` as manual |
+
+## Post-GSD Live Iteration Note
+
+**Recorded:** 2026-06-24
+**Context:** After v1.27 Phase 70 closed, live iteration continued outside the
+formal GSD phase workflow.
+
+### What Happened
+
+- The codebase advanced beyond Phase 70 with trailing protection changes,
+  Binance protective-order replacement hardening, regime routing, micro-grid
+  live candidates, raw-feed collection, pending-limit watchdog, position
+  sentinel, DB maintenance, HFT/research scripts, and updated handoff docs.
+- These changes were committed and pushed to GitHub, but the `.planning/`
+  phase history still implied that v1.27 Phase 70 was the latest current state.
+- This created a handoff hazard: another agent could read only GSD artifacts and
+  misunderstand the active strategy, live services, and current safety gaps.
+
+### What Worked
+
+- The source code and tests still contained the real implementation truth.
+- Adding `docs/agent-handoff.md` made GitHub clone onboarding easier.
+- The issue was caught before another agent started a major continuation from
+  stale phase files.
+
+### What Was Inefficient
+
+- The project moved too quickly under live pressure for the formal phase log to
+  keep up.
+- One large commit (`4fc0539`) bundled many strategy, ops, research, docs, and
+  tests changes, making phase-level reconstruction harder.
+- Some server env values and live observations remain runtime-only, so docs
+  must tell agents to verify the server rather than trust repo examples.
+
+### Lesson
+
+When live trading iteration happens outside GSD, create a post-GSD log
+immediately. The next formal milestone should either absorb those changes into
+planned phases or explicitly start from the post-GSD log. Stale planning files
+are not harmless in a live trading system; they can cause wrong assumptions
+about risk, strategy routing, protection, and data availability.
+
+### New Pattern
+
+- `.planning/POST-GSD-LIVE-ITERATIONS.md` is required reading before future
+  planning or implementation.
+- `.planning/STATE.md` should say when formal phase history is stale.
+- Handoff docs should distinguish current code/server state from historical GSD
+  phase artifacts.

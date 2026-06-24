@@ -4,11 +4,11 @@ milestone: v1.27
 milestone_name: Adaptive Live Pilot Iteration
 current_phase: 70 — Server Canary And Manual Boundary Verification
 current_phase_name: Server Canary And Manual Boundary Verification
-status: milestone_complete
-stopped_at: v1.27 complete
-last_updated: "2026-06-21T02:49:32Z"
-last_activity: 2026-06-21
-last_activity_desc: Phase 70 complete; v1.27 shipped to server
+status: post_gsd_live_iteration
+stopped_at: post-GSD live iterations documented
+last_updated: "2026-06-24T00:00:00Z"
+last_activity: 2026-06-24
+last_activity_desc: Post-GSD live strategy and ops iterations documented for handoff
 progress:
   total_phases: 5
   completed_phases: 5
@@ -20,22 +20,32 @@ progress:
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** v1.27 complete
-**Status:** Milestone complete
-**Last planned:** 2026-06-21
+**Current phase:** v1.27 formal phases complete; post-GSD live iteration active
+**Status:** GSD phase history is stale for latest live strategy
+**Last planned:** 2026-06-21 formal GSD plan; 2026-06-24 post-GSD handoff update
 **Plan count:** 0
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-06-21)
+See: `.planning/PROJECT.md` and `.planning/POST-GSD-LIVE-ITERATIONS.md`.
 
 **Core value:** Turn hot-coin narrative momentum into auditable, risk-capped
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
-**Current focus:** Observe v1.27 live outcomes and decide the next milestone
-scope from guard/cap/live-result evidence.
+**Current focus:** Treat the formal Phase 70 artifacts as historical, then use
+the current code, server evidence, and `.planning/POST-GSD-LIVE-ITERATIONS.md`
+to consolidate the post-GSD live strategy before planning v1.28.
 
 ## Decisions
+
+- Important handoff correction: after v1.27 Phase 70 closed, the project kept
+  iterating outside formal GSD phase files. Current `main` includes regime
+  routing, micro-grid/scalping live flow, raw-feed auto-hot collection,
+  pending-limit watchdog, position sentinel, DB maintenance, protective order
+  replacement hardening, research/backtest scripts, and updated handoff docs
+  that are not fully represented by `.planning/phases/70-*`. Future agents must
+  read `.planning/POST-GSD-LIVE-ITERATIONS.md` before inferring current
+  strategy from GSD phase artifacts.
 
 - New project directory: `F:\binance_futures_agent`.
 - Deployment target: `64.83.34.222`, isolated under
@@ -801,26 +811,31 @@ scope from guard/cap/live-result evidence.
 
 ## Next Command
 
-Start a new milestone with `$gsd-new-milestone`: observe v1.27 live outcomes
-and calibrate guard strictness from current server evidence.
+Start a new milestone with `$gsd-new-milestone` only after reading
+`.planning/POST-GSD-LIVE-ITERATIONS.md`. Recommended scope: v1.28 Post-GSD Live
+Strategy Consolidation, covering current regime routing, micro-grid live
+evidence, pending-fill protection, position sentinel behavior, raw-feed/DB
+retention, and March/recent backtest replay with the current code.
 
 ## Session
 
-**Last session:** 2026-06-21T01:11:33.537Z
-**Stopped at:** v1.27 complete
-server canary verified and timers restored.
-**Resume file:** .planning/phases/70-server-canary-and-manual-boundary-verification/70-VERIFICATION.md
+**Last formal GSD session:** 2026-06-21T01:11:33.537Z
+**Stopped at:** v1.27 complete; server canary verified and timers restored.
+**Post-GSD update:** 2026-06-24, live strategy and ops iterations documented.
+**Resume file:** .planning/POST-GSD-LIVE-ITERATIONS.md
 
 ## Current Position
 
-Phase: v1.27 complete
-Plan: All v1.27 plans complete
-Status: Milestone complete
-Last activity: 2026-06-21 — Phase 70 complete; v1.27 shipped to server
+Phase: v1.27 formal phases complete; post-GSD live work documented separately
+Plan: All v1.27 plans complete, but newer live work exists outside phase files
+Status: Needs v1.28 planning or explicit continuation from post-GSD log
+Last activity: 2026-06-24 — post-GSD live iteration log added
 
 ## Operator Next Steps
 
-- Run `$gsd-new-milestone`.
+- Read `.planning/POST-GSD-LIVE-ITERATIONS.md`.
+- Then run `$gsd-new-milestone` for a consolidation milestone, or continue from
+  the latest code/server state with that log as the handoff baseline.
 
 ## Performance Metrics
 

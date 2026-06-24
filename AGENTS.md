@@ -22,6 +22,9 @@ user explicitly asks for a comparison.
   logs under `logs/`; these paths are gitignored.
 - Use structured JSON/SQLite records for all signals, decisions, orders, and
   trade outcomes.
+- Before using `.planning/phases/*` as current strategy context, read
+  `.planning/POST-GSD-LIVE-ITERATIONS.md`. Several live strategy and ops
+  iterations happened after the formal v1.27 GSD phase files were closed.
 
 ## Verification
 
