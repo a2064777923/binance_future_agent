@@ -13,6 +13,18 @@ class DeployAssetTests(unittest.TestCase):
     def read(self, *parts):
         return (DEPLOY.joinpath(*parts)).read_text(encoding="utf-8")
 
+    def test_linux_deploy_assets_use_lf_line_endings(self):
+        paths = [
+            *DEPLOY.rglob("*.sh"),
+            *DEPLOY.joinpath("systemd").glob("*"),
+            DEPLOY / "server-env.example",
+            ROOT / ".env.example",
+        ]
+
+        for path in paths:
+            if path.is_file():
+                self.assertNotIn(b"\r\n", path.read_bytes(), f"{path} must use LF line endings")
+
     def test_server_env_example_has_empty_secret_values(self):
         text = self.read("server-env.example")
 

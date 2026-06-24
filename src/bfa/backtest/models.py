@@ -591,6 +591,7 @@ def built_in_variants() -> dict[str, BacktestConfig]:
                 "block_adverse_trend_vwap": False,
                 "block_hot_micro_reversal": False,
                 "block_volume_fade": False,
+                "block_trend_edge_exhaustion": True,
                 "block_spike_reversal_conflict": True,
                 "max_adverse_micro_momentum_percent": 0.12,
                 "min_rsi_for_long": 34.0,

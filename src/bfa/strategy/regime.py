@@ -226,6 +226,9 @@ def _diagnostics(features: Mapping[str, Any]) -> dict[str, Any]:
     momentum = _float_or_none(features.get("kline_momentum_percent"))
     micro_momentum = _float_or_none(features.get("kline_micro_momentum_percent"))
     realized_vol = _first_float(features.get("realized_volatility_percent"), features.get("atr_percent"))
+    close_position = _float_or_none(features.get("kline_close_position_percent"))
+    volume_change = _float_or_none(features.get("kline_quote_volume_change_percent"))
+    range_max = _float_or_none(features.get("kline_range_max_percent"))
     width_expansion_ratio = None
     if width is not None and stable_width is not None and stable_width > 0:
         width_expansion_ratio = width / stable_width
@@ -240,6 +243,9 @@ def _diagnostics(features: Mapping[str, Any]) -> dict[str, Any]:
         "kline_momentum_percent": momentum,
         "kline_micro_momentum_percent": micro_momentum,
         "realized_volatility_percent": realized_vol,
+        "kline_close_position_percent": close_position,
+        "kline_quote_volume_change_percent": volume_change,
+        "kline_range_max_percent": range_max,
     }
 
 
@@ -325,6 +331,7 @@ def _chop_reasons(
     drift = _float_or_none(diagnostics.get("drift_to_width"))
     if expansion is not None and expansion >= 1.75:
         reasons.append("regime_range_width_expanding")
+    reasons.extend(_trend_edge_exhaustion_reasons(diagnostics) if trend_signal else [])
     if width is not None and width > RANGE_MAX_WIDTH_PERCENT * 1.8 and not trend_signal:
         reasons.append("regime_width_extreme_without_direction")
     if realized_vol is not None and realized_vol >= 8.0 and not trend_signal:
@@ -332,6 +339,32 @@ def _chop_reasons(
     if drift is not None and drift > 1.25 and path is not None and path < TREND_MIN_PATH_EFFICIENCY:
         reasons.append("regime_drift_without_clean_path")
     return reasons
+
+
+def _trend_edge_exhaustion_reasons(diagnostics: Mapping[str, Any]) -> list[str]:
+    close_position = _float_or_none(diagnostics.get("kline_close_position_percent"))
+    volume_change = _float_or_none(diagnostics.get("kline_quote_volume_change_percent"))
+    momentum = _float_or_none(diagnostics.get("kline_momentum_percent"))
+    micro_momentum = _float_or_none(diagnostics.get("kline_micro_momentum_percent"))
+    width = _float_or_none(diagnostics.get("range_width_percent"))
+    range_max = _float_or_none(diagnostics.get("kline_range_max_percent"))
+    stable_width = _float_or_none(diagnostics.get("stable_width_percent"))
+    if close_position is None or volume_change is None or momentum is None or micro_momentum is None:
+        return []
+    if volume_change > -50.0:
+        return []
+    recent_spike = False
+    if range_max is not None:
+        recent_spike = range_max >= 0.8
+        if width is not None and width > 0:
+            recent_spike = recent_spike or range_max >= width * 4.0
+        if stable_width is not None and stable_width > 0:
+            recent_spike = recent_spike or range_max >= stable_width * 3.0
+    if momentum > 0 and close_position >= 68.0 and micro_momentum <= 0.0:
+        return ["regime_trend_long_edge_exhaustion" + (":recent_spike" if recent_spike else "")]
+    if momentum < 0 and close_position <= 32.0 and micro_momentum >= 0.0:
+        return ["regime_trend_short_edge_exhaustion" + (":recent_spike" if recent_spike else "")]
+    return []
 
 
 def _normalize_strategy_leg(value: str) -> str:
