@@ -952,7 +952,7 @@ class ExecutionEngineTests(unittest.TestCase):
             ["account", "margin", "leverage", "new_order", "new_algo_order", "position_risk"],
         )
 
-    def test_live_protective_failure_only_activates_kill_switch_when_position_stays_open_unprotected(self):
+    def test_live_protective_failure_does_not_activate_kill_switch_even_when_emergency_close_fails(self):
         fake_client = ProtectivePlacementCloseFailsSignedClient()
         with tempfile.TemporaryDirectory() as tmp:
             kill_switch = Path(tmp) / "KILL_SWITCH"
@@ -974,10 +974,10 @@ class ExecutionEngineTests(unittest.TestCase):
                 filters=self.filters(),
             )
 
-            self.assertTrue(kill_switch.exists())
+            self.assertFalse(kill_switch.exists())
 
         self.assertEqual(result.status, "protective_order_failed_open")
-        self.assertTrue(result.exchange_response["kill_switch_activated"])
+        self.assertNotIn("kill_switch_activated", result.exchange_response)
         self.assertIn("emergency_close_error", result.exchange_response)
         self.assertEqual(
             [call[0] for call in fake_client.calls],

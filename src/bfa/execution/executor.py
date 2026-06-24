@@ -318,7 +318,6 @@ class ExecutionEngine:
                             "code": emergency_close.get("code"),
                             "message": emergency_close.get("message"),
                         }
-                    response["kill_switch_activated"] = _activate_kill_switch(self.config)
                     status = "protective_order_failed_open"
                 return self._finish(
                     status=status,
