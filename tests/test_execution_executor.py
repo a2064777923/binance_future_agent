@@ -217,6 +217,73 @@ class ConflictingProtectiveOrderSignedClient(FakeSignedClient):
         ]
 
 
+class ProtectivePlacementNoPositionSignedClient(FakeSignedClient):
+    def __init__(self, *, available_balance="100"):
+        super().__init__(available_balance=available_balance)
+        self.close_attempts = 0
+
+    def new_algo_order(self, **kwargs):
+        self.calls.append(("new_algo_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/algoOrder",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2021,
+            binance_message="Order would immediately trigger.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return []
+
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return []
+
+
+class ProtectivePlacementCloseFailsSignedClient(FakeSignedClient):
+    def new_algo_order(self, **kwargs):
+        self.calls.append(("new_algo_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/algoOrder",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2021,
+            binance_message="Order would immediately trigger.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return [
+            {
+                "symbol": symbol or "BTCUSDT",
+                "positionAmt": "0.2",
+                "positionSide": "LONG",
+                "entryPrice": "100",
+                "markPrice": "100",
+            }
+        ]
+
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return []
+
+    def new_order(self, **kwargs):
+        self.calls.append(("new_order", kwargs))
+        if kwargs.get("reduce_only"):
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/order",
+                params=kwargs,
+                status_code=400,
+                binance_code=-2019,
+                binance_message="synthetic emergency close failure",
+                headers={},
+            )
+        return {"orderId": 123, "status": "NEW", **kwargs}
+
+
 class AccountFailingSignedClient(FakeSignedClient):
     def account(self):
         self.calls.append(("account",))
@@ -849,6 +916,82 @@ class ExecutionEngineTests(unittest.TestCase):
                 "cancel_algo_order",
                 "new_algo_order",
                 "new_algo_order",
+            ],
+        )
+
+    def test_live_protective_failure_without_matching_position_does_not_activate_kill_switch(self):
+        fake_client = ProtectivePlacementNoPositionSignedClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            kill_switch = Path(tmp) / "KILL_SWITCH"
+            engine = ExecutionEngine(
+                config=self.config(
+                    BFA_MODE="live",
+                    BFA_KILL_SWITCH_FILE=str(kill_switch),
+                    BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                    BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                ),
+                signed_client=fake_client,
+            )
+
+            result = engine.run(
+                symbol="BTCUSDT",
+                validation=self.validation(),
+                decided_at="2026-06-20T10:00:00Z",
+                risk_state=RiskState(),
+                filters=self.filters(),
+            )
+
+            self.assertFalse(kill_switch.exists())
+
+        self.assertEqual(result.status, "protective_order_failed_no_position")
+        self.assertTrue(result.submitted)
+        self.assertEqual(result.exchange_response["protective_failure_resolution"]["status"], "no_matching_position")
+        self.assertNotIn("kill_switch_activated", result.exchange_response)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            ["account", "margin", "leverage", "new_order", "new_algo_order", "position_risk"],
+        )
+
+    def test_live_protective_failure_only_activates_kill_switch_when_position_stays_open_unprotected(self):
+        fake_client = ProtectivePlacementCloseFailsSignedClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            kill_switch = Path(tmp) / "KILL_SWITCH"
+            engine = ExecutionEngine(
+                config=self.config(
+                    BFA_MODE="live",
+                    BFA_KILL_SWITCH_FILE=str(kill_switch),
+                    BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                    BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                ),
+                signed_client=fake_client,
+            )
+
+            result = engine.run(
+                symbol="BTCUSDT",
+                validation=self.validation(),
+                decided_at="2026-06-20T10:00:00Z",
+                risk_state=RiskState(),
+                filters=self.filters(),
+            )
+
+            self.assertTrue(kill_switch.exists())
+
+        self.assertEqual(result.status, "protective_order_failed_open")
+        self.assertTrue(result.exchange_response["kill_switch_activated"])
+        self.assertIn("emergency_close_error", result.exchange_response)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            [
+                "account",
+                "margin",
+                "leverage",
+                "new_order",
+                "new_algo_order",
+                "position_risk",
+                "open_algo_orders",
+                "new_algo_order",
+                "new_algo_order",
+                "new_order",
             ],
         )
 

@@ -1514,6 +1514,18 @@ def _cancel_replaced_algo_orders(
                 )
             )
         except BinanceSignedError as exc:
+            if _is_stale_unknown_order_error(exc):
+                responses.append(
+                    {
+                        "status": "stale_missing",
+                        "symbol": order_plan.symbol,
+                        "algoId": algo_id,
+                        "clientAlgoId": client_algo_id,
+                        "warning": _signed_error_payload(exc),
+                        "order": dict(order),
+                    }
+                )
+                continue
             responses.append({"error": _signed_error_payload(exc), "order": dict(order)})
     return responses
 
@@ -1543,6 +1555,15 @@ def _signed_error_payload(exc: BinanceSignedError) -> dict[str, Any]:
         "code": exc.binance_code,
         "message": exc.binance_message,
     }
+
+
+def _is_stale_unknown_order_error(exc: BinanceSignedError) -> bool:
+    message = (exc.binance_message or "").lower()
+    return exc.binance_code == -2011 and (
+        "unknown order" in message
+        or "does not exist" in message
+        or "not found" in message
+    )
 
 
 def _same_side_algo_order(order: Mapping[str, Any], *, order_plan: PositionAdjustmentOrderPlan) -> bool:
