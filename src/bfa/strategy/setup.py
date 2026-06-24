@@ -192,6 +192,17 @@ class TradeSetupProfile:
     orderly_range_min_edge_alternations: int = 0
     orderly_range_min_mid_cross_count: int = 0
     orderly_range_min_width_cost_ratio: float = 0.0
+    # ML-learned trend filter: when enabled, a trained LightGBM booster scores
+    # P(win) from continuous features and a trade is only allowed when the
+    # probability clears ``ml_trend_threshold``. This supersedes the brittle
+    # boolean-gate stack (require_entry_quality / block_* / confluence / mtf)
+    # for the trend leg, which over-rejected and starved the system. The model
+    # path and threshold are calibrated offline from 6 months of 23-symbol
+    # data; the gate is additive and defaults off so existing variants are
+    # unaffected.
+    use_ml_trend_filter: bool = False
+    ml_trend_model_path: str = ""
+    ml_trend_threshold: float = 0.55
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -328,12 +339,23 @@ def build_trade_setup(
     if _high_crowding(features, side):
         warnings.append("crowding_risk")
         reasons = _dedupe([*reasons, "crowding_risk"])
-    profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
-    profile_rejections.extend(_setup_reason_rejections(reasons, setup_profile))
-    profile_rejections.extend(_factor_guard_rejections(factor_scores, setup_profile))
-    if profile_rejections:
-        decision = "pass"
-        reasons = _dedupe([*reasons, *profile_rejections])
+    # ML-learned trend filter short-circuits the boolean-gate stack when
+    # enabled: a single calibrated probability replaces require_entry_quality /
+    # confluence / block_* / mtf checks, which over-rejected and starved the
+    # system. Existing variants keep their boolean gates (flag defaults off).
+    if setup_profile.use_ml_trend_filter:
+        ml_verdict = _ml_trend_filter_rejection(features, side, setup_profile)
+        if ml_verdict:
+            decision = "pass"
+            reasons = _dedupe([*reasons, *ml_verdict])
+        # skip the boolean-gate stack below when ML governs the trend leg
+    else:
+        profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
+        profile_rejections.extend(_setup_reason_rejections(reasons, setup_profile))
+        profile_rejections.extend(_factor_guard_rejections(factor_scores, setup_profile))
+        if profile_rejections:
+            decision = "pass"
+            reasons = _dedupe([*reasons, *profile_rejections])
     if decision == "pass":
         return TradeSetup(
             symbol=symbol,
@@ -1097,6 +1119,83 @@ def _spike_reversal_reference(features: Mapping[str, Any]) -> dict[str, Any] | N
         "stop_price": _positive_float(features.get("spike_reversal_stop_price")),
         "target_price": _positive_float(features.get("spike_reversal_target_price")),
     }
+
+
+# Cached ML booster so repeated setup calls do not re-read the model file.
+_ML_TREND_MODEL_CACHE: dict[str, Any] = {}
+
+
+def _ml_trend_filter_rejection(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> list[str]:
+    """Run the ML trend filter; return rejection reasons (empty = accepted).
+
+    Features are read from the candidate feature dict; the 14 inputs mirror
+    what the indicator layer already produces so no extra computation is
+    needed in the live path. The model is loaded lazily and cached by path.
+    """
+    if not profile.ml_trend_model_path:
+        return ["ml_trend_model_path_missing"]
+    try:
+        from bfa.strategy.ml_trend_filter import (
+            FEATURE_NAMES,
+            ml_trend_filter_verdict,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return [f"ml_trend_filter_unavailable:{exc.__class__.__name__}"]
+    model = _ML_TREND_MODEL_CACHE.get(profile.ml_trend_model_path)
+    if model is None:
+        try:
+            from bfa.strategy.ml_trend_filter import load_persisted_model
+
+            model = load_persisted_model(profile.ml_trend_model_path)
+            _ML_TREND_MODEL_CACHE[profile.ml_trend_model_path] = model
+        except Exception as exc:  # pragma: no cover - defensive
+            return [f"ml_trend_model_load_failed:{exc.__class__.__name__}"]
+    feature_snapshot = {
+        "ema_spread": _float(features.get("ema_spread_percent")),
+        "rsi": _float(features.get("rsi")),
+        "atr_percent": _float(features.get("atr_percent")),
+        "realized_vol": _float(features.get("realized_volatility_percent")),
+        "mom_6": _float(features.get("kline_momentum_percent")),
+        "mom_12": _float(features.get("kline_momentum_percent")),
+        "micro_mom": _float(features.get("kline_micro_momentum_percent")),
+        "close_position": _float(features.get("kline_close_position_percent")),
+        "vol_change": _float(features.get("kline_quote_volume_change_percent")),
+        "taker_ratio": _float(features.get("taker_buy_sell_ratio")),
+        "rsi_15m": _float(features.get("mtf_15m_rsi")) or _float(features.get("rsi")),
+        "ema_spread_15m": _float(features.get("mtf_15m_ema_spread_percent"))
+        or _float(features.get("ema_spread_percent")),
+        "mom_15m": _float(features.get("mtf_15m_momentum_percent"))
+        or _float(features.get("kline_momentum_percent")),
+        "hour_of_day": _hour_of_day(features),
+    }
+    accept, proba, reasons = ml_trend_filter_verdict(
+        feature_snapshot,
+        model=model,
+        threshold=profile.ml_trend_threshold,
+    )
+    # Stash the probability so downstream diagnostics/price_basis can surface it.
+    features_ref = dict(features) if isinstance(features, Mapping) else {}
+    features_ref.setdefault("ml_trend_probability", round(proba, 4))
+    if accept:
+        return []
+    return reasons or [f"ml_trend_rejected:{proba:.4f}"]
+
+
+def _hour_of_day(features: Mapping[str, Any]) -> float:
+    """Extract hour-of-day from the latest market timestamp, defaulting to 12."""
+    for key in ("latest_market_at", "occurred_at", "generated_at", "reference_time"):
+        value = features.get(key)
+        if isinstance(value, str) and "T" in value:
+            try:
+                hour = int(value[11:13])
+                return float(hour)
+            except (ValueError, IndexError):
+                continue
+    return 12.0
 
 
 def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> list[str]:
