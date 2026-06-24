@@ -300,7 +300,24 @@ class MicroGridResearchScriptTests(unittest.TestCase):
                 wick_entry_quantile=30.0,
             ),
         )
-        orders = research.build_grid_orders("TESTUSDT", state, self.profile()) if state else []
+        # The grid-order profile relaxes the EV statistical gates and disables
+        # walk-forward validation so the synthetic 120-second training window
+        # can still produce an EV model; this test exercises the EV
+        # entry-placement behavior, not the (tightened) overfit controls.
+        orders = (
+            research.build_grid_orders(
+                "TESTUSDT",
+                state,
+                self.profile(
+                    wick_ev_min_fills=2,
+                    wick_ev_confidence_z=0.0,
+                    wick_ev_walk_forward_enabled=False,
+                    wick_min_samples=2,
+                ),
+            )
+            if state
+            else []
+        )
 
         self.assertEqual(reasons, [])
         self.assertIsNotNone(state)

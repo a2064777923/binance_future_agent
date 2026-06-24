@@ -1861,6 +1861,7 @@ def _live_candidate_rank(candidate) -> tuple[float, float, str]:
     features = getattr(candidate, "features", {}) or {}
     quality = 0.0
     regime_confidence = 0.0
+    raw_score = float(getattr(candidate, "score", 0.0))
     if isinstance(features, dict):
         quality = _float_or_zero(
             features.get("micro_grid_score")
@@ -1870,7 +1871,14 @@ def _live_candidate_rank(candidate) -> tuple[float, float, str]:
         )
         if features.get("route_decision") == "allow":
             regime_confidence = _float_or_zero(features.get("regime_confidence"))
-    return (float(getattr(candidate, "score", 0.0)), regime_confidence, quality, str(getattr(candidate, "symbol", "")))
+        # Micro candidates carry an artificial 80-point base offset (see
+        # _candidate_from_order: 80.0 + score*10.0) which dwarfs the trend
+        # candidate scores (~10-50) and made the fuser prefer micro legs almost
+        # unconditionally. Strip the base offset so regime routing, not a
+        # magnitude bias, decides which leg ranks first.
+        if str(features.get("strategy_leg") or "").lower() == "micro_grid":
+            raw_score = max(raw_score - 80.0, 0.0) / 10.0
+    return (raw_score, regime_confidence, quality, str(getattr(candidate, "symbol", "")))
 
 
 def _live_quant_setup_profile(config: AppConfig) -> dict[str, Any]:

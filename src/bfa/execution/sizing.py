@@ -603,7 +603,7 @@ def _outcome_health_multiplier(
     symbol_blocks = getattr(paper_guard, "symbol_blocks", {}) or {}
     side_blocks = getattr(paper_guard, "side_blocks", {}) or {}
     if symbol in symbol_blocks:
-        mode = _guard_mode_for(paper_guard, "symbol", symbol)
+        mode = _relax_block_on_low_samples(_guard_mode_for(paper_guard, "symbol", symbol), symbol_blocks[symbol], warnings, symbol)
         if mode == "observe":
             warnings.append(f"forward_paper_symbol_observed:{symbol}")
             return 1.0
@@ -611,13 +611,13 @@ def _outcome_health_multiplier(
             warnings.append(f"forward_paper_symbol_downsize:{symbol}")
             return _clip(
                 _float_or_none(getattr(paper_guard, "symbol_downsize_multiplier", None)) or 0.65,
-                0.1,
+                _OUTCOME_HEALTH_DOWNSIZE_FLOOR,
                 1.0,
             )
         blocks.append(f"forward_paper_symbol_block:{symbol}")
         return 0.0
     if side in side_blocks:
-        mode = _guard_mode_for(paper_guard, "side", side)
+        mode = _relax_block_on_low_samples(_guard_mode_for(paper_guard, "side", side), side_blocks[side], warnings, side)
         if mode == "observe":
             warnings.append(f"forward_paper_side_observed:{side}")
             return 1.0
@@ -625,7 +625,7 @@ def _outcome_health_multiplier(
             warnings.append(f"forward_paper_side_downsize:{side}")
             return _clip(
                 _float_or_none(getattr(paper_guard, "side_downsize_multiplier", None)) or 0.65,
-                0.1,
+                _OUTCOME_HEALTH_DOWNSIZE_FLOOR,
                 1.0,
             )
         blocks.append(f"forward_paper_side_block:{side}")
@@ -635,6 +635,15 @@ def _outcome_health_multiplier(
     blocked_factors = sorted(setup_reasons & set(factor_blocks))
     if blocked_factors:
         mode = str(getattr(paper_guard, "factor_mode", "block") or "block").lower()
+        low_sample_factors = [
+            reason for reason in blocked_factors
+            if _should_relax_factor_block(reason, factor_blocks)
+        ]
+        if low_sample_factors and mode == "block":
+            mode = "downsize"
+            warnings.append(
+                f"forward_paper_factor_block_relaxed_low_sample:{','.join(low_sample_factors)}"
+            )
         if mode == "observe":
             warnings.extend(f"forward_paper_factor_observed:{reason}" for reason in blocked_factors)
             return 1.0
@@ -642,12 +651,46 @@ def _outcome_health_multiplier(
             warnings.extend(f"forward_paper_factor_downsize:{reason}" for reason in blocked_factors)
             return _clip(
                 _float_or_none(getattr(paper_guard, "factor_downsize_multiplier", None)) or 0.65,
-                0.1,
+                _OUTCOME_HEALTH_DOWNSIZE_FLOOR,
                 1.0,
             )
         blocks.extend(f"forward_paper_factor_block:{reason}" for reason in blocked_factors)
         return 0.0
     return 1.0
+
+
+# Below the block sample floor a paper-guard block is statistically too thin to
+# fully shut the bot out: doing so starves the system of the fresh samples it
+# needs to ever clear the block. Such blocks are downgraded to a downsize with
+# a hard floor so the agent keeps producing measurable evidence instead of
+# locking itself into a no-trade positive feedback loop.
+_OUTCOME_HEALTH_DOWNSIZE_FLOOR = 0.5
+_OUTCOME_HEALTH_BLOCK_SAMPLE_FLOOR = 30
+
+
+def _relax_block_on_low_samples(
+    mode: str,
+    stats: Any,
+    warnings: list[str],
+    name: str,
+) -> str:
+    if mode != "block":
+        return mode
+    outcome_count = int(getattr(stats, "outcome_count", 0) or 0)
+    if outcome_count < _OUTCOME_HEALTH_BLOCK_SAMPLE_FLOOR:
+        warnings.append(
+            f"forward_paper_block_relaxed_low_sample:{name}:{outcome_count}/{_OUTCOME_HEALTH_BLOCK_SAMPLE_FLOOR}"
+        )
+        return "downsize"
+    return mode
+
+
+def _should_relax_factor_block(reason: str, factor_blocks: Mapping[str, Any]) -> bool:
+    stats = factor_blocks.get(reason)
+    if stats is None:
+        return False
+    outcome_count = int(getattr(stats, "outcome_count", 0) or 0)
+    return outcome_count < _OUTCOME_HEALTH_BLOCK_SAMPLE_FLOOR
 
 
 def _guard_mode_for(paper_guard: Any, group: str, name: str) -> str:

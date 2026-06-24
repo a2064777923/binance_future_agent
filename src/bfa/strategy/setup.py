@@ -820,8 +820,19 @@ def _target_distance_percent(
     if trend >= 0.35:
         reward_multiple += 0.15
     target = stop_distance * reward_multiple
+    # Volatility ceiling must never force target below stop * min_risk_reward.
+    # Previously `min(target, max(vol*2.0, stop*1.25))` could collapse the
+    # reward geometry so the min_risk_reward gate could never be satisfied in
+    # compressed volatility, making the trend leg systematically untradeable.
+    # The floor is now stop * min_risk_reward so the cap only trims excess
+    # reward, never the minimum admissible risk/reward.
+    min_rr_floor = stop_distance * max(profile.min_risk_reward, 1.0)
+    volatility_ceiling_reason = None
     if volatility is not None:
-        target = min(target, max(volatility * 2.0, stop_distance * 1.25))
+        volatility_ceiling = max(volatility * 2.0, stop_distance * 1.25)
+        if target > volatility_ceiling:
+            target = max(volatility_ceiling, min_rr_floor)
+            volatility_ceiling_reason = "capped_to_volatility_ceiling" if target == volatility_ceiling else "volatility_ceiling_floor_protected"
     structure_price = _positive_float(features.get("resistance_price" if side == "long" else "support_price"))
     structure_distance: float | None = None
     if structure_price is not None:
@@ -860,6 +871,8 @@ def _target_distance_percent(
         "min_target_distance_percent": stop_distance * profile.min_risk_reward,
         "max_target_distance_percent": max_target,
         "was_capped": capped_target != profile_adjusted,
+        "min_rr_floor_percent": min_rr_floor,
+        "volatility_ceiling_reason": volatility_ceiling_reason,
         "profile": profile.name,
     }
 

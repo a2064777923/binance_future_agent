@@ -79,13 +79,22 @@ class MicroGridProfile:
     wick_training_seconds: int = 900
     wick_event_gap_seconds: int = 6
     wick_ev_max_samples: int = 72
-    wick_ev_min_fills: int = 5
+    # Tightened from (5, 0.25) to reduce in-sample overfit of the dynamic
+    # wick model. z=0.25 was less than one standard error of shrinkage on the
+    # same samples used to fit the model, so EV was systematically overstated
+    # on low-sample symbols. min_fills 12 gives a meaningful standard error,
+    # z=0.85 is a one-sided ~80% lower confidence bound.
+    wick_ev_min_fills: int = 12
     wick_ev_min_fill_rate: float = 0.08
     wick_ev_min_win_rate: float = 0.45
     wick_ev_max_stop_rate: float = 0.22
     wick_ev_max_same_bar_stop_rate: float = 0.25
     wick_ev_min_avg_net_percent: float = 0.04
-    wick_ev_confidence_z: float = 0.25
+    wick_ev_confidence_z: float = 0.85
+    # Walk-forward validation of the EV model on an out-of-sample slice.
+    # Default True in production to suppress in-sample overfit; can be turned
+    # off in isolation tests that exercise EV entry-placement behavior only.
+    wick_ev_walk_forward_enabled: bool = True
     wick_ev_min_entry_edge_fraction: float = 0.0
     wick_require_positive_ev: bool = False
     wick_min_target_fraction: float = 0.20
@@ -174,10 +183,25 @@ class MicroGridProfile:
     maker_fee_bps: float = 2.0
     taker_fee_bps: float = 4.0
     exit_slippage_bps: float = 1.0
+    # When True the entry leg is costed as maker (post-only fills). When False
+    # (legacy default) the entry leg conservatively carries the taker fee too,
+    # which overstates cost for a strategy whose entries are post-only limits.
+    # The legacy value is preserved so existing backtests stay reproducible;
+    # live can opt into the maker-accurate model.
+    entry_maker_cost: bool = False
+    # Extra bps added when a post-only entry is reprice-attempted and may slip
+    # to taker; only applied when entry_maker_cost is True.
+    entry_taker_risk_bps: float = 0.5
 
     @property
     def round_trip_cost_percent(self) -> float:
-        return (max(self.maker_fee_bps, 0.0) + max(self.taker_fee_bps, 0.0) + max(self.exit_slippage_bps, 0.0)) / 100.0
+        if self.entry_maker_cost:
+            entry_fee = max(self.maker_fee_bps, 0.0) + max(self.entry_taker_risk_bps, 0.0)
+        else:
+            # Legacy model: entry leg charged maker + taker, exit leg slippage.
+            # Preserved exactly so existing backtests stay reproducible.
+            entry_fee = max(self.maker_fee_bps, 0.0) + max(self.taker_fee_bps, 0.0)
+        return (entry_fee + max(self.exit_slippage_bps, 0.0)) / 100.0
 
     @property
     def required_history_seconds(self) -> int:
@@ -3586,10 +3610,102 @@ def dynamic_wick_side_model(
     quantile_model = quantile_wick_side_model(side, lower, upper, samples, profile, default, success_rate=success_rate)
     if profile.wick_model_mode == "ev":
         ev_model = ev_wick_side_model(side, lower, upper, samples, profile, default, success_rate=success_rate)
-        if str(ev_model.get("model")) == "ev":
+        if str(ev_model.get("model")) != "ev":
+            return quantile_model
+        if not profile.wick_ev_walk_forward_enabled:
+            ev_model["walk_forward_validated"] = None
+            ev_model["walk_forward_skipped_disabled"] = True
             return ev_model
+        # Walk-forward: fit EV model on the earlier 2/3 of events (in time
+        # order) and validate on the most recent 1/3. This guards against the
+        # in-sample overfit that came from fitting and evaluating the model on
+        # the same samples. A model whose validation-set avg_net is not
+        # positive is downgraded to the (still sample-aware) quantile model so
+        # the leg does not trade a geometry that only worked historically.
+        # Walk-forward only runs when the validation slice is itself large
+        # enough to be meaningful; otherwise the tightened confidence-z alone
+        # governs overfit control and the EV model is trusted.
+        split = max(profile.wick_min_samples, int(len(samples) * 2 / 3))
+        refit_model = ev_wick_side_model(side, lower, upper, samples[:split], profile, default, success_rate=success_rate)
+        if str(refit_model.get("model")) == "ev":
+            ev_model = refit_model
+        validation_samples = samples[split:]
+        if len(validation_samples) < profile.wick_min_samples:
+            ev_model["walk_forward_validated"] = None
+            ev_model["validation_sample_count"] = len(validation_samples)
+            ev_model["walk_forward_skipped_low_samples"] = True
+            return ev_model
+        validated = _validate_wick_ev_model(side, lower, upper, ev_model, validation_samples, profile)
+        if validated:
+            ev_model["walk_forward_validated"] = True
+            ev_model["validation_sample_count"] = len(validation_samples)
+            return ev_model
+        ev_model["model"] = "quantile_walk_forward_rejected"
+        ev_model["walk_forward_validated"] = False
+        ev_model["validation_sample_count"] = len(validation_samples)
         return quantile_model
     return quantile_model
+
+
+def _validate_wick_ev_model(
+    side: str,
+    lower: float,
+    upper: float,
+    ev_model: dict[str, Any],
+    validation_samples: list[dict[str, Any]],
+    profile: MicroGridProfile,
+) -> bool:
+    """Replay the chosen entry/stop/target geometry on out-of-sample paths."""
+    if not validation_samples:
+        return False
+    span = upper - lower
+    if span <= 0:
+        return False
+    entry_fraction = float(ev_model.get("entry_edge_fraction", 0.0))
+    stop_fraction = float(ev_model.get("stop_span_fraction", 0.0))
+    target_fraction = float(ev_model.get("target_span_fraction", 0.0))
+    entry_price = lower + span * entry_fraction if side == "long" else upper - span * entry_fraction
+    stop_price = entry_price - span * stop_fraction if side == "long" else entry_price + span * stop_fraction
+    target_price = entry_price + span * target_fraction if side == "long" else entry_price - span * target_fraction
+    cost = profile.round_trip_cost_percent
+    net_total = 0.0
+    for sample in validation_samples:
+        path = sample.get("path")
+        if not path:
+            continue
+        net = _wick_path_net_percent(side, entry_price, stop_price, target_price, path, cost)
+        net_total += net
+    avg_net = net_total / max(1, len(validation_samples))
+    return avg_net > 0.0
+
+
+def _wick_path_net_percent(
+    side: str,
+    entry_price: float,
+    stop_price: float,
+    target_price: float,
+    path: list[Any],
+    round_trip_cost_percent: float,
+) -> float:
+    """Simulate a single long/short edge-reversion outcome on a bar path."""
+    if not path:
+        return -round_trip_cost_percent
+    for bar in path[1:]:
+        high = getattr(bar, "high", None)
+        low = getattr(bar, "low", None)
+        if high is None or low is None:
+            continue
+        if side == "long":
+            if low <= stop_price:
+                return -abs((entry_price - stop_price) / entry_price) * 100.0 - round_trip_cost_percent
+            if high >= target_price:
+                return abs((target_price - entry_price) / entry_price) * 100.0 - round_trip_cost_percent
+        else:
+            if high >= stop_price:
+                return -abs((stop_price - entry_price) / entry_price) * 100.0 - round_trip_cost_percent
+            if low <= target_price:
+                return abs((entry_price - target_price) / entry_price) * 100.0 - round_trip_cost_percent
+    return -round_trip_cost_percent
 
 
 def quantile_wick_side_model(
