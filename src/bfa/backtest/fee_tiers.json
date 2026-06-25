@@ -1,0 +1,7 @@
+{
+  "source": "https://www.binance.com/en/fee/futureFee",
+  "queried_at": "2026-06-25",
+  "note": "Seeded from Binance public USD-M fee schedule, VIP 0 standard. Excludes operator VIP tier + BNB discount. Per-symbol exceptions to be filled from the public schedule; unlisted symbols fall back to default.",
+  "default": {"maker_fee_bps": 2.0, "taker_fee_bps": 4.0},
+  "tiers": {}
+}
