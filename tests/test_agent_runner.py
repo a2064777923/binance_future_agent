@@ -7,6 +7,7 @@ from pathlib import Path
 from bfa.agent import (
     _build_live_outcome_guard,
     _candidate_latency_summary,
+    _live_execution_queue,
     _live_micro_grid_extra_capacity_preflight_reasons,
     run_agent_once,
 )
@@ -55,6 +56,66 @@ class LatencyTelemetryTests(unittest.TestCase):
         self.assertEqual(latency["candidate_generated_at_ms"], 1781949603000)
         self.assertEqual(latency["signal_to_candidate_ms"], 2000)
         self.assertTrue(latency["ai_expected"])
+
+
+class MicroGridFastLaneQueueTests(unittest.TestCase):
+    def candidate(self, symbol: str, *, leg: str, side: str, score: float) -> CandidateSignal:
+        features = {
+            "strategy_leg": leg,
+            "route_decision": "allow",
+            "regime_confidence": 0.9,
+        }
+        if leg == "micro_grid":
+            features.update(
+                {
+                    "micro_grid_side": side,
+                    "micro_grid_score": score,
+                    "micro_grid_latency": {
+                        "source": "micro_grid_live",
+                        "signal_time_ms": 1_700_000_000_000,
+                        "candidate_generated_at_ms": 1_700_000_000_500,
+                        "signal_to_candidate_ms": 500,
+                        "ai_expected": False,
+                    },
+                }
+            )
+        else:
+            features["kline_micro_momentum_percent"] = 1.0 if side == "long" else -1.0
+        return CandidateSignal(
+            symbol=symbol,
+            score=score,
+            narrative_score=0.0,
+            market_score=score,
+            reason_codes=[f"strategy_leg:{leg}"],
+            data_quality_notes=[],
+            source_event_ids=[],
+            market_event_ids=[],
+            generated_at="2026-06-24T00:00:00Z",
+            features=features,
+        )
+
+    def test_micro_grid_fast_lane_runs_before_trend_candidates(self):
+        trend = self.candidate("BTCUSDT", leg="trend", side="long", score=120.0)
+        micro = self.candidate("ETHUSDT", leg="micro_grid", side="short", score=95.0)
+
+        queue = _live_execution_queue([trend], [micro], top_n=2, micro_fast_lane=True)
+
+        self.assertEqual([item.symbol for item in queue], ["ETHUSDT", "BTCUSDT"])
+        self.assertEqual(queue[0].features["execution_queue_routing"], ["micro_grid_fast_lane"])
+
+    def test_same_symbol_opposite_trend_is_delayed_and_marked_for_recheck(self):
+        trend = self.candidate("AVAXUSDT", leg="trend", side="long", score=180.0)
+        other_trend = self.candidate("BTCUSDT", leg="trend", side="long", score=100.0)
+        micro = self.candidate("AVAXUSDT", leg="micro_grid", side="short", score=90.0)
+
+        queue = _live_execution_queue([trend, other_trend], [micro], top_n=3, micro_fast_lane=True)
+
+        self.assertEqual([item.symbol for item in queue], ["AVAXUSDT", "BTCUSDT", "AVAXUSDT"])
+        delayed = queue[-1]
+        self.assertEqual(delayed.features["strategy_leg"], "trend")
+        self.assertIn("micro_grid_same_symbol_fast_lane_preempts_trend", delayed.reason_codes)
+        self.assertIn("micro_grid_opposite_side_requires_trend_recheck", delayed.reason_codes)
+        self.assertEqual(delayed.features["execution_queue_delayed_by_symbol"], "AVAXUSDT")
 
 
 class MicroGridExtraCapacityTests(unittest.TestCase):
