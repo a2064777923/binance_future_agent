@@ -473,6 +473,49 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertFalse(risk.accepted)
         self.assertIn("portfolio_margin_cap_reached", risk.reason_codes)
 
+    def test_manual_positions_do_not_consume_bot_portfolio_margin_cap(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                manual_exposures=[
+                    {
+                        "symbol": "DRAMUSDT",
+                        "direction": "LONG",
+                        "notional_usdt": 1200,
+                        "initial_margin_usdt": 80,
+                    },
+                    {
+                        "symbol": "BABAUSDT",
+                        "direction": "LONG",
+                        "notional_usdt": 900,
+                        "initial_margin_usdt": 45,
+                    },
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MAX_PORTFOLIO_MARGIN_USDT="8",
+                BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+        self.assertEqual(risk.reason_codes, ["risk_accepted"])
+        self.assertIn("manual_margin_pressure_included", risk.warnings)
+
     def test_multi_position_rejects_same_direction_notional_cap(self):
         validation = self.validation()
         intent, _risk = intent_from_ai_decision(

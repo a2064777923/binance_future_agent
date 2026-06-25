@@ -270,7 +270,7 @@ def _is_micro_grid_intent(intent: OrderIntent) -> bool:
 
 
 def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
-    return risk_state.total_initial_margin_usdt + intent.estimated_initial_margin_usdt
+    return risk_state.active_initial_margin_usdt + intent.estimated_initial_margin_usdt
 
 
 def _portfolio_notional_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
