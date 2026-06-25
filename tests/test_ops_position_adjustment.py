@@ -16,6 +16,7 @@ from bfa.ops.position_adjustment import (
 )
 from bfa.ops.position_hold_check import position_hold_check_from_live_status
 from bfa.ops.position_review import position_review_from_hold_check
+from bfa.ops.position_review import PositionReviewItem, PositionReviewReport
 
 
 EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchange_info.json"
@@ -284,6 +285,47 @@ class PositionAdjustmentTests(unittest.TestCase):
         self.assertEqual(adjustment.status, "adjustment_plan_blocked")
         self.assertFalse(adjustment.adjustment_allowed)
         self.assertIn("trailing_activation_r_not_reached", adjustment.plans[0].reasons)
+
+    def test_sentinel_loss_control_cannot_trail_negative_r_position(self):
+        item = PositionReviewItem(
+            symbol="BTCUSDT",
+            position_side="LONG",
+            position_amt=0.2,
+            recommendation="trail_or_reduce",
+            urgency="normal",
+            reasons=[
+                "sentinel_reversal_risk_trailing",
+                "sentinel_loss_control",
+                "sentinel_min_profit_r:0.45",
+                "sentinel_min_target_progress:0.35",
+            ],
+            entry_price=100,
+            mark_price=99.0,
+            stop_price=96,
+            target_price=108,
+            stop_r_multiple=-0.25,
+            target_progress=-0.125,
+            algo_protection_count=2,
+            algo_orders=protective_algo_orders(),
+            matching_intent_event_id=123,
+        )
+        adjustment = position_adjustment_plan_from_review(
+            PositionReviewReport(
+                status="review_required",
+                action_required=True,
+                checked_at="2026-06-20T04:00:00Z",
+                positions=[item],
+            ),
+            position_mode="hedge",
+            trailing_protection_enabled=True,
+            trailing_activate_r=0.0,
+            filters_by_symbol={"BTCUSDT": SymbolExecutionFilters(symbol="BTCUSDT", tick_size=Decimal("0.1"))},
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_blocked")
+        self.assertFalse(adjustment.adjustment_allowed)
+        self.assertIn("sentinel_profit_gate_not_met", adjustment.plans[0].reasons)
+        self.assertIn("position_not_in_profit", adjustment.plans[0].reasons)
 
     def test_partial_take_profit_quantity_respects_step_size(self):
         adjustment = position_adjustment_plan_from_review(

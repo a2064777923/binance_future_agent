@@ -266,7 +266,7 @@ class PositionSentinelTests(unittest.TestCase):
             metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
             reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
         )
-        fake_signed = FakeSignedClient(mark_price="100.6")
+        fake_signed = FakeSignedClient(mark_price="101.9")
         market = FakeMarketClient(
             closes=[100.4, 101.0, 102.1, 101.5, 101.0, 100.8, 100.6, 100.5],
             volumes=[30, 30, 30, 30, 18, 16, 14, 12],
@@ -285,12 +285,13 @@ class PositionSentinelTests(unittest.TestCase):
 
         self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
         self.assertIn("recent_mfe_threshold_met", report.reversal_signals[0].reasons)
-        self.assertIn("profit_giveback_detected", report.reversal_signals[0].reasons)
+        self.assertIn("profit_r_threshold_met", report.reversal_signals[0].reasons)
         self.assertEqual(report.status, "sentinel_executed")
         order_plan = report.execution.executions[0].order_plan
         self.assertIn("sentinel_profit_protection", order_plan.reason_codes)
         self.assertIn("trailing_activated_by_target_progress", order_plan.reason_codes)
         self.assertIn("trailing_lock_r:0.18", order_plan.reason_codes)
+        self.assertIn("sentinel_min_profit_r:0.45", order_plan.reason_codes)
         self.assertGreater(order_plan.stop_price, 100)
 
     def test_micro_grid_does_not_trail_immediately_on_tiny_profit_giveback(self):
@@ -328,7 +329,7 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertEqual(report.status, "sentinel_no_allowed_action")
         self.assertEqual(fake_signed.algo_orders, [])
 
-    def test_micro_grid_stagnation_uses_loss_control_trailing(self):
+    def test_micro_grid_stagnation_without_profit_only_observes(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmp.name) / "agent.sqlite"
@@ -353,13 +354,12 @@ class PositionSentinelTests(unittest.TestCase):
             execute=True,
         )
 
-        self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
+        self.assertEqual(report.reversal_signals[0].decision, "observe")
         self.assertIn("stagnation_exit_pressure", report.reversal_signals[0].reasons)
-        order_plan = report.execution.executions[0].order_plan
-        self.assertIn("sentinel_loss_control", order_plan.reason_codes)
-        self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
-        self.assertGreater(order_plan.stop_price, 96)
-        self.assertLess(order_plan.stop_price, 100.05)
+        self.assertIn("loss_control_waiting_for_confirmation", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_no_allowed_action")
+        self.assertIsNone(report.execution)
+        self.assertEqual(fake_signed.algo_orders, [])
 
     def test_micro_grid_early_invalidation_waits_for_confirmation(self):
         self.tmp.cleanup()
@@ -394,7 +394,7 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertEqual(report.status, "sentinel_no_allowed_action")
         self.assertEqual(fake_signed.algo_orders, [])
 
-    def test_micro_grid_invalidated_hard_adverse_after_observation_tightens_stop(self):
+    def test_micro_grid_invalidated_hard_adverse_without_profit_only_observes(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self.tmp.name) / "agent.sqlite"
@@ -419,15 +419,12 @@ class PositionSentinelTests(unittest.TestCase):
             execute=True,
         )
 
-        self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
+        self.assertEqual(report.reversal_signals[0].decision, "observe")
         self.assertIn("setup_invalidated_exit_pressure", report.reversal_signals[0].reasons)
-        self.assertIn("loss_control_ready", report.reversal_signals[0].reasons)
-        order_plan = report.execution.executions[0].order_plan
-        self.assertIn("sentinel_loss_control", order_plan.reason_codes)
-        self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
-        self.assertIn("sentinel_min_giveback_r:0.35", order_plan.reason_codes)
-        self.assertGreater(order_plan.stop_price, 96)
-        self.assertLess(order_plan.stop_price, 97.5)
+        self.assertIn("loss_control_waiting_for_confirmation", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_no_allowed_action")
+        self.assertIsNone(report.execution)
+        self.assertEqual(fake_signed.algo_orders, [])
 
 
 if __name__ == "__main__":
