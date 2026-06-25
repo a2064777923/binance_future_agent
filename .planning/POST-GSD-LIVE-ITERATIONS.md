@@ -298,6 +298,34 @@ protection across trend/range/spike/flash-crash/stagnation dynamics. Result:
 **0 protection violations, 0 naked-position events**. Trend vs micro sensitivity
 profiles are independently exercised.
 
+### 17. Alpha Walk-Forward Validation Framework + First Trend Verdict (2026-06-25)
+
+Implemented a reusable, fail-closed OOS validation pipeline in
+`src/bfa/backtest/`:
+
+- `cost.py`: unified per-symbol CostModel (fees + slippage + funding).
+- `adapters.py`: `FoldRunner` contract + `TrendFoldRunner`.
+- `walk_forward.py`: expanding-window month folds, grid search on train only,
+  operator pass bar (`>=30` trades, `min_reward_cost_ratio >= 1.8`, post-cost
+  post-funding positive, full candidate flow).
+- `scripts/research/run_alpha_validation.py`: CLI entry producing
+  `data/research/alpha_validation/trend_verdict.json`.
+
+First trend-leg verdict (22 symbols, Dec 2025 -> Mar 2026, 5m klines, public
+fee tier default maker 2.0 / taker 4.0 bps, funding included):
+
+- **Verdict:** `unverified`
+- **OOS aggregate:** 19 trades, net PnL `-1.24 USDT`, profit factor `0.79`
+- **Selected params:** `min_post_cost_edge_ratio = 1.0` on all folds (higher
+  ratios did not produce enough training trades to clear the anti-overfit
+  floor of 10).
+- **Why unverified:** fails the sample-count bar (<30 OOS trades), the
+  reward/cost bar (selected ratio < 1.8), and post-cost positivity.
+
+This means `quant_setup_live_action_flow` does **not** currently have
+sufficient OOS, post-cost+funding evidence to resume live. Micro and
+limit-range legs are still pending Phase 2 adapter work.
+
 ## Live Server Notes
 
 Known deployment shape:
