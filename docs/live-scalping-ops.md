@@ -68,3 +68,45 @@ When micro-grid intents reach the exchange but show
 `entry_order_expired_canceled`, the signal passed risk and submitted a post-only
 limit order, but price did not touch the limit within
 `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS`.
+
+## Processed Live Cycle Statuses
+
+These statuses mean the live runner handled and recorded the exchange state for
+that cycle. They should not by themselves make systemd stop future scans:
+
+- `entry_order_expired_canceled`: post-only limit accepted, not filled within
+  the wait window, and canceled.
+- `entry_order_unknown_canceled`: entry status was unknown, no matching position
+  was found, and cleanup succeeded.
+- `entry_order_reconciled_from_position`: entry status was unknown but matching
+  position risk existed, so the fill path was reconciled from the position.
+- `protective_order_failed_no_position`: protection failed, but the matching
+  position was already gone.
+- `protective_order_failed_open`: protection failed while the matching position
+  remained open. This is urgent risk evidence and needs follow-up, but it is a
+  processed cycle for timer health.
+
+`entry_order_unknown_cancel_failed` is still a true failed status. It means the
+runner could not reconcile the entry state or clean it up.
+
+## Unmatched Live Positions
+
+If an active exchange position has no matching submitted intent, do not assume
+it is safe or bot-managed. Use read-only checks first:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops position-hold-check \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops position-adjustment-plan \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+```
+
+Classify the symbol as manual only after operator confirmation and, if needed,
+add it to `BFA_MANUAL_POSITION_SYMBOLS`. If it is agent-managed but unmatched,
+handle it through the explicit protection or close confirmation flow. The
+pending-limit watchdog only reconciles unresolved `entry_order_pending` intents;
+it cannot protect a position that never had a matching intent in the event
+store.

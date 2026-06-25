@@ -112,6 +112,15 @@ The micro-grid leg separates exits into three states:
 
 Loss-control does not market-close by default. It replaces protective orders with a closer stop, keeping exits exchange-side while avoiding a fixed max-hold exit.
 
+The current live safety posture is profit-gated. `sentinel_loss_control` cannot
+move stops just because a position is negative or noisy; it still needs the
+configured post-entry evidence and profile gates. This prevents the earlier
+failure mode where stops were tightened immediately after entry and got swept
+by normal volatility. With `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`, the
+sentinel only records plans and diagnostics. With
+`BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`, live-cycle full-close or backfill
+plans are not executed automatically.
+
 ## Latency Telemetry
 
 Micro-grid candidates and order intents carry a latency chain:

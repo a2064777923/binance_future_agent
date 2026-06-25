@@ -229,6 +229,30 @@ The GitHub handoff now includes:
 These docs are newer than the GSD phase files. They are concise on purpose and
 should be read before starting implementation.
 
+### 11. Processed Live Statuses No Longer Stop The Timer
+
+Live debugging found that several resolved execution states were being treated
+as failed systemd cycles even though the runner had already handled and recorded
+the exchange state. `AgentRunResult.ok` now treats these as processed cycles:
+
+- `entry_order_expired_canceled`
+- `entry_order_unknown_canceled`
+- `entry_order_reconciled_from_position`
+- `protective_order_failed_no_position`
+- `protective_order_failed_open`
+
+This is a service-health rule, not a risk waiver. In particular,
+`protective_order_failed_open` still means an open position needs urgent
+exchange-side protection review. `entry_order_unknown_cancel_failed` remains a
+failed status.
+
+Key files:
+
+- `src/bfa/agent.py`
+- `tests/test_agent_runner.py`
+- `docs/deployment.md`
+- `docs/live-scalping-ops.md`
+
 ## Live Server Notes
 
 Known deployment shape:

@@ -5,9 +5,12 @@ system focuses first on hot-coin discovery from Binance Square and other
 narrative sources, then combines those events with futures-market anomalies and
 AI-provider structured trade decisions.
 
-The first live target is a 100 USDT pilot account. The project must default to
-dry-run/test modes until explicit live mode, API credentials, leverage limits,
-loss limits, and the server kill switch are all configured.
+The first live target was a 100 USDT pilot account. Live sizing is now
+environment-driven; as of the latest handoff the server profile has been tested
+with `BFA_ACCOUNT_CAPITAL_USDT=200` and
+`BFA_MAX_PORTFOLIO_MARGIN_USDT=160`. The project must default to dry-run/test
+modes until explicit live mode, API credentials, leverage limits, loss limits,
+and the server kill switch are all configured.
 
 In this project, `notional_usdt` means contract position notional, not the
 initial margin consumed by a futures position. Approximate initial margin is
@@ -17,7 +20,7 @@ rules.
 ## Scope
 
 - Exchange: Binance USD-M futures.
-- Initial account size: 100 USDT.
+- Initial account size: 100 USDT pilot, now configurable by environment profile.
 - Initial strategy family: hot narrative coin + futures anomaly confirmation.
 - AI provider: DeepSeek for live use, with OpenAI Responses still available as
   a fallback provider.
@@ -112,6 +115,14 @@ python -m bfa.cli ops position-review --env-file .env --db runtime/agent.sqlite
 python -m bfa.cli ops position-adjustment-plan --env-file .env --db runtime/agent.sqlite
 python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 ```
+
+The live systemd timer can be healthy even when no new position is opened. GTX
+or post-only entries may expire unfilled, unknown entry orders may be reconciled
+as canceled or filled, and protection failures may be logged as processed live
+cycle statuses instead of service failures. Treat an exchange-side active
+position with no matching submitted intent, or no confirmed exchange algo
+protection, as urgent risk evidence: classify it as manual only after operator
+confirmation, otherwise use the read-only position checks before any mutation.
 
 `ops position-review` is read-only. It turns the active exchange position plus
 the matching submitted trade plan into hold/watch/trail-or-reduce/close-review

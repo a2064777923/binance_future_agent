@@ -61,6 +61,11 @@ The live deployment is isolated from other projects:
 - Runtime state: `/opt/binance-futures-agent/runtime`
 - Logs: `/opt/binance-futures-agent/logs`
 
+Latest operator-tuned live caps observed in handoff were
+`BFA_ACCOUNT_CAPITAL_USDT=200`, `BFA_MAX_PORTFOLIO_MARGIN_USDT=160`, base
+`BFA_MAX_OPEN_POSITIONS=5`, and `BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`.
+Always verify the server env before using these numbers.
+
 Do not put server credentials in this repository. Configure SSH access outside
 the repo. Any agent operating from another machine must obtain SSH access and
 the server env file through an out-of-band channel.
@@ -68,10 +73,21 @@ the server env file through an out-of-band channel.
 Useful read-only checks:
 
 ```bash
+systemctl list-units --type=service --type=timer --all 'binance-futures-agent*' --no-pager
+
 python -m bfa.cli ops live-status \
   --env-file /etc/binance-futures-agent/env \
   --db /opt/binance-futures-agent/data/agent.sqlite \
   --check-binance
+
+python -m bfa.cli ops position-hold-check \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+
+python -m bfa.cli ops live-cycle-explainability \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite \
+  --latest-cycles 10
 
 python -m bfa.cli ops kill-switch-clearance \
   --env-file /etc/binance-futures-agent/env
@@ -79,6 +95,27 @@ python -m bfa.cli ops kill-switch-clearance \
 
 Only use mutation commands after reading their docs and confirming the current
 live state. The live account is real money.
+
+## Current Live Ops Semantics
+
+Before assuming "the bot stopped," inspect systemd timers, the latest live
+result, current exchange positions, open algo orders, and matching event-store
+intents. A healthy timer can produce no new position when passive entries expire
+unfilled or when risk gates reject the current state.
+
+Processed live-cycle statuses include `entry_order_expired_canceled`,
+`entry_order_unknown_canceled`, `entry_order_reconciled_from_position`,
+`protective_order_failed_no_position`, and `protective_order_failed_open`.
+They keep the live timer from falsely failing after the state is recorded.
+`protective_order_failed_open` is still urgent risk evidence: verify exchange
+protection and current position ownership immediately. `entry_order_unknown_cancel_failed`
+remains a failed status.
+
+Unmatched positions require special care. If `ops position-hold-check` shows an
+active exchange position with no matching submitted intent, the pending-limit
+watchdog cannot help because it only reconciles unresolved pending entry
+intents. Classify the symbol as manual only after operator confirmation;
+otherwise handle protection or closure through the explicit confirmation flow.
 
 ## Current Strategy Shape
 
