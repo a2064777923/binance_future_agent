@@ -85,6 +85,9 @@ class TrendFoldRunner:
         self.bars_by_symbol = bars_by_symbol
         self.funding_rates_by_symbol = funding_rates_by_symbol
         self.config_overrides = dict(config_overrides or {})
+        # cache once per (split, start_ms, end_ms) because grid search calls
+        # the same fold many times with different params
+        self._bars_cache: dict[tuple[str, int, int], dict[str, list[BacktestBar]]] = {}
 
     def _build_config(self, params: dict[str, Any]) -> BacktestConfig:
         base = built_in_variants()[self.variant_name]
@@ -102,8 +105,14 @@ class TrendFoldRunner:
     def run_fold(self, range: FoldRange, *, split: str, params: dict[str, Any]) -> FoldResult:
         start_ms, end_ms = _month_bounds_ms(range, split)
         config = self._build_config(params)
-        symbols = [s for s in range.symbols if s in self.bars_by_symbol]
-        bars = {s: self.bars_by_symbol[s] for s in symbols}
+        cache_key = (split, start_ms, end_ms)
+        bars = self._bars_cache.get(cache_key)
+        if bars is None:
+            symbols = [s for s in range.symbols if s in self.bars_by_symbol]
+            bars = {s: self.bars_by_symbol[s] for s in symbols}
+            self._bars_cache[cache_key] = bars
+        else:
+            symbols = list(bars.keys())
         result = run_hot_momentum_backtest(bars, config, start_ms=start_ms, end_ms=end_ms)
 
         trades_out: list[dict[str, Any]] = []
