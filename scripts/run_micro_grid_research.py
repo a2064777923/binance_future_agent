@@ -75,6 +75,14 @@ class MicroGridProfile:
     dynamic_entry_volatility_push_fraction: float = 0.05
     dynamic_entry_wick_push_fraction: float = 0.08
     dynamic_entry_continuation_push_fraction: float = 0.05
+    dynamic_exit_geometry_enabled: bool = False
+    dynamic_exit_stop_widen_fraction: float = 0.14
+    dynamic_exit_max_stop_fraction: float = 0.62
+    dynamic_exit_target_mean_ratio: float = 0.92
+    dynamic_exit_target_quality_ratio: float = 0.08
+    dynamic_exit_target_beyond_mean_fraction: float = 0.16
+    dynamic_exit_max_target_fraction: float = 1.10
+    dynamic_exit_min_target_stop_ratio: float = 0.88
     post_only_entry_gap_bps: float = 0.0
     dynamic_wick_enabled: bool = True
     wick_model_mode: str = "ev"
@@ -579,6 +587,14 @@ def main() -> int:
     parser.add_argument("--dynamic-entry-volatility-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_volatility_push_fraction)
     parser.add_argument("--dynamic-entry-wick-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_wick_push_fraction)
     parser.add_argument("--dynamic-entry-continuation-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_continuation_push_fraction)
+    parser.add_argument("--dynamic-exit-geometry-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_exit_geometry_enabled)
+    parser.add_argument("--dynamic-exit-stop-widen-fraction", type=float, default=MicroGridProfile.dynamic_exit_stop_widen_fraction)
+    parser.add_argument("--dynamic-exit-max-stop-fraction", type=float, default=MicroGridProfile.dynamic_exit_max_stop_fraction)
+    parser.add_argument("--dynamic-exit-target-mean-ratio", type=float, default=MicroGridProfile.dynamic_exit_target_mean_ratio)
+    parser.add_argument("--dynamic-exit-target-quality-ratio", type=float, default=MicroGridProfile.dynamic_exit_target_quality_ratio)
+    parser.add_argument("--dynamic-exit-target-beyond-mean-fraction", type=float, default=MicroGridProfile.dynamic_exit_target_beyond_mean_fraction)
+    parser.add_argument("--dynamic-exit-max-target-fraction", type=float, default=MicroGridProfile.dynamic_exit_max_target_fraction)
+    parser.add_argument("--dynamic-exit-min-target-stop-ratio", type=float, default=MicroGridProfile.dynamic_exit_min_target_stop_ratio)
     parser.add_argument("--post-only-entry-gap-bps", type=float, default=MicroGridProfile.post_only_entry_gap_bps)
     parser.add_argument("--min-width-percent", type=float, default=MicroGridProfile.min_width_percent)
     parser.add_argument("--max-width-percent", type=float, default=MicroGridProfile.max_width_percent)
@@ -709,6 +725,14 @@ def main() -> int:
         dynamic_entry_volatility_push_fraction=args.dynamic_entry_volatility_push_fraction,
         dynamic_entry_wick_push_fraction=args.dynamic_entry_wick_push_fraction,
         dynamic_entry_continuation_push_fraction=args.dynamic_entry_continuation_push_fraction,
+        dynamic_exit_geometry_enabled=args.dynamic_exit_geometry_enabled,
+        dynamic_exit_stop_widen_fraction=args.dynamic_exit_stop_widen_fraction,
+        dynamic_exit_max_stop_fraction=args.dynamic_exit_max_stop_fraction,
+        dynamic_exit_target_mean_ratio=args.dynamic_exit_target_mean_ratio,
+        dynamic_exit_target_quality_ratio=args.dynamic_exit_target_quality_ratio,
+        dynamic_exit_target_beyond_mean_fraction=args.dynamic_exit_target_beyond_mean_fraction,
+        dynamic_exit_max_target_fraction=args.dynamic_exit_max_target_fraction,
+        dynamic_exit_min_target_stop_ratio=args.dynamic_exit_min_target_stop_ratio,
         post_only_entry_gap_bps=args.post_only_entry_gap_bps,
         min_width_percent=args.min_width_percent,
         max_width_percent=args.max_width_percent,
@@ -1686,6 +1710,40 @@ def dynamic_entry_edge_fraction(side: str, state: MicroGridState, profile: Micro
     if not profile.dynamic_entry_edge_enabled:
         return base, []
 
+    pressures = dynamic_entry_pressure_components(side, state, profile)
+
+    flow_push = max(0.0, profile.dynamic_entry_flow_push_fraction) * pressures["flow_pressure"]
+    momentum_push = max(0.0, profile.dynamic_entry_momentum_push_fraction) * pressures["momentum_pressure"]
+    volatility_push = max(0.0, profile.dynamic_entry_volatility_push_fraction) * pressures["volatility_pressure"]
+    wick_push = max(0.0, profile.dynamic_entry_wick_push_fraction) * pressures["wick_pressure"]
+    continuation_push = max(0.0, profile.dynamic_entry_continuation_push_fraction) * pressures["continuation_pressure"]
+    total_push = min(
+        max(0.0, profile.dynamic_entry_max_push_fraction),
+        flow_push + momentum_push + volatility_push + wick_push + continuation_push,
+    )
+    edge = clamp(base - total_push, lower, profile.max_reservation_edge_fraction)
+    multiplier = abs(edge) / max(abs(base), 1e-9)
+    return edge, [
+        f"dynamic_entry_enabled:{profile.dynamic_entry_edge_enabled}",
+        f"dynamic_entry_base_edge_fraction:{round(base, 6)}",
+        f"dynamic_entry_min_edge_fraction:{round(lower, 6)}",
+        f"dynamic_entry_flow_pressure:{round(pressures['flow_pressure'], 6)}",
+        f"dynamic_entry_flow_push_fraction:{round(flow_push, 6)}",
+        f"dynamic_entry_momentum_pressure:{round(pressures['momentum_pressure'], 6)}",
+        f"dynamic_entry_momentum_push_fraction:{round(momentum_push, 6)}",
+        f"dynamic_entry_volatility_pressure:{round(pressures['volatility_pressure'], 6)}",
+        f"dynamic_entry_volatility_push_fraction:{round(volatility_push, 6)}",
+        f"dynamic_entry_wick_pressure:{round(pressures['wick_pressure'], 6)}",
+        f"dynamic_entry_wick_push_fraction:{round(wick_push, 6)}",
+        f"dynamic_entry_continuation_pressure:{round(pressures['continuation_pressure'], 6)}",
+        f"dynamic_entry_continuation_push_fraction:{round(continuation_push, 6)}",
+        f"dynamic_entry_total_push_fraction:{round(total_push, 6)}",
+        f"dynamic_entry_push_multiplier:{round(multiplier, 6)}",
+        f"dynamic_entry_model_edge_fraction:{round(edge, 6)}",
+    ]
+
+
+def dynamic_entry_pressure_components(side: str, state: MicroGridState, profile: MicroGridProfile) -> dict[str, float]:
     width = max(abs(state.width_percent), 0.0001)
     if side == "long":
         flow_pressure = clamp((0.50 - state.entry_taker_buy_ratio) / 0.18, 0.0, 1.0)
@@ -1716,35 +1774,81 @@ def dynamic_entry_edge_fraction(side: str, state: MicroGridState, profile: Micro
         0.0,
         1.0,
     )
+    return {
+        "flow_pressure": flow_pressure,
+        "momentum_pressure": momentum_pressure,
+        "volatility_pressure": volatility_pressure,
+        "wick_pressure": wick_pressure,
+        "continuation_pressure": continuation_pressure,
+    }
 
-    flow_push = max(0.0, profile.dynamic_entry_flow_push_fraction) * flow_pressure
-    momentum_push = max(0.0, profile.dynamic_entry_momentum_push_fraction) * momentum_pressure
-    volatility_push = max(0.0, profile.dynamic_entry_volatility_push_fraction) * volatility_pressure
-    wick_push = max(0.0, profile.dynamic_entry_wick_push_fraction) * wick_pressure
-    continuation_push = max(0.0, profile.dynamic_entry_continuation_push_fraction) * continuation_pressure
-    total_push = min(
-        max(0.0, profile.dynamic_entry_max_push_fraction),
-        flow_push + momentum_push + volatility_push + wick_push + continuation_push,
+
+def dynamic_exit_span_fractions(
+    side: str,
+    *,
+    edge_fraction: float,
+    base_stop_fraction: float,
+    base_target_fraction: float,
+    state: MicroGridState,
+    profile: MicroGridProfile,
+) -> tuple[float, float, list[str]]:
+    if not profile.dynamic_exit_geometry_enabled:
+        return base_stop_fraction, base_target_fraction, []
+    pressures = dynamic_entry_pressure_components(side, state, profile)
+    pullback_quality = clamp(pullback_quality_for_side(side, state), 0.0, 1.0)
+    wick_success = clamp(state.long_wick_success_rate if side == "long" else state.short_wick_success_rate, 0.0, 1.0)
+    response = clamp(state.reversal_response_rate, 0.0, 1.0)
+    chaos = max(
+        clamp((state.recent_path_efficiency - 0.55) / 0.35, 0.0, 1.0),
+        clamp((state.recent_drift_to_width - max(profile.max_drift_to_width * 0.75, 0.01)) / max(profile.max_drift_to_width, 0.01), 0.0, 1.0),
+        clamp((state.drift_to_width - max(profile.max_drift_to_width, 0.01)) / max(profile.max_drift_to_width, 0.01), 0.0, 1.0),
     )
-    edge = clamp(base - total_push, lower, profile.max_reservation_edge_fraction)
-    multiplier = abs(edge) / max(abs(base), 1e-9)
-    return edge, [
-        f"dynamic_entry_enabled:{profile.dynamic_entry_edge_enabled}",
-        f"dynamic_entry_base_edge_fraction:{round(base, 6)}",
-        f"dynamic_entry_min_edge_fraction:{round(lower, 6)}",
-        f"dynamic_entry_flow_pressure:{round(flow_pressure, 6)}",
-        f"dynamic_entry_flow_push_fraction:{round(flow_push, 6)}",
-        f"dynamic_entry_momentum_pressure:{round(momentum_pressure, 6)}",
-        f"dynamic_entry_momentum_push_fraction:{round(momentum_push, 6)}",
-        f"dynamic_entry_volatility_pressure:{round(volatility_pressure, 6)}",
-        f"dynamic_entry_volatility_push_fraction:{round(volatility_push, 6)}",
-        f"dynamic_entry_wick_pressure:{round(wick_pressure, 6)}",
-        f"dynamic_entry_wick_push_fraction:{round(wick_push, 6)}",
-        f"dynamic_entry_continuation_pressure:{round(continuation_pressure, 6)}",
-        f"dynamic_entry_continuation_push_fraction:{round(continuation_push, 6)}",
-        f"dynamic_entry_total_push_fraction:{round(total_push, 6)}",
-        f"dynamic_entry_push_multiplier:{round(multiplier, 6)}",
-        f"dynamic_entry_model_edge_fraction:{round(edge, 6)}",
+    quality = clamp(
+        pullback_quality * 0.28
+        + response * 0.28
+        + wick_success * 0.16
+        + (1.0 - pressures["continuation_pressure"]) * 0.14
+        + (1.0 - chaos) * 0.14,
+        0.0,
+        1.0,
+    )
+    stop_pressure = clamp(
+        pressures["volatility_pressure"] * 0.34
+        + pressures["wick_pressure"] * 0.26
+        + pressures["momentum_pressure"] * 0.22
+        + pressures["flow_pressure"] * 0.18,
+        0.0,
+        1.0,
+    )
+    stop_widen = max(0.0, profile.dynamic_exit_stop_widen_fraction) * stop_pressure * (0.70 + quality * 0.30) * (1.0 - chaos * 0.45)
+    stop_fraction = max(base_stop_fraction, base_stop_fraction + stop_widen)
+    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, min(profile.dynamic_exit_max_stop_fraction, profile.wick_max_stop_fraction + 0.32))
+
+    mean_distance = max(0.0, 0.50 - edge_fraction)
+    target_mean_ratio = clamp(
+        profile.dynamic_exit_target_mean_ratio + profile.dynamic_exit_target_quality_ratio * quality - 0.08 * chaos,
+        0.70,
+        1.05,
+    )
+    beyond_mean = max(0.0, profile.dynamic_exit_target_beyond_mean_fraction) * clamp((quality - 0.68) / 0.32, 0.0, 1.0) * (1.0 - chaos * 0.65)
+    target_from_mean = mean_distance * target_mean_ratio + beyond_mean
+    target_fraction = max(
+        base_target_fraction,
+        target_from_mean,
+        stop_fraction * max(0.0, profile.dynamic_exit_min_target_stop_ratio),
+    )
+    target_fraction = clamp(target_fraction, profile.wick_min_target_fraction, min(profile.dynamic_exit_max_target_fraction, profile.wick_max_target_fraction + 0.60))
+    return stop_fraction, target_fraction, [
+        f"dynamic_exit_geometry_enabled:{profile.dynamic_exit_geometry_enabled}",
+        f"dynamic_exit_quality:{round(quality, 6)}",
+        f"dynamic_exit_chaos_pressure:{round(chaos, 6)}",
+        f"dynamic_exit_stop_pressure:{round(stop_pressure, 6)}",
+        f"dynamic_exit_stop_widen_fraction:{round(stop_widen, 6)}",
+        f"dynamic_exit_mean_distance_fraction:{round(mean_distance, 6)}",
+        f"dynamic_exit_target_mean_ratio:{round(target_mean_ratio, 6)}",
+        f"dynamic_exit_beyond_mean_fraction:{round(beyond_mean, 6)}",
+        f"dynamic_exit_stop_span_fraction:{round(stop_fraction, 6)}",
+        f"dynamic_exit_target_span_fraction:{round(target_fraction, 6)}",
     ]
 
 
@@ -1894,14 +1998,22 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
                 min_edge_fraction,
                 profile.max_reservation_edge_fraction,
             )
+            layer_stop_fraction, layer_target_fraction, exit_reason_codes = dynamic_exit_span_fractions(
+                side,
+                edge_fraction=edge_fraction,
+                base_stop_fraction=stop_fraction,
+                base_target_fraction=target_fraction,
+                state=state,
+                profile=profile,
+            )
             if side == "long":
                 entry = state.lower_price + span * edge_fraction
-                target = min(entry + span * target_fraction, state.upper_price - target_buffer)
-                stop = entry - span * stop_fraction
+                target = min(entry + span * layer_target_fraction, state.upper_price - target_buffer)
+                stop = entry - span * layer_stop_fraction
             else:
                 entry = state.upper_price - span * edge_fraction
-                target = max(entry - span * target_fraction, state.lower_price + target_buffer)
-                stop = entry + span * stop_fraction
+                target = max(entry - span * layer_target_fraction, state.lower_price + target_buffer)
+                stop = entry + span * layer_stop_fraction
             adjusted_target, target_adjustment = cost_aware_target(side, entry, target, state, profile)
             dedupe_key = (side, round(entry, 10))
             if dedupe_key in seen_entries:
@@ -1918,14 +2030,14 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
                     target=adjusted_target,
                     stop=stop,
                     hold_seconds=hold_seconds,
-                    stop_fraction=stop_fraction,
-                    target_fraction=target_fraction,
+                    stop_fraction=layer_stop_fraction,
+                    target_fraction=layer_target_fraction,
                     target_adjustment=target_adjustment,
                     layer=layer,
                     layer_size=layer_size,
                     edge_fraction=edge_fraction,
                     dynamic_plan=plan,
-                    entry_reason_codes=side_entry_reasons,
+                    entry_reason_codes=[*side_entry_reasons, *exit_reason_codes],
                 )
             )
     return orders
@@ -2123,14 +2235,22 @@ def grid_price_or_reward_rejection_reasons(state: MicroGridState, profile: Micro
     ):
         for layer in range(layers):
             edge_fraction = clamp(base_edge_fraction - layer * layer_spacing, minimum_entry_edge_fraction(profile), profile.max_reservation_edge_fraction)
+            layer_stop_fraction, layer_target_fraction, _exit_reasons = dynamic_exit_span_fractions(
+                side,
+                edge_fraction=edge_fraction,
+                base_stop_fraction=stop_fraction,
+                base_target_fraction=target_fraction,
+                state=state,
+                profile=profile,
+            )
             if side == "long":
                 entry = state.lower_price + span * edge_fraction
-                target = min(entry + span * target_fraction, state.upper_price - target_buffer)
-                stop = entry - span * stop_fraction
+                target = min(entry + span * layer_target_fraction, state.upper_price - target_buffer)
+                stop = entry - span * layer_stop_fraction
             else:
                 entry = state.upper_price - span * edge_fraction
-                target = max(entry - span * target_fraction, state.lower_price + target_buffer)
-                stop = entry + span * stop_fraction
+                target = max(entry - span * layer_target_fraction, state.lower_price + target_buffer)
+                stop = entry + span * layer_stop_fraction
             target, _ = cost_aware_target(side, entry, target, state, profile)
             reasons.extend(single_grid_order_rejection_reasons(state, profile, side=side, entry=entry, target=target, stop=stop))
     return sorted(set(reasons))

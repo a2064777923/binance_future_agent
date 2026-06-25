@@ -871,6 +871,17 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(entry_calls[1]["new_client_order_id"], "bfa-btcusdt-20260620100000-r1")
         self.assertIn("post_only_repriced_attempt:2", result.intent.reason_codes)
         self.assertEqual(result.intent.entry_price, 99.8)
+        self.assertIn("micro_grid_reprice_reanchored_protective_prices", result.intent.reason_codes)
+        self.assertIn("micro_grid_fill_reanchored_protective_prices", result.intent.reason_codes)
+        self.assertAlmostEqual(result.intent.stop_price, 95.808)
+        self.assertEqual(result.intent.target_price, 108.0)
+        self.assertIn("micro_grid_reprice_reanchor", result.intent.metadata)
+        reanchor = result.intent.metadata["micro_grid_fill_reanchor"]
+        self.assertEqual(reanchor["fill_quality"], "better_or_equal")
+        stop_order = [call[1] for call in fake_client.calls if call[0] == "new_algo_order" and call[1]["order_type"] == "STOP_MARKET"][0]
+        target_order = [call[1] for call in fake_client.calls if call[0] == "new_algo_order" and call[1]["order_type"] == "TAKE_PROFIT_MARKET"][0]
+        self.assertAlmostEqual(stop_order["stop_price"], 95.808)
+        self.assertEqual(target_order["stop_price"], 108.0)
         reprice = result.exchange_response["entry_order"]["post_only_reprice"]
         self.assertTrue(reprice["enabled"])
         self.assertEqual([attempt["status"] for attempt in reprice["attempts"]], ["rejected", "accepted"])

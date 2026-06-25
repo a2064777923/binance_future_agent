@@ -1069,10 +1069,26 @@ def _repriced_post_only_intent(
         adjusted = _round_decimal(price + offset, tick_size, up=True)
     if adjusted <= 0:
         return intent
+    stop_price = intent.stop_price
+    target_price = intent.target_price
+    reason_codes = list(intent.reason_codes)
+    metadata = dict(intent.metadata)
+    if _is_micro_grid_intent(intent):
+        stop_price, target_price, reanchor = _micro_grid_fill_reanchored_protective_prices(intent, float(adjusted))
+        if reanchor:
+            reason_codes.append("micro_grid_reprice_reanchored_protective_prices")
+            metadata["micro_grid_reprice_reanchor"] = {
+                **reanchor,
+                "model": "micro_grid_reprice_reanchor_v1",
+            }
     return replace(
         intent,
         entry_price=float(adjusted),
         notional_usdt=float(Decimal(str(intent.quantity)) * adjusted),
+        stop_price=stop_price,
+        target_price=target_price,
+        reason_codes=reason_codes,
+        metadata=metadata,
     )
 
 
@@ -1134,12 +1150,67 @@ def _intent_with_fill(intent: OrderIntent, payload: dict) -> OrderIntent:
     if quantity <= 0:
         return intent
     fill_price = _average_fill_price(payload, intent.entry_price)
+    stop_price = intent.stop_price
+    target_price = intent.target_price
+    reason_codes = list(intent.reason_codes)
+    metadata = dict(intent.metadata)
+    if _is_micro_grid_intent(intent):
+        stop_price, target_price, reanchor = _micro_grid_fill_reanchored_protective_prices(intent, fill_price)
+        if reanchor:
+            reason_codes.append("micro_grid_fill_reanchored_protective_prices")
+            metadata["micro_grid_fill_reanchor"] = reanchor
     return replace(
         intent,
         quantity=quantity,
         notional_usdt=quantity * fill_price,
         entry_price=fill_price,
+        stop_price=stop_price,
+        target_price=target_price,
+        reason_codes=reason_codes,
+        metadata=metadata,
     )
+
+
+def _is_micro_grid_intent(intent: OrderIntent) -> bool:
+    metadata = intent.metadata if isinstance(intent.metadata, Mapping) else {}
+    if str(metadata.get("strategy_leg") or "").strip().lower() == "micro_grid":
+        return True
+    return any(str(reason).strip().lower() == "strategy_leg:micro_grid" for reason in intent.reason_codes)
+
+
+def _micro_grid_fill_reanchored_protective_prices(intent: OrderIntent, fill_price: float) -> tuple[float, float, dict[str, Any] | None]:
+    old_entry = intent.entry_price
+    if old_entry <= 0 or fill_price <= 0:
+        return intent.stop_price, intent.target_price, None
+    risk_fraction = abs(old_entry - intent.stop_price) / old_entry
+    reward_fraction = abs(intent.target_price - old_entry) / old_entry
+    if risk_fraction <= 0 or reward_fraction <= 0:
+        return intent.stop_price, intent.target_price, None
+
+    if intent.side.upper() == "BUY":
+        reanchored_stop = fill_price * (1.0 - risk_fraction)
+        reanchored_target = fill_price * (1.0 + reward_fraction)
+        stop_price = min(intent.stop_price, reanchored_stop)
+        target_price = intent.target_price if fill_price <= old_entry else max(intent.target_price, reanchored_target)
+        fill_quality = "better_or_equal" if fill_price <= old_entry else "worse"
+    else:
+        reanchored_stop = fill_price * (1.0 + risk_fraction)
+        reanchored_target = fill_price * (1.0 - reward_fraction)
+        stop_price = max(intent.stop_price, reanchored_stop)
+        target_price = intent.target_price if fill_price >= old_entry else min(intent.target_price, reanchored_target)
+        fill_quality = "better_or_equal" if fill_price >= old_entry else "worse"
+    return stop_price, target_price, {
+        "model": "micro_grid_fill_reanchor_v1",
+        "fill_quality": fill_quality,
+        "original_entry_price": old_entry,
+        "fill_price": fill_price,
+        "original_stop_price": intent.stop_price,
+        "original_target_price": intent.target_price,
+        "reanchored_stop_price": stop_price,
+        "reanchored_target_price": target_price,
+        "risk_fraction": risk_fraction,
+        "reward_fraction": reward_fraction,
+    }
 
 
 def _opposite_side(side: str) -> str:
