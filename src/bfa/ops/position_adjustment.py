@@ -983,6 +983,8 @@ def _trail_prices(
     overrides = _sentinel_trailing_overrides(item.reasons)
     lock_r = max(overrides.get("lock_r", lock_r), 0.0)
     giveback_r = max(overrides.get("giveback_r", giveback_r), 0.0)
+    if loss_control_activation:
+        giveback_r = max(giveback_r, overrides.get("min_giveback_r", 0.0))
     target_extension_r = max(overrides.get("target_extension_r", target_extension_r), 0.0)
     # Bug fix: lock_r=0 places the stop exactly at entry (break-even), but
     # fees+slippage on exit make break-even a guaranteed small loss. The lock
@@ -1062,6 +1064,7 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
     mapping = {
         "sentinel_lock_r": "lock_r",
         "sentinel_giveback_r": "giveback_r",
+        "sentinel_min_giveback_r": "min_giveback_r",
         "sentinel_target_extension_r": "target_extension_r",
     }
     for reason in reasons:
@@ -1591,6 +1594,18 @@ def _cancel_replaced_algo_orders(
                 )
             )
         except BinanceSignedError as exc:
+            if _is_stale_unknown_order_error(exc):
+                responses.append(
+                    {
+                        "status": "stale_missing",
+                        "symbol": order_plan.symbol,
+                        "algoId": algo_id,
+                        "clientAlgoId": client_algo_id,
+                        "warning": _signed_error_payload(exc),
+                        "order": dict(order),
+                    }
+                )
+                continue
             responses.append({"error": _signed_error_payload(exc), "order": dict(order)})
     return responses
 
@@ -1620,6 +1635,15 @@ def _signed_error_payload(exc: BinanceSignedError) -> dict[str, Any]:
         "code": exc.binance_code,
         "message": exc.binance_message,
     }
+
+
+def _is_stale_unknown_order_error(exc: BinanceSignedError) -> bool:
+    message = (exc.binance_message or "").lower()
+    return exc.binance_code == -2011 and (
+        "unknown order" in message
+        or "does not exist" in message
+        or "not found" in message
+    )
 
 
 def _same_side_algo_order(order: Mapping[str, Any], *, order_plan: PositionAdjustmentOrderPlan) -> bool:

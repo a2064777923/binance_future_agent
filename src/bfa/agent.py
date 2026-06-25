@@ -39,7 +39,7 @@ from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.pending_limit_watchdog import execute_pending_limit_watchdog
 from bfa.ops.position_adjustment import build_position_adjustment_plan_report, execute_position_adjustment_plan_report
-from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.candidates import CandidateSignal, StrategyConfig, generate_candidates
 from bfa.strategy.micro_grid_live import (
     MicroGridLiveConfig,
     build_micro_grid_live_candidates,
@@ -378,11 +378,24 @@ def run_agent_once(
             "micro": regime_route_summary(micro_candidates),
             "combined": regime_route_summary([*normal_candidates, *micro_candidates]),
         }
+        micro_fast_lane_enabled = _truthy(config.get("BFA_LIVE_MICRO_GRID_FAST_LANE_ENABLED"))
         fused_candidates = _fuse_live_candidates(
             normal_candidates,
             micro_candidates,
             top_n=top_n,
             enforce_regime=regime_router_enforced,
+        )
+        evaluation_candidates = _live_execution_queue(
+            normal_candidates,
+            micro_candidates,
+            top_n=top_n,
+            enforce_regime=regime_router_enforced,
+            micro_fast_lane=micro_fast_lane_enabled,
+        )
+        source_health["execution_queue"] = _execution_queue_source_health(
+            fused_candidates=fused_candidates,
+            evaluation_candidates=evaluation_candidates,
+            micro_fast_lane=micro_fast_lane_enabled,
         )
         decision_snapshot_event_id = _persist_decision_snapshot(
             store,
@@ -396,11 +409,11 @@ def run_agent_once(
             source_health=source_health,
             normal_candidates=normal_candidates,
             micro_candidates=micro_candidates,
-            fused_candidates=fused_candidates,
+            fused_candidates=evaluation_candidates,
             rejected_candidates=candidates.rejected,
         )
-        persisted_candidate_count = len(persist_candidates(store, fused_candidates))
-        if not fused_candidates:
+        persisted_candidate_count = len(persist_candidates(store, evaluation_candidates))
+        if not evaluation_candidates:
             return AgentRunResult(
                 status="no_candidate",
                 mode=mode.value,
@@ -430,7 +443,7 @@ def run_agent_once(
                 started_at=started_at,
                 market_snapshot_count=len(market_snapshots),
                 narrative_record_count=len(narrative_records),
-                candidate_count=len(fused_candidates),
+                candidate_count=len(evaluation_candidates),
                 rejected_count=len(candidates.rejected),
                 scan_symbols=scan_symbols,
                 ai_accepted=True,
@@ -449,7 +462,7 @@ def run_agent_once(
         return _evaluate_candidate_queue(
             config=config,
             mode=mode,
-            candidates=fused_candidates,
+            candidates=evaluation_candidates,
             exchange_info=exchange_info,
             ai_client=ai_client,
             ai_enabled=ai_enabled and not backoff.active,
@@ -460,7 +473,7 @@ def run_agent_once(
             started_at=started_at,
             market_snapshot_count=len(market_snapshots),
             narrative_record_count=len(narrative_records),
-            candidate_count=len(fused_candidates),
+            candidate_count=len(evaluation_candidates),
             rejected_count=len(candidates.rejected),
             scan_symbols=scan_symbols,
             persisted_candidate_count=persisted_candidate_count,
@@ -1197,12 +1210,24 @@ def _candidate_feature_summary(features: dict[str, Any]) -> dict[str, Any]:
                 "width_percent",
                 "stable_width_percent",
                 "wick_tail_range_percent",
+                "wick_opportunity",
                 "close_position_percent",
                 "turn_count",
                 "edge_alternation_count",
                 "reversal_response_rate",
                 "path_efficiency",
                 "drift_to_width",
+                "recent_path_efficiency",
+                "recent_drift_to_width",
+                "long_reversal_ready",
+                "short_reversal_ready",
+                "long_reversal_reason",
+                "short_reversal_reason",
+                "long_entry_reversal_fraction",
+                "short_entry_reversal_fraction",
+                "long_entry_continuation_fraction",
+                "short_entry_continuation_fraction",
+                "entry_taker_buy_ratio",
                 "long_pullback_quality",
                 "short_pullback_quality",
             )
@@ -1223,6 +1248,20 @@ def _candidate_feature_summary(features: dict[str, Any]) -> dict[str, Any]:
                 "kline_momentum_percent",
                 "kline_micro_momentum_percent",
                 "realized_volatility_percent",
+                "kline_close_position_percent",
+                "micro_grid_side",
+                "wick_opportunity",
+                "long_reversal_ready",
+                "short_reversal_ready",
+                "long_reversal_reason",
+                "short_reversal_reason",
+                "long_entry_reversal_fraction",
+                "short_entry_reversal_fraction",
+                "long_entry_continuation_fraction",
+                "short_entry_continuation_fraction",
+                "long_pullback_quality",
+                "short_pullback_quality",
+                "entry_taker_buy_ratio",
             )
             if key in diagnostics
         }
@@ -1855,6 +1894,124 @@ def _fuse_live_candidates(normal_candidates, micro_candidates, *, top_n: int, en
             by_symbol[symbol] = candidate
     ranked = sorted(by_symbol.values(), key=lambda item: _live_candidate_rank(item), reverse=True)
     return ranked[: max(int(top_n or 0), 1)]
+
+
+def _live_execution_queue(
+    normal_candidates,
+    micro_candidates,
+    *,
+    top_n: int,
+    enforce_regime: bool = False,
+    micro_fast_lane: bool = True,
+) -> list:
+    if not micro_fast_lane:
+        return _fuse_live_candidates(
+            normal_candidates,
+            micro_candidates,
+            top_n=top_n,
+            enforce_regime=enforce_regime,
+        )
+
+    allowed_micro = [
+        _with_candidate_routing_reason(candidate, "micro_grid_fast_lane")
+        for candidate in micro_candidates
+        if not enforce_regime or route_allows_candidate(candidate)
+    ]
+    if not allowed_micro:
+        return _fuse_live_candidates(
+            normal_candidates,
+            [],
+            top_n=top_n,
+            enforce_regime=enforce_regime,
+        )
+
+    allowed_micro = sorted(allowed_micro, key=lambda item: _live_candidate_rank(item), reverse=True)
+    micro_by_symbol = {str(candidate.symbol).upper(): candidate for candidate in allowed_micro}
+    immediate_normal: list[Any] = []
+    delayed_normal: list[Any] = []
+    for candidate in normal_candidates:
+        if enforce_regime and not route_allows_candidate(candidate):
+            continue
+        symbol = str(candidate.symbol).upper()
+        micro = micro_by_symbol.get(symbol)
+        if micro is None:
+            immediate_normal.append(candidate)
+            continue
+        delayed_normal.append(_trend_candidate_delayed_by_micro(candidate, micro))
+
+    normal_limit = max(int(top_n or 0), 1)
+    immediate_normal = sorted(immediate_normal, key=lambda item: _live_candidate_rank(item), reverse=True)
+    delayed_normal = sorted(delayed_normal, key=lambda item: _live_candidate_rank(item), reverse=True)
+    # Micro-grid uses short-lived passive entries; keep all current micro
+    # candidates ahead of the normal queue, then let normal candidates continue
+    # if the fast-lane orders reject or expire.
+    return [*allowed_micro, *immediate_normal[:normal_limit], *delayed_normal[:normal_limit]]
+
+
+def _execution_queue_source_health(*, fused_candidates, evaluation_candidates, micro_fast_lane: bool) -> dict[str, Any]:
+    return {
+        "micro_fast_lane_enabled": bool(micro_fast_lane),
+        "fused_order": [_queue_candidate_summary(candidate) for candidate in fused_candidates],
+        "evaluation_order": [_queue_candidate_summary(candidate) for candidate in evaluation_candidates],
+    }
+
+
+def _queue_candidate_summary(candidate) -> dict[str, Any]:
+    features = getattr(candidate, "features", {}) or {}
+    if not isinstance(features, dict):
+        features = {}
+    return {
+        "symbol": getattr(candidate, "symbol", None),
+        "strategy_leg": features.get("strategy_leg"),
+        "side": _candidate_declared_side(candidate),
+        "score": getattr(candidate, "score", None),
+        "routing": list(features.get("execution_queue_routing") or []),
+    }
+
+
+def _trend_candidate_delayed_by_micro(candidate, micro_candidate) -> CandidateSignal:
+    reasons = ["micro_grid_same_symbol_fast_lane_preempts_trend"]
+    trend_side = _candidate_declared_side(candidate)
+    micro_side = _candidate_declared_side(micro_candidate)
+    if trend_side in {"long", "short"} and micro_side in {"long", "short"} and trend_side != micro_side:
+        reasons.append("micro_grid_opposite_side_requires_trend_recheck")
+    return _with_candidate_routing_reason(candidate, *reasons, delayed_by_symbol=str(micro_candidate.symbol).upper())
+
+
+def _with_candidate_routing_reason(candidate, *reasons: str, delayed_by_symbol: str | None = None) -> CandidateSignal:
+    features = dict(getattr(candidate, "features", {}) or {})
+    existing_routing = [str(item) for item in features.get("execution_queue_routing") or []]
+    routing = _dedupe([*existing_routing, *[reason for reason in reasons if reason]])
+    features["execution_queue_routing"] = routing
+    if delayed_by_symbol:
+        features["execution_queue_delayed_by_symbol"] = delayed_by_symbol
+    reason_codes = _dedupe([*list(getattr(candidate, "reason_codes", []) or []), *routing])
+    return replace(candidate, reason_codes=reason_codes, features=features)
+
+
+def _candidate_declared_side(candidate) -> str:
+    features = getattr(candidate, "features", {}) or {}
+    if not isinstance(features, dict):
+        features = {}
+    side = str(features.get("micro_grid_side") or features.get("selected_side") or "").strip().lower()
+    if side in {"long", "buy"}:
+        return "long"
+    if side in {"short", "sell"}:
+        return "short"
+    reasons = [str(reason).lower() for reason in getattr(candidate, "reason_codes", []) or []]
+    if any("directional_bias_long" in reason or "supports_long" in reason or "quant_long_setup" in reason for reason in reasons):
+        return "long"
+    if any("directional_bias_short" in reason or "supports_short" in reason or "quant_short_setup" in reason for reason in reasons):
+        return "short"
+    momentum = _float_or_none(features.get("kline_micro_momentum_percent"))
+    if momentum is None:
+        momentum = _float_or_none(features.get("kline_momentum_percent"))
+    if momentum is not None:
+        if momentum > 0:
+            return "long"
+        if momentum < 0:
+            return "short"
+    return "unknown"
 
 
 def _live_candidate_rank(candidate) -> tuple[float, float, str]:

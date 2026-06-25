@@ -370,11 +370,11 @@ def _position_item(
         reasons.append("active_position_without_confirmed_algo_protection")
     if intent is None:
         reasons.append("active_position_without_matching_submitted_intent")
-    elif intent.hold_time_minutes is None:
-        reasons.append("hold_time_missing")
     else:
         elapsed = round((_parse_iso(checked_at) - _parse_iso(intent.occurred_at)).total_seconds() / 60.0, 2)
-        if elapsed > intent.hold_time_minutes:
+        if intent.hold_time_minutes is None:
+            reasons.append("hold_time_missing")
+        elif elapsed > intent.hold_time_minutes:
             overdue = True
             reasons.append("hold_time_expired")
     return PositionHoldItem(

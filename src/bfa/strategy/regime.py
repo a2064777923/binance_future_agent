@@ -84,9 +84,17 @@ def classify_regime(
     diagnostics = _diagnostics(features)
     trend_signal, trend_reasons, trend_score = _trend_evidence(diagnostics)
     range_signal, range_reasons, range_score = _range_evidence(diagnostics)
+    micro_wick_signal, micro_wick_reasons, micro_wick_score = _micro_grid_wick_reversal_evidence(
+        diagnostics,
+        strategy_leg=leg,
+    )
     chop_reasons = _chop_reasons(diagnostics, trend_signal=trend_signal, range_signal=range_signal)
 
-    if chop_reasons:
+    if micro_wick_signal:
+        label = RANGE
+        confidence = _clamp(max(range_score, micro_wick_score), 0.0, 0.95)
+        reasons = _dedupe([*micro_wick_reasons, *range_reasons])
+    elif chop_reasons:
         label = CHOP
         confidence = _clamp(0.58 + 0.06 * len(chop_reasons), 0.58, 0.88)
         reasons = chop_reasons
@@ -226,6 +234,9 @@ def _diagnostics(features: Mapping[str, Any]) -> dict[str, Any]:
     momentum = _float_or_none(features.get("kline_momentum_percent"))
     micro_momentum = _float_or_none(features.get("kline_micro_momentum_percent"))
     realized_vol = _first_float(features.get("realized_volatility_percent"), features.get("atr_percent"))
+    close_position = _first_float(features.get("kline_close_position_percent"), micro_state.get("close_position_percent"))
+    volume_change = _float_or_none(features.get("kline_quote_volume_change_percent"))
+    range_max = _float_or_none(features.get("kline_range_max_percent"))
     width_expansion_ratio = None
     if width is not None and stable_width is not None and stable_width > 0:
         width_expansion_ratio = width / stable_width
@@ -236,10 +247,27 @@ def _diagnostics(features: Mapping[str, Any]) -> dict[str, Any]:
         "stable_width_percent": stable_width,
         "width_expansion_ratio": width_expansion_ratio,
         "drift_to_width": drift_to_width,
+        "reversal_response_rate": _float_or_none(micro_state.get("reversal_response_rate")),
         "ema_spread_percent": ema_spread,
         "kline_momentum_percent": momentum,
         "kline_micro_momentum_percent": micro_momentum,
         "realized_volatility_percent": realized_vol,
+        "kline_close_position_percent": close_position,
+        "kline_quote_volume_change_percent": volume_change,
+        "kline_range_max_percent": range_max,
+        "micro_grid_side": _normalize_side(features.get("micro_grid_side")),
+        "wick_opportunity": _truthy(features.get("wick_opportunity"), micro_state.get("wick_opportunity")),
+        "long_reversal_ready": _truthy(micro_state.get("long_reversal_ready")),
+        "short_reversal_ready": _truthy(micro_state.get("short_reversal_ready")),
+        "long_reversal_reason": str(micro_state.get("long_reversal_reason") or ""),
+        "short_reversal_reason": str(micro_state.get("short_reversal_reason") or ""),
+        "long_entry_reversal_fraction": _float_or_none(micro_state.get("long_entry_reversal_fraction")),
+        "short_entry_reversal_fraction": _float_or_none(micro_state.get("short_entry_reversal_fraction")),
+        "long_entry_continuation_fraction": _float_or_none(micro_state.get("long_entry_continuation_fraction")),
+        "short_entry_continuation_fraction": _float_or_none(micro_state.get("short_entry_continuation_fraction")),
+        "long_pullback_quality": _float_or_none(micro_state.get("long_pullback_quality")),
+        "short_pullback_quality": _float_or_none(micro_state.get("short_pullback_quality")),
+        "entry_taker_buy_ratio": _float_or_none(micro_state.get("entry_taker_buy_ratio")),
     }
 
 
@@ -309,6 +337,67 @@ def _range_evidence(diagnostics: Mapping[str, Any]) -> tuple[bool, list[str], fl
     return path_ok and edge_ok and width_ok and ema_ok and drift_ok, reasons or ["range_signal"], score
 
 
+def _micro_grid_wick_reversal_evidence(
+    diagnostics: Mapping[str, Any],
+    *,
+    strategy_leg: str,
+) -> tuple[bool, list[str], float]:
+    if _normalize_strategy_leg(strategy_leg) != MICRO_GRID_LEG:
+        return False, [], 0.0
+    if not bool(diagnostics.get("wick_opportunity")):
+        return False, [], 0.0
+    width = _float_or_none(diagnostics.get("range_width_percent"))
+    if width is None or width < RANGE_MIN_WIDTH_PERCENT or width > RANGE_MAX_WIDTH_PERCENT * 1.4:
+        return False, [], 0.0
+    side = _normalize_side(diagnostics.get("micro_grid_side"))
+    if side not in {"long", "short"}:
+        return False, [], 0.0
+    path = _float_or_none(diagnostics.get("path_efficiency"))
+    edge_alternations = _int_or_none(diagnostics.get("edge_alternation_count"))
+    response = _float_or_none(diagnostics.get("reversal_response_rate"))
+    structure_ok = (
+        (path is not None and path <= 0.48)
+        or (edge_alternations is not None and edge_alternations >= RANGE_MIN_EDGE_ALTERNATIONS)
+        or (response is not None and response >= 0.45)
+    )
+    if not structure_ok:
+        return False, [], 0.0
+
+    if side == "short":
+        ready = bool(diagnostics.get("short_reversal_ready"))
+        reason = str(diagnostics.get("short_reversal_reason") or "")
+        reversal = _float_or_none(diagnostics.get("short_entry_reversal_fraction")) or 0.0
+        continuation = _float_or_none(diagnostics.get("short_entry_continuation_fraction")) or 0.0
+        pullback = _float_or_none(diagnostics.get("short_pullback_quality")) or 0.0
+        close_position = _float_or_none(diagnostics.get("kline_close_position_percent"))
+        edge_ok = close_position is None or close_position >= 50.0
+        flow = _float_or_none(diagnostics.get("entry_taker_buy_ratio"))
+        flow_ok = flow is None or flow <= 0.72
+    else:
+        ready = bool(diagnostics.get("long_reversal_ready"))
+        reason = str(diagnostics.get("long_reversal_reason") or "")
+        reversal = _float_or_none(diagnostics.get("long_entry_reversal_fraction")) or 0.0
+        continuation = _float_or_none(diagnostics.get("long_entry_continuation_fraction")) or 0.0
+        pullback = _float_or_none(diagnostics.get("long_pullback_quality")) or 0.0
+        close_position = _float_or_none(diagnostics.get("kline_close_position_percent"))
+        edge_ok = close_position is None or close_position <= 50.0
+        flow = _float_or_none(diagnostics.get("entry_taker_buy_ratio"))
+        flow_ok = flow is None or flow >= 0.28
+
+    if reason.endswith("still_breaking_up") or reason.endswith("still_breaking_down"):
+        return False, [], 0.0
+    reversal_ok = ready or reason == "ready" or reversal >= 0.10 or pullback >= 0.25
+    continuation_ok = continuation <= 0.35
+    if not (edge_ok and flow_ok and reversal_ok and continuation_ok):
+        return False, [], 0.0
+    score = 0.60
+    score += min(max(reversal, 0.0), 0.45) * 0.25
+    score += min(max(pullback, 0.0), 1.0) * 0.10
+    if edge_alternations is not None:
+        score += min(max(edge_alternations - 1, 0), 4) * 0.025
+    return True, [f"range_micro_grid_{side}_wick_reversal_opportunity"], score
+
+
 def _chop_reasons(
     diagnostics: Mapping[str, Any],
     *,
@@ -325,6 +414,7 @@ def _chop_reasons(
     drift = _float_or_none(diagnostics.get("drift_to_width"))
     if expansion is not None and expansion >= 1.75:
         reasons.append("regime_range_width_expanding")
+    reasons.extend(_trend_edge_exhaustion_reasons(diagnostics) if trend_signal else [])
     if width is not None and width > RANGE_MAX_WIDTH_PERCENT * 1.8 and not trend_signal:
         reasons.append("regime_width_extreme_without_direction")
     if realized_vol is not None and realized_vol >= 8.0 and not trend_signal:
@@ -332,6 +422,32 @@ def _chop_reasons(
     if drift is not None and drift > 1.25 and path is not None and path < TREND_MIN_PATH_EFFICIENCY:
         reasons.append("regime_drift_without_clean_path")
     return reasons
+
+
+def _trend_edge_exhaustion_reasons(diagnostics: Mapping[str, Any]) -> list[str]:
+    close_position = _float_or_none(diagnostics.get("kline_close_position_percent"))
+    volume_change = _float_or_none(diagnostics.get("kline_quote_volume_change_percent"))
+    momentum = _float_or_none(diagnostics.get("kline_momentum_percent"))
+    micro_momentum = _float_or_none(diagnostics.get("kline_micro_momentum_percent"))
+    width = _float_or_none(diagnostics.get("range_width_percent"))
+    range_max = _float_or_none(diagnostics.get("kline_range_max_percent"))
+    stable_width = _float_or_none(diagnostics.get("stable_width_percent"))
+    if close_position is None or volume_change is None or momentum is None or micro_momentum is None:
+        return []
+    if volume_change > -50.0:
+        return []
+    recent_spike = False
+    if range_max is not None:
+        recent_spike = range_max >= 0.8
+        if width is not None and width > 0:
+            recent_spike = recent_spike or range_max >= width * 4.0
+        if stable_width is not None and stable_width > 0:
+            recent_spike = recent_spike or range_max >= stable_width * 3.0
+    if momentum > 0 and close_position >= 68.0 and micro_momentum <= 0.0:
+        return ["regime_trend_long_edge_exhaustion" + (":recent_spike" if recent_spike else "")]
+    if momentum < 0 and close_position <= 32.0 and micro_momentum >= 0.0:
+        return ["regime_trend_short_edge_exhaustion" + (":recent_spike" if recent_spike else "")]
+    return []
 
 
 def _normalize_strategy_leg(value: str) -> str:
@@ -342,6 +458,15 @@ def _normalize_strategy_leg(value: str) -> str:
         return RANGE_REVERSION_LEG
     if normalized in {"trend", "normal", "quant", "quant_setup", ""}:
         return TREND_LEG if normalized else ""
+    return normalized
+
+
+def _normalize_side(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"buy", "long"}:
+        return "long"
+    if normalized in {"sell", "short"}:
+        return "short"
     return normalized
 
 
@@ -366,6 +491,18 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _truthy(*values: Any) -> bool:
+    for value in values:
+        if isinstance(value, bool):
+            if value:
+                return True
+            continue
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "y", "on"}:
+            return True
+    return False
 
 
 def _int_or_none(value: Any) -> int | None:

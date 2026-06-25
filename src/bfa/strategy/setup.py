@@ -147,6 +147,10 @@ class TradeSetupProfile:
     block_hot_micro_reversal: bool = False
     block_volume_fade: bool = False
     block_spike_reversal_conflict: bool = False
+    block_trend_edge_exhaustion: bool = False
+    trend_edge_exhaustion_zone_percent: float = 68.0
+    trend_edge_exhaustion_volume_fade_percent: float = -50.0
+    trend_edge_exhaustion_micro_adverse_percent: float = 0.0
     max_adverse_micro_momentum_percent: float | None = None
     min_rsi_for_long: float | None = None
     max_rsi_for_short: float | None = None
@@ -1273,6 +1277,8 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
         rejections.append("hot_move_micro_reversal")
     if profile.block_volume_fade and not is_range_reversion and _volume_fade_against_trade(features, side):
         rejections.append("volume_fade_against_trade")
+    if profile.block_trend_edge_exhaustion and not is_range_reversion:
+        rejections.extend(_trend_edge_exhaustion_rejections(features, side, profile))
     if profile.block_spike_reversal_conflict and not is_range_reversion:
         rejections.extend(_spike_reversal_conflict_rejections(features, side))
     min_confluence = int(_float(profile.min_directional_confluence) or 0)
@@ -1290,6 +1296,28 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
         elif int(mtf["score"]) < required:
             rejections.append(f"mtf_alignment_below_profile_min:{mtf['score']}/{required}")
     return _dedupe(rejections)
+
+
+def _trend_edge_exhaustion_rejections(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> list[str]:
+    close_position = _float(features.get("kline_close_position_percent"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    micro_momentum = _float(features.get("kline_micro_momentum_percent"))
+    momentum = _float(features.get("kline_momentum_percent"))
+    if close_position is None or volume_change is None or micro_momentum is None or momentum is None:
+        return []
+    if volume_change > profile.trend_edge_exhaustion_volume_fade_percent:
+        return []
+    zone = max(50.0, min(95.0, profile.trend_edge_exhaustion_zone_percent))
+    micro_limit = abs(profile.trend_edge_exhaustion_micro_adverse_percent)
+    if side == "long" and momentum > 0 and close_position >= zone and micro_momentum <= -micro_limit:
+        return ["trend_long_edge_exhaustion"]
+    if side == "short" and momentum < 0 and close_position <= 100.0 - zone and micro_momentum >= micro_limit:
+        return ["trend_short_edge_exhaustion"]
+    return []
 
 
 def _post_cost_rejections(target_distance_percent: float, profile: TradeSetupProfile) -> list[str]:

@@ -65,6 +65,8 @@ class FakeSignedClient:
         cross_side_algo_orders=False,
         fail_take_profit_algo=False,
         fail_cancel_algo=False,
+        fail_cancel_algo_code=-2011,
+        fail_cancel_algo_message="Unknown order sent.",
     ):
         self.mark_price = mark_price
         self.closed = False
@@ -73,6 +75,8 @@ class FakeSignedClient:
         self.cross_side_algo_orders = cross_side_algo_orders
         self.fail_take_profit_algo = fail_take_profit_algo
         self.fail_cancel_algo = fail_cancel_algo
+        self.fail_cancel_algo_code = fail_cancel_algo_code
+        self.fail_cancel_algo_message = fail_cancel_algo_message
         self.position_amount = 0.2
         self.orders = []
         self.algo_orders = []
@@ -150,8 +154,8 @@ class FakeSignedClient:
                 endpoint="/fapi/v1/algoOrder",
                 params={},
                 status_code=400,
-                binance_code=-2011,
-                binance_message="synthetic cancel failure",
+                binance_code=self.fail_cancel_algo_code,
+                binance_message=self.fail_cancel_algo_message,
                 headers={},
             )
         return {"status": "CANCELED", **kwargs}
@@ -647,8 +651,47 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
         self.assertEqual(report.executions[0].error["message"], "protective order replacement needs follow-up")
         self.assertIn("take_profit_error", report.executions[0].order_response)
 
-    def test_trailing_replacement_defers_cleanup_when_old_algo_cancel_fails(self):
+    def test_trailing_replacement_continues_when_old_algo_cancel_is_stale_unknown_order(self):
         fake = FakeSignedClient(mark_price="107", fail_cancel_algo=True)
+        config = load_config(
+            env={
+                "BFA_MODE": "live",
+                "BFA_POSITION_MODE": "hedge",
+                "BFA_TRAILING_PROTECTION_ENABLED": "true",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            }
+        )
+        preview = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(len(fake.algo_orders), 2)
+        self.assertEqual(len(fake.cancelled_algo_orders), 2)
+        cancel_results = report.executions[0].order_response["cancel_replaced_algo_orders"]
+        self.assertTrue(all(item.get("status") == "stale_missing" for item in cancel_results))
+
+    def test_trailing_replacement_defers_cleanup_when_old_algo_cancel_really_fails(self):
+        fake = FakeSignedClient(
+            mark_price="107",
+            fail_cancel_algo=True,
+            fail_cancel_algo_code=-2019,
+            fail_cancel_algo_message="margin is insufficient",
+        )
         config = load_config(
             env={
                 "BFA_MODE": "live",

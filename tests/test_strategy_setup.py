@@ -182,6 +182,53 @@ class StrategySetupTests(unittest.TestCase):
         self.assertIn("trend_not_aligned", setup.reasons)
         self.assertEqual(setup.price_basis["profile"], "selective")
 
+    def test_live_action_flow_blocks_upper_edge_exhaustion_long(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+        setup = build_trade_setup(
+            self.candidate(
+                symbol="AVAXUSDT",
+                price_change_percent=3.348,
+                quote_volume=116_685_034,
+                open_interest_value=58_828_037,
+                open_interest_change_percent=-0.2236,
+                taker_buy_sell_ratio=2.142,
+                taker_buy_sell_ratio_change=1.3831,
+                kline_momentum_percent=0.9069585613760863,
+                kline_micro_momentum_percent=-0.04646840148699061,
+                kline_close_position_percent=72.727272727272,
+                kline_quote_volume_change_percent=-75.68259693900472,
+                kline_range_percent=0.17046335037967023,
+                kline_range_mean_percent=0.28636511767901635,
+                kline_range_max_percent=1.2496143165689664,
+                realized_volatility_percent=0.27791539021495554,
+                atr_percent=0.36085098846605085,
+                ema_fast=6.4417953521781675,
+                ema_slow=6.421256073078146,
+                ema_spread_percent=0.31986388435955565,
+                rsi=62.376237623762556,
+                vwap=6.410696950933156,
+                support_price=6.366,
+                resistance_price=6.492,
+                reference_price=6.453,
+                min_executable_notional=6.453,
+                min_qty=1.0,
+                step_size=1.0,
+            ),
+            risk_limits=RiskLimits(
+                account_capital_usdt=100,
+                max_leverage=30,
+                max_position_notional_usdt=600,
+                max_risk_per_trade_usdt=4,
+                max_daily_loss_usdt=10,
+                max_open_positions=5,
+            ),
+            profile=profile,
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertEqual(setup.side, "flat")
+        self.assertIn("trend_long_edge_exhaustion", setup.reasons)
+
     def test_profile_can_disable_side_without_changing_default(self):
         short_candidate = self.candidate(
             price_change_percent=-4.0,
