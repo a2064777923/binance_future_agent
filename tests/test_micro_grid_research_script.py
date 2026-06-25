@@ -828,6 +828,69 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertTrue(all(entry < state.current_price for entry in long_entries))
         self.assertTrue(all(entry > state.current_price for entry in short_entries))
 
+    def test_dynamic_entry_edge_starts_just_outside_band_edge(self):
+        state = research.replace(
+            self.state(),
+            current_price=100.0,
+            long_entry_edge_fraction=0.42,
+            short_entry_edge_fraction=0.42,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_entry_base_edge_fraction=-0.08,
+                dynamic_entry_max_push_fraction=0.24,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        short = next(order for order in orders if order.side == "short")
+        self.assertAlmostEqual(research.edge_fraction_for_order("long", long.entry_price, state), -0.08)
+        self.assertAlmostEqual(research.edge_fraction_for_order("short", short.entry_price, state), -0.08)
+        self.assertIn("dynamic_entry_base_edge_fraction:-0.08", long.reason_codes)
+        self.assertIn("dynamic_entry_applied_edge_fraction:-0.08", short.reason_codes)
+
+    def test_dynamic_entry_edge_pushes_farther_when_flow_and_momentum_are_forceful(self):
+        state = research.replace(
+            self.state(),
+            current_price=100.0,
+            long_entry_edge_fraction=0.42,
+            short_entry_edge_fraction=0.42,
+            recent_drift_percent=-1.4,
+            instantaneous_vol_percent=0.8,
+            recent_spike_depth_percent=2.0,
+            entry_taker_buy_ratio=0.18,
+            long_entry_continuation_fraction=0.18,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_entry_base_edge_fraction=-0.08,
+                dynamic_entry_max_push_fraction=0.24,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        long_edge = research.edge_fraction_for_order("long", long.entry_price, state)
+        self.assertLess(long_edge, -0.08)
+        self.assertGreaterEqual(long_edge + 1e-9, -0.32)
+        self.assertTrue(any(code.startswith("dynamic_entry_total_push_fraction:") for code in long.reason_codes))
+        self.assertIn("dynamic_entry_flow_pressure:1.0", long.reason_codes)
+
     def test_directional_path_is_rejected_as_trend_pause(self):
         state, reasons = research.build_micro_grid_state(trend_seconds(count=120), 80, self.profile())
 

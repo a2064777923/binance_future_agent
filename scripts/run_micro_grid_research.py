@@ -67,6 +67,14 @@ class MicroGridProfile:
     min_filled_grid_layers: int = 1
     min_reservation_edge_fraction: float = -0.12
     max_reservation_edge_fraction: float = 0.50
+    dynamic_entry_edge_enabled: bool = False
+    dynamic_entry_base_edge_fraction: float = -0.08
+    dynamic_entry_max_push_fraction: float = 0.26
+    dynamic_entry_flow_push_fraction: float = 0.08
+    dynamic_entry_momentum_push_fraction: float = 0.08
+    dynamic_entry_volatility_push_fraction: float = 0.05
+    dynamic_entry_wick_push_fraction: float = 0.08
+    dynamic_entry_continuation_push_fraction: float = 0.05
     post_only_entry_gap_bps: float = 0.0
     dynamic_wick_enabled: bool = True
     wick_model_mode: str = "ev"
@@ -563,6 +571,14 @@ def main() -> int:
     parser.add_argument("--min-filled-grid-layers", type=int, default=MicroGridProfile.min_filled_grid_layers)
     parser.add_argument("--min-reservation-edge-fraction", type=float, default=MicroGridProfile.min_reservation_edge_fraction)
     parser.add_argument("--max-reservation-edge-fraction", type=float, default=MicroGridProfile.max_reservation_edge_fraction)
+    parser.add_argument("--dynamic-entry-edge-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_entry_edge_enabled)
+    parser.add_argument("--dynamic-entry-base-edge-fraction", type=float, default=MicroGridProfile.dynamic_entry_base_edge_fraction)
+    parser.add_argument("--dynamic-entry-max-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_max_push_fraction)
+    parser.add_argument("--dynamic-entry-flow-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_flow_push_fraction)
+    parser.add_argument("--dynamic-entry-momentum-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_momentum_push_fraction)
+    parser.add_argument("--dynamic-entry-volatility-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_volatility_push_fraction)
+    parser.add_argument("--dynamic-entry-wick-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_wick_push_fraction)
+    parser.add_argument("--dynamic-entry-continuation-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_continuation_push_fraction)
     parser.add_argument("--post-only-entry-gap-bps", type=float, default=MicroGridProfile.post_only_entry_gap_bps)
     parser.add_argument("--min-width-percent", type=float, default=MicroGridProfile.min_width_percent)
     parser.add_argument("--max-width-percent", type=float, default=MicroGridProfile.max_width_percent)
@@ -685,6 +701,14 @@ def main() -> int:
         min_filled_grid_layers=args.min_filled_grid_layers,
         min_reservation_edge_fraction=args.min_reservation_edge_fraction,
         max_reservation_edge_fraction=args.max_reservation_edge_fraction,
+        dynamic_entry_edge_enabled=args.dynamic_entry_edge_enabled,
+        dynamic_entry_base_edge_fraction=args.dynamic_entry_base_edge_fraction,
+        dynamic_entry_max_push_fraction=args.dynamic_entry_max_push_fraction,
+        dynamic_entry_flow_push_fraction=args.dynamic_entry_flow_push_fraction,
+        dynamic_entry_momentum_push_fraction=args.dynamic_entry_momentum_push_fraction,
+        dynamic_entry_volatility_push_fraction=args.dynamic_entry_volatility_push_fraction,
+        dynamic_entry_wick_push_fraction=args.dynamic_entry_wick_push_fraction,
+        dynamic_entry_continuation_push_fraction=args.dynamic_entry_continuation_push_fraction,
         post_only_entry_gap_bps=args.post_only_entry_gap_bps,
         min_width_percent=args.min_width_percent,
         max_width_percent=args.max_width_percent,
@@ -1645,6 +1669,85 @@ def classify_vol_regime(instantaneous_vol_percent: float, profile: "MicroGridPro
     return (1.0, 1.0, 1.0)  # mid regime: no scaling
 
 
+def minimum_entry_edge_fraction(profile: MicroGridProfile) -> float:
+    lower = profile.min_reservation_edge_fraction
+    if profile.dynamic_entry_edge_enabled:
+        lower = min(
+            lower,
+            profile.dynamic_entry_base_edge_fraction - max(0.0, profile.dynamic_entry_max_push_fraction),
+            profile.wick_min_entry_fraction,
+        )
+    return lower
+
+
+def dynamic_entry_edge_fraction(side: str, state: MicroGridState, profile: MicroGridProfile) -> tuple[float, list[str]]:
+    lower = minimum_entry_edge_fraction(profile)
+    base = clamp(profile.dynamic_entry_base_edge_fraction, lower, profile.max_reservation_edge_fraction)
+    if not profile.dynamic_entry_edge_enabled:
+        return base, []
+
+    width = max(abs(state.width_percent), 0.0001)
+    if side == "long":
+        flow_pressure = clamp((0.50 - state.entry_taker_buy_ratio) / 0.18, 0.0, 1.0)
+        directional_drift = max(0.0, -state.recent_drift_percent)
+        continuation_fraction = state.long_entry_continuation_fraction
+    else:
+        flow_pressure = clamp((state.entry_taker_buy_ratio - 0.50) / 0.18, 0.0, 1.0)
+        directional_drift = max(0.0, state.recent_drift_percent)
+        continuation_fraction = state.short_entry_continuation_fraction
+
+    momentum_pressure = clamp(
+        directional_drift / max(width * 0.35, profile.round_trip_cost_percent * 1.5, 0.04),
+        0.0,
+        1.0,
+    )
+    volatility_pressure = clamp(
+        state.instantaneous_vol_percent / max(width * 0.25, profile.round_trip_cost_percent, 0.03),
+        0.0,
+        1.0,
+    )
+    wick_pressure = clamp(
+        state.recent_spike_depth_percent / max(width * 0.75, profile.spike_depth_min_percent, 0.01),
+        0.0,
+        1.0,
+    )
+    continuation_pressure = clamp(
+        continuation_fraction / max(profile.reversal_max_continuation_fraction, 0.02),
+        0.0,
+        1.0,
+    )
+
+    flow_push = max(0.0, profile.dynamic_entry_flow_push_fraction) * flow_pressure
+    momentum_push = max(0.0, profile.dynamic_entry_momentum_push_fraction) * momentum_pressure
+    volatility_push = max(0.0, profile.dynamic_entry_volatility_push_fraction) * volatility_pressure
+    wick_push = max(0.0, profile.dynamic_entry_wick_push_fraction) * wick_pressure
+    continuation_push = max(0.0, profile.dynamic_entry_continuation_push_fraction) * continuation_pressure
+    total_push = min(
+        max(0.0, profile.dynamic_entry_max_push_fraction),
+        flow_push + momentum_push + volatility_push + wick_push + continuation_push,
+    )
+    edge = clamp(base - total_push, lower, profile.max_reservation_edge_fraction)
+    multiplier = abs(edge) / max(abs(base), 1e-9)
+    return edge, [
+        f"dynamic_entry_enabled:{profile.dynamic_entry_edge_enabled}",
+        f"dynamic_entry_base_edge_fraction:{round(base, 6)}",
+        f"dynamic_entry_min_edge_fraction:{round(lower, 6)}",
+        f"dynamic_entry_flow_pressure:{round(flow_pressure, 6)}",
+        f"dynamic_entry_flow_push_fraction:{round(flow_push, 6)}",
+        f"dynamic_entry_momentum_pressure:{round(momentum_pressure, 6)}",
+        f"dynamic_entry_momentum_push_fraction:{round(momentum_push, 6)}",
+        f"dynamic_entry_volatility_pressure:{round(volatility_pressure, 6)}",
+        f"dynamic_entry_volatility_push_fraction:{round(volatility_push, 6)}",
+        f"dynamic_entry_wick_pressure:{round(wick_pressure, 6)}",
+        f"dynamic_entry_wick_push_fraction:{round(wick_push, 6)}",
+        f"dynamic_entry_continuation_pressure:{round(continuation_pressure, 6)}",
+        f"dynamic_entry_continuation_push_fraction:{round(continuation_push, 6)}",
+        f"dynamic_entry_total_push_fraction:{round(total_push, 6)}",
+        f"dynamic_entry_push_multiplier:{round(multiplier, 6)}",
+        f"dynamic_entry_model_edge_fraction:{round(edge, 6)}",
+    ]
+
+
 def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProfile) -> list[GridOrder]:
     span = state.upper_price - state.lower_price
     if span <= 0:
@@ -1673,6 +1776,7 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         sell_entry = max(sell_entry, state.upper_price - span * entry_fraction)
     buy_edge_fraction = reservation_adjusted_edge_fraction("long", edge_fraction_for_price("long", buy_entry, state), state, profile)
     sell_edge_fraction = reservation_adjusted_edge_fraction("short", edge_fraction_for_price("short", sell_entry, state), state, profile)
+    entry_reason_codes: dict[str, list[str]] = {"long": [], "short": []}
     # --- volatility regime adaptive scaling (偵察 + 動態適配 + 快進快出) ---
     # Bucket the instantaneous vol into low/mid/high and rescale stop/target/hold
     # so the leg is not stopped by noise in high vol nor dead in low vol.
@@ -1708,6 +1812,36 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
             sell_stop_fraction = max(sell_stop_fraction, spike_stop_frac)
             buy_target_fraction = max(buy_target_fraction, spike_target_frac)
             sell_target_fraction = max(sell_target_fraction, spike_target_frac)
+            spike_reasons = [
+                f"spike_depth_entry_edge_fraction:{round(spike_entry_edge, 6)}",
+                f"spike_depth_percent:{round(state.recent_spike_depth_percent, 6)}",
+                f"spike_depth_in_span:{round(depth_in_span, 6)}",
+            ]
+            entry_reason_codes["long"].extend(spike_reasons)
+            entry_reason_codes["short"].extend(spike_reasons)
+    if profile.dynamic_entry_edge_enabled:
+        long_dynamic_edge, long_dynamic_reasons = dynamic_entry_edge_fraction("long", state, profile)
+        short_dynamic_edge, short_dynamic_reasons = dynamic_entry_edge_fraction("short", state, profile)
+        long_existing_edge = buy_edge_fraction
+        short_existing_edge = sell_edge_fraction
+        buy_edge_fraction = min(buy_edge_fraction, long_dynamic_edge)
+        sell_edge_fraction = min(sell_edge_fraction, short_dynamic_edge)
+        entry_reason_codes["long"].extend(
+            [
+                *long_dynamic_reasons,
+                f"dynamic_entry_existing_edge_fraction:{round(long_existing_edge, 6)}",
+                f"dynamic_entry_existing_deeper:{long_existing_edge < long_dynamic_edge}",
+                f"dynamic_entry_applied_edge_fraction:{round(buy_edge_fraction, 6)}",
+            ]
+        )
+        entry_reason_codes["short"].extend(
+            [
+                *short_dynamic_reasons,
+                f"dynamic_entry_existing_edge_fraction:{round(short_existing_edge, 6)}",
+                f"dynamic_entry_existing_deeper:{short_existing_edge < short_dynamic_edge}",
+                f"dynamic_entry_applied_edge_fraction:{round(sell_edge_fraction, 6)}",
+            ]
+        )
     if profile.dynamic_level_planner_enabled:
         long_plan = dynamic_level_plan(
             "long",
@@ -1740,20 +1874,24 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         short_plan = None
         buy_edge_fraction = pullback_adjusted_edge_fraction("long", buy_edge_fraction, state, profile)
         sell_edge_fraction = pullback_adjusted_edge_fraction("short", sell_edge_fraction, state, profile)
+    if profile.dynamic_entry_edge_enabled:
+        entry_reason_codes["long"].append(f"dynamic_entry_post_pullback_edge_fraction:{round(buy_edge_fraction, 6)}")
+        entry_reason_codes["short"].append(f"dynamic_entry_post_pullback_edge_fraction:{round(sell_edge_fraction, 6)}")
     grid_range_fraction = dynamic_grid_range_fraction(state, profile)
     target_buffer = span * clamp(profile.target_edge_buffer_fraction, 0.0, 0.35)
     orders: list[GridOrder] = []
     layers = max(1, int(profile.grid_layer_count))
     layer_spacing = grid_range_fraction * max(0.0, profile.grid_layer_spacing_fraction) / max(1, layers - 1)
     seen_entries: set[tuple[str, int]] = set()
-    for side, base_edge_fraction, target_fraction, stop_fraction, hold_seconds, plan in (
-        ("long", buy_edge_fraction, buy_target_fraction, buy_stop_fraction, buy_hold_seconds, long_plan),
-        ("short", sell_edge_fraction, sell_target_fraction, sell_stop_fraction, sell_hold_seconds, short_plan),
+    min_edge_fraction = minimum_entry_edge_fraction(profile)
+    for side, base_edge_fraction, target_fraction, stop_fraction, hold_seconds, plan, side_entry_reasons in (
+        ("long", buy_edge_fraction, buy_target_fraction, buy_stop_fraction, buy_hold_seconds, long_plan, entry_reason_codes["long"]),
+        ("short", sell_edge_fraction, sell_target_fraction, sell_stop_fraction, sell_hold_seconds, short_plan, entry_reason_codes["short"]),
     ):
         for layer in range(layers):
             edge_fraction = clamp(
                 base_edge_fraction - layer * layer_spacing,
-                profile.min_reservation_edge_fraction,
+                min_edge_fraction,
                 profile.max_reservation_edge_fraction,
             )
             if side == "long":
@@ -1787,6 +1925,7 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
                     layer_size=layer_size,
                     edge_fraction=edge_fraction,
                     dynamic_plan=plan,
+                    entry_reason_codes=side_entry_reasons,
                 )
             )
     return orders
@@ -1809,6 +1948,7 @@ def build_single_grid_order(
     layer_size: float,
     edge_fraction: float,
     dynamic_plan: DynamicLevelPlan | None = None,
+    entry_reason_codes: list[str] | None = None,
 ) -> list[GridOrder]:
     reward = (target - entry) if side == "long" else (entry - target)
     risk = (entry - stop) if side == "long" else (stop - entry)
@@ -1928,6 +2068,7 @@ def build_single_grid_order(
                 f"entry_price:{round(entry, 8)}",
                 f"target_price:{round(target, 8)}",
                 f"stop_price:{round(stop, 8)}",
+                *(entry_reason_codes or []),
                 *dynamic_level_reason_codes(dynamic_plan),
             ],
             max_hold_seconds=max(1, int(hold_seconds)),
@@ -1981,7 +2122,7 @@ def grid_price_or_reward_rejection_reasons(state: MicroGridState, profile: Micro
         ("short", sell_edge_fraction, state.short_target_span_fraction if profile.dynamic_wick_enabled else profile.target_fraction, state.short_stop_span_fraction if profile.dynamic_wick_enabled else profile.stop_fraction, state.short_hold_seconds if profile.dynamic_wick_enabled else profile.max_hold_seconds),
     ):
         for layer in range(layers):
-            edge_fraction = clamp(base_edge_fraction - layer * layer_spacing, profile.min_reservation_edge_fraction, profile.max_reservation_edge_fraction)
+            edge_fraction = clamp(base_edge_fraction - layer * layer_spacing, minimum_entry_edge_fraction(profile), profile.max_reservation_edge_fraction)
             if side == "long":
                 entry = state.lower_price + span * edge_fraction
                 target = min(entry + span * target_fraction, state.upper_price - target_buffer)
@@ -2062,7 +2203,7 @@ def reservation_adjusted_edge_fraction(side: str, base_edge_fraction: float, sta
         adjusted = max(base_edge_fraction, reservation_edge_short)
     else:
         adjusted = base_edge_fraction
-    return clamp(adjusted, profile.min_reservation_edge_fraction, profile.max_reservation_edge_fraction)
+    return clamp(adjusted, minimum_entry_edge_fraction(profile), profile.max_reservation_edge_fraction)
 
 
 def pullback_quality_for_side(side: str, state: MicroGridState) -> float:
@@ -2075,8 +2216,9 @@ def pullback_adjusted_edge_fraction(side: str, base_edge_fraction: float, state:
     quality = pullback_quality_for_side(side, state)
     shift = max(0.0, float(profile.pullback_entry_shift_fraction)) * (1.0 - clamp(quality, 0.0, 1.0))
     model = state.long_wick_model if side == "long" else state.short_wick_model
-    ev_min_entry = profile.wick_ev_min_entry_edge_fraction if profile.dynamic_wick_enabled and model == "ev" else profile.min_reservation_edge_fraction
-    lower = max(profile.min_reservation_edge_fraction, ev_min_entry)
+    min_entry = minimum_entry_edge_fraction(profile)
+    ev_min_entry = profile.wick_ev_min_entry_edge_fraction if profile.dynamic_wick_enabled and model == "ev" else min_entry
+    lower = max(min_entry, ev_min_entry)
     lower = min(base_edge_fraction, lower)
     return clamp(base_edge_fraction - shift, lower, profile.max_reservation_edge_fraction)
 
@@ -2101,8 +2243,8 @@ def side_flow_blocks_order(side: str, state: MicroGridState, profile: MicroGridP
 
 def planner_min_entry_edge_fraction(profile: MicroGridProfile) -> float:
     if not profile.dynamic_level_planner_enabled:
-        return profile.min_reservation_edge_fraction
-    return min(profile.min_reservation_edge_fraction, profile.wick_min_entry_fraction)
+        return minimum_entry_edge_fraction(profile)
+    return min(minimum_entry_edge_fraction(profile), profile.wick_min_entry_fraction)
 
 
 def dynamic_level_plan(

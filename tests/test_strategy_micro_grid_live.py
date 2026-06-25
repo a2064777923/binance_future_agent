@@ -92,7 +92,7 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         self.assertEqual(live_config.order_wait_seconds, 30)
 
     def test_default_order_wait_is_twenty_seconds_for_fast_lane_scalps(self):
-        live_config = MicroGridLiveConfig.from_app(load_config())
+        live_config = MicroGridLiveConfig.from_app(load_config(env={}))
 
         self.assertEqual(live_config.order_wait_seconds, 20)
 
