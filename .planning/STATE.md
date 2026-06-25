@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.27
-milestone_name: Adaptive Live Pilot Iteration
-current_phase: 70 — Server Canary And Manual Boundary Verification
-current_phase_name: Server Canary And Manual Boundary Verification
-status: post_gsd_live_iteration
-stopped_at: post-GSD live iterations documented
-last_updated: "2026-06-24T00:00:00Z"
+milestone: v1.28
+milestone_name: Post-GSD Protection And Strategy Hardening
+current_phase: post-GSD live iteration (protection degrade hotfix deployed)
+current_phase_name: Protection Degrade Hotfix + ML Filters + Spike-Depth
+status: live_iteration_active
+stopped_at: protection degrade hotfix deployed to live 2026-06-24
+last_updated: "2026-06-24T21:00:00Z"
 last_activity: 2026-06-24
-last_activity_desc: Post-GSD live strategy and ops iterations documented for handoff
+last_activity_desc: Protection degrade hotfix + micro fast lane + regime routing + ML trend filter + spike-depth entry deployed
 progress:
   total_phases: 5
   completed_phases: 5
@@ -20,9 +20,9 @@ progress:
 # Project State: Binance Futures Agent
 
 **Initialized:** 2026-06-19
-**Current phase:** v1.27 formal phases complete; post-GSD live iteration active
-**Status:** GSD phase history is stale for latest live strategy
-**Last planned:** 2026-06-21 formal GSD plan; 2026-06-24 post-GSD handoff update
+**Current phase:** v1.28 post-GSD protection hardening deployed to live
+**Status:** Live system hardened with fail-closed protection, ML filters, and spike-depth entry; observing live outcomes
+**Last planned:** 2026-06-24 protection degrade hotfix merged to main
 **Plan count:** 0
 
 ## Project Reference
