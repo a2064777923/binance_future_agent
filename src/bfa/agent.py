@@ -101,6 +101,10 @@ class AgentRunResult:
             "entry_order_expired_canceled",
             "entry_order_pending",
             "entry_order_partial_filled_protected",
+            "entry_order_reconciled_from_position",
+            "entry_order_unknown_canceled",
+            "protective_order_failed_no_position",
+            "protective_order_failed_open",
         }
 
     def to_dict(self) -> dict[str, Any]:

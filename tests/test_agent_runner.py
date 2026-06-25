@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bfa.agent import (
+    AgentRunResult,
     _build_live_outcome_guard,
     _candidate_latency_summary,
     _live_execution_queue,
@@ -58,6 +59,31 @@ class LatencyTelemetryTests(unittest.TestCase):
         self.assertEqual(latency["candidate_generated_at_ms"], 1781949603000)
         self.assertEqual(latency["signal_to_candidate_ms"], 2000)
         self.assertTrue(latency["ai_expected"])
+
+
+class AgentRunResultStatusTests(unittest.TestCase):
+    def result(self, status: str, *, submitted: bool = False) -> AgentRunResult:
+        return AgentRunResult(
+            status=status,
+            mode="live",
+            started_at="2026-06-20T10:00:00Z",
+            submitted=submitted,
+        )
+
+    def test_live_execution_reconcile_and_protection_failure_statuses_are_processed_cycles(self):
+        for status in [
+            "entry_order_reconciled_from_position",
+            "entry_order_unknown_canceled",
+            "protective_order_failed_no_position",
+            "protective_order_failed_open",
+        ]:
+            with self.subTest(status=status):
+                self.assertTrue(self.result(status, submitted=True).ok)
+
+    def test_failure_statuses_still_exit_unsuccessfully(self):
+        for status in ["invalid_config", "entry_order_unknown_cancel_failed"]:
+            with self.subTest(status=status):
+                self.assertFalse(self.result(status).ok)
 
 
 class MicroGridFastLaneQueueTests(unittest.TestCase):
