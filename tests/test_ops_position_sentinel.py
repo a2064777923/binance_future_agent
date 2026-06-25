@@ -293,6 +293,41 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertIn("trailing_lock_r:0.18", order_plan.reason_codes)
         self.assertGreater(order_plan.stop_price, 100)
 
+    def test_micro_grid_does_not_trail_immediately_on_tiny_profit_giveback(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(
+            occurred_at="2026-06-20T03:59:48Z",
+            metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
+        )
+        fake_signed = FakeSignedClient(mark_price="100.2")
+        market = FakeMarketClient(
+            closes=[100.0, 100.5, 100.8, 100.45, 100.35, 100.25, 100.2, 100.2],
+            volumes=[30, 30, 30, 30, 18, 16, 14, 12],
+            high_offset=0.25,
+            low_offset=0.15,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+                BFA_POSITION_SENTINEL_MICRO_MIN_PROFIT_R="0.05",
+                BFA_POSITION_SENTINEL_MICRO_MIN_TARGET_PROGRESS="0.05",
+                BFA_POSITION_SENTINEL_MICRO_REVERSAL_THRESHOLD="0.0",
+            ),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "observe")
+        self.assertEqual(report.status, "sentinel_no_allowed_action")
+        self.assertEqual(fake_signed.algo_orders, [])
+
     def test_micro_grid_stagnation_uses_loss_control_trailing(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()

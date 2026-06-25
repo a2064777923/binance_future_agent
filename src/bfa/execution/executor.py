@@ -240,11 +240,17 @@ class ExecutionEngine:
                 reconciled_intent, reconcile_response = self._reconcile_unknown_limit_entry_from_position(intent)
                 response["limit_entry_position_reconcile"] = reconcile_response
                 if reconciled_intent is None:
+                    cancel_resolution = self._cancel_unknown_limit_entry(
+                        intent,
+                        client_order_id=client_order_id,
+                        error=exc,
+                    )
+                    response.update(cancel_resolution.response)
                     return self._finish(
-                        status="entry_order_pending",
-                        submitted=True,
-                        intent=intent,
-                        risk=RiskDecision(True, [*risk.reason_codes, "limit_entry_state_unknown"], risk.warnings),
+                        status=cancel_resolution.status,
+                        submitted=False,
+                        intent=cancel_resolution.intent,
+                        risk=RiskDecision(True, [*risk.reason_codes, cancel_resolution.status], risk.warnings),
                         exchange_response=response,
                     )
                 status = "entry_order_reconciled_from_position"
@@ -861,6 +867,36 @@ class ExecutionEngine:
             )
         return LimitEntryResolution(
             status="entry_order_expired_canceled",
+            submitted=False,
+            intent=intent,
+            response=response,
+        )
+
+    def _cancel_unknown_limit_entry(
+        self,
+        intent: OrderIntent,
+        *,
+        client_order_id: str,
+        error: BinanceSignedError,
+    ) -> LimitEntryResolution:
+        assert self.signed_client is not None
+        response: dict[str, Any] = {
+            "entry_order_query_error": _signed_error_payload(error),
+            "entry_order_final": {"status": "UNKNOWN"},
+            "limit_entry_unknown_resolution": "cancel_attempted_after_query_not_found",
+        }
+        status = "entry_order_unknown_canceled"
+        try:
+            response["entry_order_cancel"] = self.signed_client.cancel_order(
+                symbol=intent.symbol,
+                orig_client_order_id=client_order_id,
+            )
+        except BinanceSignedError as exc:
+            response["entry_order_cancel_error"] = _signed_error_payload(exc)
+            response["limit_entry_unknown_resolution"] = "cancel_failed_after_query_not_found"
+            status = "entry_order_unknown_cancel_failed"
+        return LimitEntryResolution(
+            status=status,
             submitted=False,
             intent=intent,
             response=response,

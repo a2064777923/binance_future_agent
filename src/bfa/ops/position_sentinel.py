@@ -412,6 +412,13 @@ def _signal_allows_trailing(
 ) -> bool:
     if item.algo_protection_count < 2:
         return True
+    if str(profile.get("name") or "") == "micro_grid":
+        loss_control_ready = (
+            _micro_stagnation_detected(item, metrics, profile=profile)
+            or _micro_setup_invalidated(item, metrics, profile=profile)
+        ) and _micro_loss_control_ready(item, metrics, profile=profile)
+        if not loss_control_ready and not _micro_profit_protection_ready(item, metrics, profile=profile):
+            return False
     profitable = (item.stop_r_multiple is not None and item.stop_r_multiple >= min_profit_r) or (
         item.target_progress is not None and item.target_progress >= min_progress
     )
@@ -462,6 +469,9 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
             "loss_control_min_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_GIVEBACK_R"), 0.35),
             "loss_control_hard_adverse_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_HARD_ADVERSE_R"), 0.55),
             "loss_control_target_extension_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_TARGET_EXTENSION_R"), 0.08),
+            "profit_protection_min_seconds": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_SECONDS"), 45.0),
+            "profit_protection_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_PROGRESS"), 0.35),
+            "profit_protection_min_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_R"), 0.45),
         }
     return {
         "name": "trend",
@@ -507,6 +517,22 @@ def _micro_loss_control_ready(item, metrics: Mapping[str, Any], *, profile: Mapp
     )
     hard_adverse_r = _float_or_default(profile.get("loss_control_hard_adverse_r"), 0.55)
     return adverse_r >= hard_adverse_r and _micro_setup_invalidated(item, metrics, profile=profile)
+
+
+def _micro_profit_protection_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
+    if str(profile.get("name") or "") != "micro_grid":
+        return True
+    current_r = _float_or_none(item.stop_r_multiple) or 0.0
+    current_progress = _float_or_none(item.target_progress) or 0.0
+    recent_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
+    recent_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
+    min_r = _float_or_default(profile.get("profit_protection_min_r"), 0.45)
+    min_progress = _float_or_default(profile.get("profit_protection_min_progress"), 0.35)
+    if max(current_r, recent_r) >= min_r or max(current_progress, recent_progress) >= min_progress:
+        return True
+    elapsed = _float_or_none(metrics.get("elapsed_seconds"))
+    min_seconds = _float_or_default(profile.get("profit_protection_min_seconds"), 45.0)
+    return elapsed is not None and elapsed >= min_seconds
 
 
 def _profit_giveback_detected(metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
