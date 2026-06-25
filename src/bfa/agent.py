@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time as dt_time, timedelta
 from pathlib import Path
 import time
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from bfa.ai.client import OpenAIAPIError
 from bfa.ai.decision import AiDecisionRun
@@ -518,9 +519,15 @@ def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[l
         crypto_only = _truthy(config.get("BFA_LIVE_AUTO_HOT_CRYPTO_ONLY", "true"))
         crypto_symbols: set[str] | None = None
         crypto_filter: dict[str, Any] = {"enabled": crypto_only}
+        tradfi_symbols: set[str] = set()
+        tradfi_window: dict[str, Any] | None = None
+        exchange_info_payload: dict[str, Any] | None = None
         if crypto_only:
             exchange_info_payload = market_client.exchange_info().payload
             crypto_symbols, crypto_filter = _crypto_perpetual_symbol_filter(exchange_info_payload)
+        elif _truthy(config.get("BFA_LIVE_TRADFI_WINDOW_ENABLED", "true")):
+            exchange_info_payload = market_client.exchange_info().payload
+            tradfi_symbols, tradfi_window = _tradfi_window_symbol_filter(config, exchange_info_payload)
         ticker_response = market_client.ticker_24hr()
         ticker_payload = ticker_response.payload if isinstance(ticker_response.payload, list) else []
         eligible_ticker_payload = [
@@ -529,6 +536,11 @@ def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[l
             if isinstance(item, dict)
             and str(item.get("symbol", "")).upper() not in excluded
             and (crypto_symbols is None or str(item.get("symbol", "")).upper() in crypto_symbols)
+            and (
+                not tradfi_symbols
+                or str(item.get("symbol", "")).upper() not in tradfi_symbols
+                or bool(tradfi_window.get("window_open"))
+            )
         ]
         hot_rows = select_hot_usdt_symbols(
             eligible_ticker_payload,
@@ -564,6 +576,7 @@ def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[l
         ticker_eligible_payload_count=len(eligible_ticker_payload),
         selected_rows=hot_rows,
         crypto_filter=crypto_filter,
+        tradfi_window=tradfi_window,
         filters=filters,
         fallback_symbols=fallback if not auto_selected else [],
         manual_excluded_symbols=_manual_excluded_symbols(
@@ -618,6 +631,127 @@ def _crypto_perpetual_symbol_filter(exchange_info_payload: dict[str, Any]) -> tu
         "excluded_tradfi_symbols": [item["symbol"] for item in excluded[:50]],
         "excluded_tradfi_sample": excluded[:12],
     }
+
+
+def _tradfi_window_symbol_filter(
+    config: AppConfig,
+    exchange_info_payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> tuple[set[str], dict[str, Any]]:
+    tradfi_symbols = _tradfi_like_symbols(exchange_info_payload)
+    return tradfi_symbols, _tradfi_window_health(config, tradfi_symbols, now=now)
+
+
+def _tradfi_like_symbols(exchange_info_payload: dict[str, Any]) -> set[str]:
+    symbols: set[str] = set()
+    for row in exchange_info_payload.get("symbols", []) if isinstance(exchange_info_payload, dict) else []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol and _tradfi_like(row):
+            symbols.add(symbol)
+    return symbols
+
+
+def _tradfi_window_health(
+    config: AppConfig,
+    tradfi_symbols: set[str] | None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    enabled = _truthy(config.get("BFA_LIVE_TRADFI_WINDOW_ENABLED", "true"))
+    timezone_name = config.get("BFA_LIVE_TRADFI_TIMEZONE", "America/New_York").strip() or "America/New_York"
+    open_text = config.get("BFA_LIVE_TRADFI_OPEN_TIME", "09:30").strip() or "09:30"
+    close_text = config.get("BFA_LIVE_TRADFI_CLOSE_TIME", "16:00").strip() or "16:00"
+    pre_open_minutes = max(0, _int_or_none(config.get("BFA_LIVE_TRADFI_PRE_OPEN_MINUTES")) or 0)
+    post_close_minutes = max(0, _int_or_none(config.get("BFA_LIVE_TRADFI_POST_CLOSE_MINUTES")) or 0)
+    weekdays_only = _truthy(config.get("BFA_LIVE_TRADFI_WEEKDAYS_ONLY", "true"))
+    symbols = sorted(tradfi_symbols or [])
+    payload: dict[str, Any] = {
+        "enabled": enabled,
+        "timezone": timezone_name,
+        "open_time": open_text,
+        "close_time": close_text,
+        "pre_open_minutes": pre_open_minutes,
+        "post_close_minutes": post_close_minutes,
+        "weekdays_only": weekdays_only,
+        "tradfi_symbol_count": len(symbols),
+        "tradfi_symbols_sample": symbols[:50],
+    }
+    if not enabled:
+        payload.update(
+            {
+                "window_open": True,
+                "status": "disabled",
+                "excluded_outside_window_count": 0,
+                "excluded_outside_window_symbols": [],
+            }
+        )
+        return payload
+    tz = _resolve_timezone(timezone_name)
+    if tz is None:
+        payload.update(
+            {
+                "window_open": False,
+                "status": "invalid_timezone",
+                "error": f"unknown timezone: {timezone_name}",
+                "excluded_outside_window_count": len(symbols),
+                "excluded_outside_window_symbols": symbols[:50],
+            }
+        )
+        return payload
+    open_time = _parse_hhmm(open_text)
+    close_time = _parse_hhmm(close_text)
+    if open_time is None or close_time is None:
+        payload.update(
+            {
+                "window_open": False,
+                "status": "invalid_time_config",
+                "excluded_outside_window_count": len(symbols),
+                "excluded_outside_window_symbols": symbols[:50],
+            }
+        )
+        return payload
+    current = (now or datetime.now(UTC)).astimezone(tz)
+    market_open = datetime.combine(current.date(), open_time, tzinfo=tz)
+    market_close = datetime.combine(current.date(), close_time, tzinfo=tz)
+    window_start = market_open - timedelta(minutes=pre_open_minutes)
+    window_end = market_close + timedelta(minutes=post_close_minutes)
+    is_weekday = current.weekday() < 5
+    window_open = window_start <= current <= window_end and (is_weekday or not weekdays_only)
+    excluded = [] if window_open else symbols[:50]
+    payload.update(
+        {
+            "window_open": window_open,
+            "status": "open" if window_open else "closed",
+            "now": current.replace(microsecond=0).isoformat(),
+            "window_start": window_start.replace(microsecond=0).isoformat(),
+            "window_end": window_end.replace(microsecond=0).isoformat(),
+            "weekday": current.weekday(),
+            "is_weekday": is_weekday,
+            "excluded_outside_window_count": 0 if window_open else len(symbols),
+            "excluded_outside_window_symbols": excluded,
+        }
+    )
+    return payload
+
+
+def _resolve_timezone(value: str):
+    if value.strip().upper() in {"UTC", "Z"}:
+        return UTC
+    try:
+        return ZoneInfo(value)
+    except ZoneInfoNotFoundError:
+        return None
+
+
+def _parse_hhmm(value: str) -> dt_time | None:
+    try:
+        parsed = datetime.strptime(value, "%H:%M")
+    except ValueError:
+        return None
+    return dt_time(hour=parsed.hour, minute=parsed.minute)
 
 
 def _non_crypto_perpetual_reasons(row: dict[str, Any]) -> list[str]:
@@ -691,6 +825,7 @@ def _live_source_health_base(
     ticker_eligible_payload_count: int | None = None,
     selected_rows: list[dict[str, Any]] | None = None,
     crypto_filter: dict[str, Any] | None = None,
+    tradfi_window: dict[str, Any] | None = None,
     fallback_reason: str | None = None,
     ticker_error_type: str | None = None,
     ticker_selected_count: int | None = None,
@@ -714,6 +849,8 @@ def _live_source_health_base(
     }
     if crypto_filter is not None:
         ticker["crypto_filter"] = dict(crypto_filter)
+    if tradfi_window is not None:
+        ticker["tradfi_window"] = dict(tradfi_window)
     if ticker_error_type:
         ticker["error_type"] = ticker_error_type
     return {
@@ -981,6 +1118,8 @@ def _ticker_source_health_summary(health) -> dict[str, Any]:
         payload["selected_rows"] = selected_rows[:80]
     if isinstance(health.get("crypto_filter"), dict):
         payload["crypto_filter"] = dict(health["crypto_filter"])
+    if isinstance(health.get("tradfi_window"), dict):
+        payload["tradfi_window"] = dict(health["tradfi_window"])
     return payload
 
 

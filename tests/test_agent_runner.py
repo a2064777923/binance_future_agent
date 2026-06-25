@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bfa.agent import (
@@ -9,6 +10,7 @@ from bfa.agent import (
     _candidate_latency_summary,
     _live_execution_queue,
     _live_micro_grid_extra_capacity_preflight_reasons,
+    _tradfi_window_symbol_filter,
     run_agent_once,
 )
 from bfa.ai.client import OpenAIAPIError, OpenAIResponse
@@ -1985,6 +1987,156 @@ class AgentRunnerTests(unittest.TestCase):
             {"SNDKUSDT", "XAUUSDT", "MSTRUSDT"},
         )
         self.assertNotIn("SNDKUSDT", result.source_health["symbol_selection"]["selected_symbols"])
+
+    def test_tradfi_window_opens_around_us_equity_hours(self):
+        payload = exchange_info_payload("HOTUSDT", "SNDKUSDT", "XAUUSDT", "MSTRUSDT")
+        for item in payload["symbols"]:
+            if item["symbol"] == "HOTUSDT":
+                item["contractType"] = "PERPETUAL"
+                item["underlyingType"] = "COIN"
+                item["underlyingSubType"] = ["Layer-1"]
+            elif item["symbol"] == "XAUUSDT":
+                item["contractType"] = "TRADIFI_PERPETUAL"
+                item["underlyingType"] = "COMMODITY"
+                item["underlyingSubType"] = ["TradFi"]
+            else:
+                item["contractType"] = "TRADIFI_PERPETUAL"
+                item["underlyingType"] = "EQUITY"
+                item["underlyingSubType"] = ["TradFi"]
+        config = load_config(
+            {
+                "BFA_LIVE_TRADFI_TIMEZONE": "UTC",
+                "BFA_LIVE_TRADFI_OPEN_TIME": "09:30",
+                "BFA_LIVE_TRADFI_CLOSE_TIME": "16:00",
+                "BFA_LIVE_TRADFI_PRE_OPEN_MINUTES": "30",
+                "BFA_LIVE_TRADFI_POST_CLOSE_MINUTES": "60",
+            }
+        )
+
+        symbols, open_health = _tradfi_window_symbol_filter(
+            config,
+            payload,
+            now=datetime(2026, 6, 22, 9, 5, tzinfo=UTC),
+        )
+        _symbols, closed_health = _tradfi_window_symbol_filter(
+            config,
+            payload,
+            now=datetime(2026, 6, 22, 18, 1, tzinfo=UTC),
+        )
+
+        self.assertEqual(symbols, {"SNDKUSDT", "XAUUSDT", "MSTRUSDT"})
+        self.assertTrue(open_health["window_open"])
+        self.assertEqual(open_health["excluded_outside_window_count"], 0)
+        self.assertFalse(closed_health["window_open"])
+        self.assertEqual(closed_health["excluded_outside_window_count"], 3)
+        self.assertEqual(
+            set(closed_health["excluded_outside_window_symbols"]),
+            {"SNDKUSDT", "XAUUSDT", "MSTRUSDT"},
+        )
+
+    def test_run_once_auto_hot_allows_tradfi_perpetuals_inside_window_when_crypto_only_disabled(self):
+        tradfi_symbols = {"SNDKUSDT", "XAUUSDT", "MSTRUSDT"}
+
+        class TradFiHotMarketClient(FakeMarketClient):
+            def __init__(self):
+                self.calls = []
+
+            def ticker_24hr(self, symbol=None):
+                self.calls.append(("ticker_24hr", symbol))
+                return MarketDataResponse(
+                    endpoint="/fapi/v1/ticker/24hr",
+                    params={},
+                    payload=[
+                        {"symbol": "SNDKUSDT", "priceChangePercent": "300", "quoteVolume": "900000000", "count": 1000},
+                        {"symbol": "XAUUSDT", "priceChangePercent": "250", "quoteVolume": "800000000", "count": 1000},
+                        {"symbol": "MSTRUSDT", "priceChangePercent": "200", "quoteVolume": "700000000", "count": 1000},
+                        {"symbol": "HOTUSDT", "priceChangePercent": "8", "quoteVolume": "120000000", "count": 1000},
+                    ],
+                )
+
+            def exchange_info(self):
+                self.calls.append(("exchange_info",))
+                payload = exchange_info_payload("HOTUSDT", "SNDKUSDT", "XAUUSDT", "MSTRUSDT")
+                for item in payload["symbols"]:
+                    if item["symbol"] == "HOTUSDT":
+                        item["contractType"] = "PERPETUAL"
+                        item["underlyingType"] = "COIN"
+                        item["underlyingSubType"] = ["Layer-1"]
+                    elif item["symbol"] == "XAUUSDT":
+                        item["contractType"] = "TRADIFI_PERPETUAL"
+                        item["underlyingType"] = "COMMODITY"
+                        item["underlyingSubType"] = ["TradFi"]
+                    else:
+                        item["contractType"] = "TRADIFI_PERPETUAL"
+                        item["underlyingType"] = "EQUITY"
+                        item["underlyingSubType"] = ["TradFi"]
+                return MarketDataResponse(endpoint="/fapi/v1/exchangeInfo", params={}, payload=payload)
+
+        class HotCollector:
+            def collect_rest_snapshots(self):
+                snapshots = []
+                for symbol in ["HOTUSDT", "SNDKUSDT", "XAUUSDT", "MSTRUSDT"]:
+                    snapshots.extend(snapshots_for_symbol(symbol, price_change="8.0", quote_volume="120000000"))
+                return snapshots
+
+        class HotNarrativeRunner:
+            def collect(self):
+                return [
+                    NormalizedNarrativeRecord(
+                        source="binance_square",
+                        source_id=f"square-{symbol}",
+                        author="poster",
+                        symbol_mentions=[symbol],
+                        text=f"{symbol} narrative",
+                        url=None,
+                        published_at="2026-06-20T09:58:00Z",
+                        collected_at="2026-06-20T10:00:00Z",
+                        engagement={"likes": 70},
+                        raw={},
+                        quality_flags=[],
+                    )
+                    for symbol in ["HOTUSDT", "SNDKUSDT", "XAUUSDT", "MSTRUSDT"]
+                ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            market_client = TradFiHotMarketClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_LIVE_AUTO_HOT_SYMBOLS": "true",
+                    "BFA_LIVE_AUTO_HOT_CRYPTO_ONLY": "false",
+                    "BFA_LIVE_AUTO_HOT_TOP_N": "4",
+                    "BFA_LIVE_TRADFI_TIMEZONE": "UTC",
+                    "BFA_LIVE_TRADFI_OPEN_TIME": "00:00",
+                    "BFA_LIVE_TRADFI_CLOSE_TIME": "23:59",
+                    "BFA_LIVE_TRADFI_PRE_OPEN_MINUTES": "0",
+                    "BFA_LIVE_TRADFI_POST_CLOSE_MINUTES": "0",
+                    "BFA_LIVE_TRADFI_WEEKDAYS_ONLY": "false",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=market_client,
+                collector=HotCollector(),
+                narrative_runner=HotNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+
+        self.assertEqual(result.scan_symbols[:3], ["SNDKUSDT", "XAUUSDT", "MSTRUSDT"])
+        self.assertTrue(tradfi_symbols.issubset(set(result.scan_symbols)))
+        self.assertEqual(result.source_health["binance_24h_ticker"]["eligible_payload_count"], 4)
+        tradfi_window = result.source_health["binance_24h_ticker"]["tradfi_window"]
+        self.assertTrue(tradfi_window["window_open"])
+        self.assertEqual(tradfi_window["tradfi_symbol_count"], 3)
 
     def test_run_once_auto_hot_falls_back_to_market_symbols_when_empty(self):
         class EmptyHotMarketClient(FakeMarketClient):
