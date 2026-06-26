@@ -209,6 +209,8 @@ Micro-grid side selection has been corrected to prefer mean-reversion geometry:
 - near the upper band, short is strongly preferred and long is penalized;
 - near the lower band, long is strongly preferred and short is penalized;
 - EMA/center deviation adds a mean-reversion bias;
+- the edge bias is continuous and bounded; it must not use cliff-style
+  `-80` score penalties that turn a ranking cue into an uncalibrated hard ban;
 - fresh-edge checks are now a quality reduction, not a hard block;
 - `entry_path_too_directional` remains a hard block in research logic.
 

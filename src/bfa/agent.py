@@ -1514,7 +1514,7 @@ def _build_live_outcome_guard(config: AppConfig, *, db_path: str | None) -> Forw
     groups = report.groups or {}
     symbol_blocks = _live_guard_blocks(
         groups.get("symbols", []),
-        min_outcomes=_positive_int_or_default(config.get("BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES"), 1),
+        min_outcomes=_positive_int_or_default(config.get("BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES"), 5),
         min_loss_usdt=_float_or_none(config.get("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MIN_LOSS_USDT")) or 0.25,
         max_win_rate=_float_or_none(config.get("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MAX_WIN_RATE")) or 0.34,
         normalize_name=str.upper,

@@ -52,7 +52,7 @@ class DeployAssetTests(unittest.TestCase):
         self.assertIn("BFA_REGIME_ROUTER_ENABLED=true", text)
         self.assertIn("BFA_REGIME_ROUTER_SHADOW_ONLY=true", text)
         self.assertIn("BFA_LIVE_OUTCOME_GUARD_ENABLED=true", text)
-        self.assertIn("BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES=1", text)
+        self.assertIn("BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES=5", text)
         self.assertIn("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MIN_LOSS_USDT=0.25", text)
         self.assertIn("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MODE=downsize", text)
         self.assertIn("BFA_LIVE_OUTCOME_GUARD_MIN_SIDE_OUTCOMES=6", text)

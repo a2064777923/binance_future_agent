@@ -706,17 +706,17 @@ def _mean_reversion_side_context_score(order, values: Mapping[str, str], researc
         score += (-mean_reversion_bias if side == "long" else mean_reversion_bias) * 0.95
 
     if close_position >= 70.0:
-        edge_strength = _clip((close_position - 70.0) / 30.0, 0.0, 2.0)
+        edge_strength = _clip((close_position - 70.0) / 30.0, 0.0, 1.0)
         if side == "short":
-            score += 7.0 + edge_strength * 4.0
+            score += 2.2 + edge_strength * 3.0
         else:
-            score -= 80.0 + edge_strength * 30.0
+            score -= 4.8 + edge_strength * 4.2
     elif close_position <= 30.0:
-        edge_strength = _clip((30.0 - close_position) / 30.0, 0.0, 2.0)
+        edge_strength = _clip((30.0 - close_position) / 30.0, 0.0, 1.0)
         if side == "long":
-            score += 7.0 + edge_strength * 4.0
+            score += 2.2 + edge_strength * 3.0
         else:
-            score -= 80.0 + edge_strength * 30.0
+            score -= 4.8 + edge_strength * 4.2
     elif 38.0 <= close_position <= 62.0 and not side_ready:
         score -= 0.65
 

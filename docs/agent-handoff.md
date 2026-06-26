@@ -149,6 +149,11 @@ liquidity or synthetic `min_executable_notional` values in the live path. If a
 symbol lacks market context, the candidate should carry explicit `missing_*`
 diagnostics or be rejected.
 
+Live outcome guard is a downsize-first feedback signal, not a one-trade kill
+switch. The default symbol sample floor is `5` closed outcomes; lower values can
+be set explicitly for experiments, but should not be treated as production
+evidence.
+
 ## Runtime Data Policy
 
 These are intentionally ignored and must not be committed:
