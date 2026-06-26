@@ -43,3 +43,33 @@ def lorentzian_distance(query: np.ndarray, reference: np.ndarray) -> np.ndarray:
     """
     diff = np.abs(reference - query)
     return np.sum(np.log1p(diff), axis=1)
+
+
+def _knn_agreement(
+    query: np.ndarray,
+    artifact: LdcArtifact,
+    *,
+    k: int,
+    side: str,
+) -> tuple[float, int, int]:
+    """Return (agreement, voters, dead_zone_neighbors) for a standardized query.
+
+    ``agreement`` in [-1, +1]: (same-direction votes - opposite votes) / voters.
+    Dead-zone neighbors (label 0) do not vote but do occupy a k slot. If no
+    neighbors vote, returns (0.0, 0, dead_zone_neighbors).
+    """
+    distances = lorentzian_distance(query, artifact.reference_x)
+    k = min(k, len(artifact.reference_x))
+    if k <= 0:
+        return 0.0, 0, 0
+    nearest_idx = np.argpartition(distances, k - 1)[:k]
+    labels = artifact.reference_y[nearest_idx]
+    same = 1 if side == "long" else -1   # label that matches the setup side
+    voters = int(np.count_nonzero(labels != 0))
+    if voters == 0:
+        return 0.0, 0, int(np.count_nonzero(labels == 0))
+    same_votes = int(np.count_nonzero(labels == same))
+    opposite_votes = voters - same_votes
+    agreement = (same_votes - opposite_votes) / voters
+    dead = int(np.count_nonzero(labels == 0))
+    return float(agreement), voters, dead
