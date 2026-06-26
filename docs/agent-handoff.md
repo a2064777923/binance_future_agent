@@ -144,6 +144,16 @@ against the actual routed trend setup. See
 `docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md` and
 iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`.
 
+Actual tick-based setup calibration now exists in
+`scripts/server_actual_setup_ldc_calibration.py`. It uses server raw-feed gzip
+trade ticks and the real persisted setup geometry, so it is the correct path for
+future LDC or direction-filter training. The current server raw-feed is usable
+but short-retention: files observed on 2026-06-26 covered roughly
+`2026-06-25T13:20Z` through `2026-06-26T13:45Z`, not a multi-week history. The
+latest 120 trend setup calibration (`ldc_actual_latest_120_v2`) had only 19
+usable labels, so its lift is not production evidence. Keep LDC disabled until
+there are enough filled tick-labeled samples across symbols/days.
+
 Micro-grid can use extra slots and an extra same-direction notional allowance so
 trend positions do not fully crowd out scalping attempts. Protective SL/TP is
 required for live fills, and the pending-limit watchdog plus position sentinel

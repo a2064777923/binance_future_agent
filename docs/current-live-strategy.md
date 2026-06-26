@@ -205,6 +205,30 @@ iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`. Do not treat
 LDC as live until an operator has explicitly switched
 `BFA_LIVE_QUANT_SETUP_VARIANT` to `quant_setup_ldc` and verified the server.
 
+Actual routed-setup tick calibration was added on 2026-06-26 via
+`scripts/server_actual_setup_ldc_calibration.py`. It reads `trade_setups`
+read-only, labels each setup from self-collected raw trade ticks using that
+setup's own limit entry / stop / target geometry, and writes JSON/CSV research
+outputs. Latest server run:
+
+```bash
+cd /opt/binance-futures-agent/app
+PYTHONPATH=/opt/binance-futures-agent/app:/opt/binance-futures-agent/app/src \
+python3 scripts/server_actual_setup_ldc_calibration.py \
+  --db /opt/binance-futures-agent/data/agent.sqlite \
+  --raw-feed-dir /opt/binance-futures-agent/data/raw-feed \
+  --since 2026-06-26T10:00:00Z --until 2026-06-26T13:45:00Z \
+  --max-setups 120 --order desc --horizon-seconds 1800 \
+  --raw-file-padding-minutes 10 --raw-workers 4 \
+  --out-dir /opt/binance-futures-agent/results/research/ldc_actual_latest_120_v2
+```
+
+Result: 120 latest trend setup rows, 25 limit fills, 84 no-fill, 11 no raw ticks,
+5 stop-first, 0 target-first under the configured target, 19 usable LDC samples.
+The tiny validation split produced only a research hint (`lift=1.75`) and must
+not be treated as production evidence. Keep LDC disabled until the raw-feed
+retention contains enough filled setup labels across symbols and days.
+
 ## Micro-Grid Fast Lane
 
 Micro-grid is live and independent from AI:
