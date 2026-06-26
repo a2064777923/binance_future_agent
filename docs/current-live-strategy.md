@@ -5,8 +5,8 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
-Snapshot checked from the server at `2026-06-26T04:45:00Z`
-(`2026-06-26 12:45:00` Asia/Hong_Kong).
+Snapshot checked from the server at `2026-06-26T06:21:00Z`
+(`2026-06-26 14:21:00` Asia/Hong_Kong).
 
 ## Source Of Truth Order
 
@@ -28,7 +28,8 @@ checking the newer sources above.
 - Local branch checked during this snapshot:
   `codex/protection-degrade-hotfix`.
 - This snapshot includes the 2026-06-26 spike-depth/stale-signal micro-grid
-  hotfix. Use the latest Git commit on this branch as the code reference.
+  hotfix and the 2026-06-26 trend near-structure entry guard. Use the latest
+  Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
 - Hashes of the live deployed strategy files matched the local files at the
@@ -143,6 +144,26 @@ actual post-entry path. Some losses have been wrong direction or poor entry,
 not merely tight stops. Future tuning should inspect each losing trade with
 price path, setup factors, regime labels, and fill timing before changing
 thresholds.
+
+Trend limit entries now include a near-structure guard to avoid the ENAUSDT
+failure pattern where the trend leg shorted near support after a large move:
+
+- if a trend short signal is within the lower `18%` of the support/resistance
+  band, the system only keeps the tiny volatility-retrace entry when breakout
+  evidence is strong enough: directional momentum, micro-momentum, volume
+  impulse, and taker-flow must all confirm continuation;
+- otherwise it posts a higher rebound short using
+  `limit_entry_anchor:support_nearby_rebound_short`, with the entry moved
+  toward the configured rebound zone and the stop/target recomputed from that
+  new entry;
+- the long side is symmetric: if a trend long is too close to resistance
+  without strong continuation evidence, it posts a lower pullback long using
+  `limit_entry_anchor:resistance_nearby_pullback_long`;
+- diagnostics are persisted in `price_basis.entry_basis.trend_near_structure_guard`.
+
+The ENAUSDT forensic replay that originally produced a `0.07881` short now
+replays locally and on the server as a passive rebound short near `0.079588`,
+with stop and target recalculated from the new entry.
 
 ## Micro-Grid Fast Lane
 

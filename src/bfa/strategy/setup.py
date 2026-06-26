@@ -159,6 +159,14 @@ class TradeSetupProfile:
     limit_entry_min_offset_percent: float = 0.04
     limit_entry_max_offset_percent: float = 0.45
     limit_entry_max_wait_seconds: int = 0
+    trend_near_structure_entry_enabled: bool = False
+    trend_near_structure_zone_percent: float = 18.0
+    trend_near_structure_rebound_zone_percent: float = 42.0
+    trend_near_structure_min_gap_percent: float = 0.18
+    trend_near_structure_max_offset_percent: float = 1.65
+    trend_near_structure_breakout_min_volume_change_percent: float = 80.0
+    trend_near_structure_breakout_min_momentum_percent: float = 1.2
+    trend_near_structure_breakout_min_taker_edge: float = 0.12
     min_post_cost_edge_ratio: float = 0.0
     fee_bps: float = 4.0
     slippage_bps: float = 5.0
@@ -735,6 +743,20 @@ def _limit_entry_price(
     vwap = _positive_float(features.get("vwap"))
     support = _positive_float(features.get("support_price"))
     resistance = _positive_float(features.get("resistance_price"))
+    structure_guard = _trend_near_structure_entry(
+        reference=reference,
+        side=side,
+        features=features,
+        profile=profile,
+    )
+    structure_entry: dict[str, float | str] | None = None
+    if structure_guard is not None:
+        guard_offset = _float(structure_guard.get("required_offset_percent"))
+        if guard_offset is not None:
+            max_offset = max(max_offset, min(guard_offset, profile.trend_near_structure_max_offset_percent))
+        if bool(structure_guard.get("applied")):
+            structure_entry = {"anchor": str(structure_guard["anchor"]), "price": float(structure_guard["price"])}
+            candidates.append(structure_entry)
     if range_entry is not None:
         candidates.append(range_entry)
 
@@ -745,7 +767,13 @@ def _limit_entry_price(
             candidates.append({"anchor": "vwap_pullback", "price": vwap})
         if support is not None and lower_bound <= support <= upper_bound:
             candidates.append({"anchor": "support_retest", "price": support})
-        selected = range_entry if range_entry is not None else max(candidates, key=lambda item: float(item["price"]))
+        selected = (
+            range_entry
+            if range_entry is not None
+            else structure_entry
+            if structure_entry is not None
+            else max(candidates, key=lambda item: float(item["price"]))
+        )
         entry = _clip(float(selected["price"]), lower_bound, upper_bound)
     else:
         lower_bound = reference * (1.0 + min_offset / 100.0)
@@ -754,11 +782,17 @@ def _limit_entry_price(
             candidates.append({"anchor": "vwap_retest", "price": vwap})
         if resistance is not None and lower_bound <= resistance <= upper_bound:
             candidates.append({"anchor": "resistance_retest", "price": resistance})
-        selected = range_entry if range_entry is not None else min(candidates, key=lambda item: float(item["price"]))
+        selected = (
+            range_entry
+            if range_entry is not None
+            else structure_entry
+            if structure_entry is not None
+            else min(candidates, key=lambda item: float(item["price"]))
+        )
         entry = _clip(float(selected["price"]), lower_bound, upper_bound)
 
     actual_offset = abs(reference - entry) / reference * 100.0
-    return entry, {
+    basis: dict[str, Any] = {
         "order_type": "limit",
         "anchor": str(selected["anchor"]),
         "raw_offset_percent": raw_offset,
@@ -770,6 +804,115 @@ def _limit_entry_price(
         "candidate_prices": [
             {"anchor": str(item["anchor"]), "price": round(float(item["price"]), 8)} for item in candidates
         ],
+    }
+    if structure_guard is not None:
+        basis["trend_near_structure_guard"] = structure_guard
+    return entry, basis
+
+
+def _trend_near_structure_entry(
+    *,
+    reference: float,
+    side: str,
+    features: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> dict[str, Any] | None:
+    if not profile.trend_near_structure_entry_enabled:
+        return None
+    if str(features.get("setup_signal_mode") or "trend_follow") != "trend_follow":
+        return None
+    support = _positive_float(features.get("support_price"))
+    resistance = _positive_float(features.get("resistance_price"))
+    if support is None or resistance is None or resistance <= support:
+        return None
+    span = resistance - support
+    position = (reference - support) / span * 100.0
+    zone = _clip(_float(profile.trend_near_structure_zone_percent) or 0.0, 1.0, 49.0)
+    if side == "short" and position > zone:
+        return None
+    if side == "long" and position < 100.0 - zone:
+        return None
+
+    breakout = _trend_structure_breakout_diagnostics(features, side, profile)
+    if breakout["passed"]:
+        return {
+            "anchor": "near_structure_breakout_exempt_short" if side == "short" else "near_structure_breakout_exempt_long",
+            "price": reference,
+            "applied": False,
+            "position_percent": round(position, 8),
+            "zone_percent": zone,
+            "breakout": breakout,
+            "reason": "strong_directional_flow",
+        }
+
+    rebound_zone = _clip(_float(profile.trend_near_structure_rebound_zone_percent) or 42.0, zone + 1.0, 92.0)
+    min_gap_percent = max(_float(profile.trend_near_structure_min_gap_percent) or 0.0, 0.0)
+    if side == "short":
+        raw_price = support + span * (rebound_zone / 100.0)
+        min_price = reference * (1.0 + min_gap_percent / 100.0)
+        price = max(raw_price, min_price)
+        anchor = "support_nearby_rebound_short"
+    else:
+        raw_price = resistance - span * (rebound_zone / 100.0)
+        max_price = reference * (1.0 - min_gap_percent / 100.0)
+        price = min(raw_price, max_price)
+        anchor = "resistance_nearby_pullback_long"
+    required_offset = abs(price - reference) / reference * 100.0
+    capped_offset = min(required_offset, max(profile.trend_near_structure_max_offset_percent, min_gap_percent))
+    if side == "short":
+        price = reference * (1.0 + capped_offset / 100.0)
+    else:
+        price = reference * (1.0 - capped_offset / 100.0)
+    return {
+        "anchor": anchor,
+        "price": price,
+        "applied": True,
+        "position_percent": round(position, 8),
+        "zone_percent": zone,
+        "rebound_zone_percent": rebound_zone,
+        "required_offset_percent": required_offset,
+        "capped_offset_percent": capped_offset,
+        "min_gap_percent": min_gap_percent,
+        "support_price": support,
+        "resistance_price": resistance,
+        "breakout": breakout,
+    }
+
+
+def _trend_structure_breakout_diagnostics(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> dict[str, Any]:
+    momentum = _float(features.get("kline_momentum_percent"))
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    taker_edge = None if taker_ratio is None else taker_ratio - 1.0
+    min_momentum = max(_float(profile.trend_near_structure_breakout_min_momentum_percent) or 0.0, 0.0)
+    min_volume = _float(profile.trend_near_structure_breakout_min_volume_change_percent)
+    min_taker_edge = max(_float(profile.trend_near_structure_breakout_min_taker_edge) or 0.0, 0.0)
+    if side == "short":
+        momentum_ok = momentum is not None and momentum <= -min_momentum
+        micro_ok = micro is not None and micro <= -min_momentum * 0.12
+        taker_ok = taker_edge is not None and taker_edge <= -min_taker_edge
+    else:
+        momentum_ok = momentum is not None and momentum >= min_momentum
+        micro_ok = micro is not None and micro >= min_momentum * 0.12
+        taker_ok = taker_edge is not None and taker_edge >= min_taker_edge
+    volume_ok = min_volume is None or (volume_change is not None and volume_change >= min_volume)
+    checks = [
+        {"name": "momentum_breakout", "passed": momentum_ok, "value": momentum},
+        {"name": "micro_momentum_breakout", "passed": micro_ok, "value": micro},
+        {"name": "volume_impulse_breakout", "passed": volume_ok, "value": volume_change},
+        {"name": "taker_flow_breakout", "passed": taker_ok, "value": taker_ratio},
+    ]
+    return {
+        "passed": all(item["passed"] for item in checks),
+        "checks": _normalised_checks(checks),
+        "min_momentum_percent": min_momentum,
+        "min_volume_change_percent": min_volume,
+        "min_taker_edge": min_taker_edge,
     }
 
 
