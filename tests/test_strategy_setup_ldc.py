@@ -165,5 +165,27 @@ class LdcWiringTests(unittest.TestCase):
             self.assertIn("confidence_below_profile_min", setup.reasons)
 
 
+class LdcVariantTests(unittest.TestCase):
+    def test_quant_setup_ldc_variant_enables_ldc(self):
+        from bfa.backtest.models import built_in_variants
+        variants = built_in_variants()
+        self.assertIn("quant_setup_ldc", variants)
+        profile = variants["quant_setup_ldc"].setup_profile
+        self.assertTrue(profile.get("use_ldc_confidence_modifier"))
+        self.assertEqual(profile.get("ldc_blend_mode"), "linear")
+        self.assertIn("ldc_artifact_path", profile)
+
+    def test_existing_variants_do_not_enable_ldc(self):
+        from bfa.backtest.models import built_in_variants
+        variants = built_in_variants()
+        for name, v in variants.items():
+            if name == "quant_setup_ldc":
+                continue
+            self.assertFalse(
+                v.setup_profile.get("use_ldc_confidence_modifier", False),
+                f"{name} should not enable LDC",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
