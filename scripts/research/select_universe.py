@@ -11,6 +11,7 @@ import json
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 LIVE_SYMBOLS = {
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "HYPEUSDT", "ONDOUSDT",
@@ -135,9 +136,11 @@ def main() -> int:
         print(f"{s:14s} {tier:8s} {qv:>16,.0f}{live}")
 
     out = {"symbols": final, "live_symbols": sorted(LIVE_SYMBOLS & eligible)}
-    with open("data/research/universe.json", "w", encoding="utf-8") as fh:
+    out_path = Path("data/research/universe.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", encoding="utf-8") as fh:
         json.dump(out, fh, indent=2)
-    print(f"\nwrote data/research/universe.json")
+    print(f"\nwrote {out_path}")
     return 0
 
 
