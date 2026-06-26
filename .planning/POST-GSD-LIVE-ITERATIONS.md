@@ -1,6 +1,7 @@
 # Post-GSD Live Iterations
 
 **Created:** 2026-06-24
+**Latest live snapshot:** 2026-06-26, see `docs/current-live-strategy.md`.
 **Purpose:** Record live strategy and operations work that happened after the
 formal GSD v1.27 phase artifacts were closed.
 
@@ -30,13 +31,15 @@ The phase files do not explain all behavior added by `c0cdfe1` and `4fc0539`.
 
 Use this precedence when continuing work:
 
-1. Current code and tests in `main`.
-2. Current live server evidence from `/opt/binance-futures-agent/app`,
+1. Current code and tests in the active GitHub branch.
+2. `docs/current-live-strategy.md` for the latest checked live strategy and
+   server snapshot.
+3. Current live server evidence from `/opt/binance-futures-agent/app`,
    `/etc/binance-futures-agent/env`, Binance account state, and the SQLite DB.
-3. This post-GSD iteration log.
-4. `docs/agent-handoff.md`, `docs/live-scalping-ops.md`, and
+4. This post-GSD iteration log.
+5. `docs/agent-handoff.md`, `docs/live-scalping-ops.md`, and
    `docs/position-profit-protection.md`.
-5. Historical `.planning/phases/*` artifacts.
+6. Historical `.planning/phases/*` artifacts.
 
 The phase artifacts are still valuable for why the system was built, but they
 are stale for the latest live strategy shape.
@@ -253,6 +256,42 @@ Key files:
 - `docs/deployment.md`
 - `docs/live-scalping-ops.md`
 
+### 12. Current Live Strategy Snapshot Was Consolidated
+
+On 2026-06-26 the handoff docs were synchronized with the actual server state
+after several direct live iterations. The canonical current-state doc is now:
+
+- `docs/current-live-strategy.md`
+
+Important current facts from that snapshot:
+
+- `/opt/binance-futures-agent/app` is a deployed copy, not a git checkout.
+- Live strategy files on the server matched the local branch by hash at the
+  snapshot.
+- Live routing is enforced, not shadow-only:
+  `BFA_REGIME_ROUTER_ENABLED=true` and
+  `BFA_REGIME_ROUTER_SHADOW_ONLY=false`.
+- Micro-grid is enabled as an independent fast lane:
+  `BFA_LIVE_MICRO_GRID_ENABLED=true` and
+  `BFA_LIVE_MICRO_GRID_FAST_LANE_ENABLED=true`.
+- Micro-grid uses AI bypass, `RANGE` routing, GTX/passive limit entries, a
+  20-second wait window, and no fixed max-hold time exit.
+- Current non-secret risk profile is 200U configured capital, 30x max leverage,
+  5 base bot positions, 2 extra micro-grid slots, 20U max margin per position,
+  4U max single-trade risk, 10U daily loss cap, and 160U portfolio margin cap.
+- Manual positions are `BTWUSDT`, `DRAMUSDT`, and `BABAUSDT` and must not
+  consume bot slots/caps.
+- Raw feed and DB maintenance are active; market snapshots are not persisted at
+  full volume, while decision snapshots and raw feed remain the main analysis
+  substrate.
+- Recent live order intents showed micro-grid scanning and exchange-handled
+  limits; do not rely only on stale `outcomes` when diagnosing whether live is
+  active.
+
+This snapshot supersedes older planning text that says current capital is 45U,
+that Phase 70 commit `7a55ece` is the latest deployed behavior, or that regime
+routing is only shadow/observe.
+
 ## Live Server Notes
 
 Known deployment shape:
@@ -263,6 +302,9 @@ Known deployment shape:
 - Env: `/etc/binance-futures-agent/env`
 - DB: `/opt/binance-futures-agent/data/agent.sqlite`
 - Runtime: `/opt/binance-futures-agent/runtime`
+
+The live app directory should be treated as a deployed copy. Check file hashes
+or redeploy from Git before assuming server code equals the local branch.
 
 Before making live claims, run read-only checks on the server:
 

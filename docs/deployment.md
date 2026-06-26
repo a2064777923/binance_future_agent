@@ -1,5 +1,9 @@
 # Deployment Runbook
 
+For the latest checked live profile and server state, read
+`docs/current-live-strategy.md` before using this runbook. This file explains
+how to deploy and operate the service; current env values live on the server.
+
 This project deploys into an isolated server prefix:
 
 - App root: `/opt/binance-futures-agent`
@@ -63,11 +67,11 @@ and AI provider credentials, then set:
 
 ```bash
 BFA_MODE=live
-BFA_AI_PROVIDER=openai
+BFA_AI_PROVIDER=deepseek
 BFA_OPENAI_ENABLED=true
 BFA_REQUIRE_PROTECTIVE_ORDERS=true
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=https://api.openai.com/v1
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 OPENAI_TIMEOUT_SECONDS=5
 OPENAI_MAX_OUTPUT_TOKENS=400
 OPENAI_RETRY_AFTER_SECONDS=300
@@ -83,6 +87,15 @@ BFA_OPENAI_ENABLED=true
 DEEPSEEK_API_KEY=...
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
+```
+
+OpenAI remains available as a fallback/provider option when explicitly chosen:
+
+```bash
+BFA_AI_PROVIDER=openai
+BFA_OPENAI_ENABLED=true
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
 `OPENAI_TIMEOUT_SECONDS`, `OPENAI_MAX_OUTPUT_TOKENS`, and
@@ -109,7 +122,8 @@ The latest live handoff profile increased the configured account capital to
 `BFA_ACCOUNT_CAPITAL_USDT=200` and portfolio margin cap to
 `BFA_MAX_PORTFOLIO_MARGIN_USDT=160`. Treat those values as operator-tuned live
 env settings, not source-code defaults; verify `/etc/binance-futures-agent/env`
-before reasoning about current capacity.
+before reasoning about current capacity. `docs/current-live-strategy.md`
+contains the latest checked non-secret env snapshot.
 
 Keep the kill-switch path configured. Creating that file stops future live
 orders:
@@ -320,6 +334,11 @@ the entry state nor cleanup was resolved. Protection failure statuses should
 still be investigated in `order_intents`, exchange responses, current positions,
 and open algo orders; they are "processed" for service health, not safe to
 ignore.
+
+The kill switch is still honored when the configured kill-switch file exists.
+Current handled protective-order failure paths do not mean "stop the whole
+system forever"; they mean record the failure, reconcile/fallback when possible,
+then keep timer health separate from urgent risk investigation.
 
 When Square exports and RSS feeds are empty, the live runner can derive a
 clearly labelled `market_heat` fallback narrative from Binance USD-M public

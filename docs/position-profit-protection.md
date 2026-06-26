@@ -1,5 +1,9 @@
 # Position Profit Protection
 
+Read `docs/current-live-strategy.md` first for the server-verified current live
+profile. This document describes the protection design; env values below are
+defaults or recently used tuning and may differ from `/etc/binance-futures-agent/env`.
+
 This note records the live position-monitoring layer used to reduce profit giveback after an entry has filled.
 
 ## Intent Metadata
@@ -91,14 +95,16 @@ The live micro-grid leg exposes these speed controls:
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS`: internal micro-grid path horizon used to estimate entry/TP/SL when max hold is disabled; `0` follows the max hold value, or falls back to 180 seconds when max hold is disabled.
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS`: maximum raw-feed cache age before the micro-grid leg skips trading.
 
-Current live tuning after 2026-06-24 risk expansion:
+Current server tuning checked on 2026-06-26:
 
-- `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS=30`
+- `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS=20`
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS=0`
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS=180`
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_MIN_SCORE=1.05`
 - `BFA_LIVE_MICRO_GRID_TOP_N=12`
+- `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`
+- `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 
 This keeps micro-grid entries passive and entry-time-limited: if the limit price is not hit quickly enough, the watchdog should let it expire instead of chasing. Filled positions are no longer closed only because a fixed micro-grid hold window expired; stop-loss, take-profit, and sentinel protection remain responsible for exits.
 

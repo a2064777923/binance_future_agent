@@ -33,8 +33,9 @@ See: `.planning/PROJECT.md` and `.planning/POST-GSD-LIVE-ITERATIONS.md`.
 Binance futures signals and small live trades without contaminating existing
 projects or losing control of downside.
 **Current focus:** Treat the formal Phase 70 artifacts as historical, then use
-the current code, server evidence, and `.planning/POST-GSD-LIVE-ITERATIONS.md`
-to consolidate the post-GSD live strategy before planning v1.28.
+the current code, server evidence, `docs/current-live-strategy.md`, and
+`.planning/POST-GSD-LIVE-ITERATIONS.md` to consolidate the post-GSD live
+strategy before planning v1.28.
 
 ## Decisions
 
@@ -55,14 +56,17 @@ to consolidate the post-GSD live strategy before planning v1.28.
   API remains available as a fallback provider.
 
 - Exchange: Binance USD-M futures.
-- Active live server caps were operator-widened during Phase 69 while keeping
-  10x max leverage and 0.7 USDT max per-trade risk: `BTWUSDT` is manual,
-  `BFA_MAX_OPEN_POSITIONS=60`, per-position/effective notional caps are
-  `500` USDT, max margin per position is `50` USDT, portfolio margin cap is
-  `150` USDT, portfolio margin fraction is `3.00`, portfolio notional cap is
-  `5000` USDT, same-direction cap is `3500` USDT, and multi-position is
-  enabled. These are live env caps, not local defaults. Manual symbols remain
-  visible in diagnostics but do not consume bot entry capacity.
+- Current live server caps must be read from `/etc/binance-futures-agent/env`
+  and are summarized in `docs/current-live-strategy.md`. The latest checked
+  snapshot on 2026-06-26 showed `BFA_ACCOUNT_CAPITAL_USDT=200`,
+  `BFA_MAX_LEVERAGE=30`, `BFA_MAX_OPEN_POSITIONS=5`,
+  `BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`,
+  `BFA_MAX_MARGIN_PER_POSITION_USDT=20`,
+  `BFA_MAX_RISK_PER_TRADE_USDT=4`,
+  `BFA_MAX_DAILY_LOSS_USDT=10`, and
+  `BFA_MAX_PORTFOLIO_MARGIN_USDT=160`. Manual symbols were
+  `BTWUSDT`, `DRAMUSDT`, and `BABAUSDT`. Older Phase 69/70 cap descriptions
+  are historical and should not be used as current live facts.
 
 - Phase 70 deployed v1.27 to `/opt/binance-futures-agent/app` from commit
   `7a55ece` and verified it under `/etc/binance-futures-agent/env`. The env was
@@ -812,17 +816,19 @@ to consolidate the post-GSD live strategy before planning v1.28.
 ## Next Command
 
 Start a new milestone with `$gsd-new-milestone` only after reading
-`.planning/POST-GSD-LIVE-ITERATIONS.md`. Recommended scope: v1.28 Post-GSD Live
-Strategy Consolidation, covering current regime routing, micro-grid live
-evidence, pending-fill protection, position sentinel behavior, raw-feed/DB
-retention, and March/recent backtest replay with the current code.
+`docs/current-live-strategy.md` and `.planning/POST-GSD-LIVE-ITERATIONS.md`.
+Recommended scope: v1.28 Post-GSD Live Strategy Consolidation, covering current
+regime routing, micro-grid live evidence, pending-fill protection, position
+sentinel behavior, raw-feed/DB retention, and March/recent backtest replay with
+the current code.
 
 ## Session
 
 **Last formal GSD session:** 2026-06-21T01:11:33.537Z
 **Stopped at:** v1.27 complete; server canary verified and timers restored.
-**Post-GSD update:** 2026-06-24, live strategy and ops iterations documented.
-**Resume file:** .planning/POST-GSD-LIVE-ITERATIONS.md
+**Post-GSD update:** 2026-06-26, current live strategy snapshot documented.
+**Resume files:** `docs/current-live-strategy.md`,
+`.planning/POST-GSD-LIVE-ITERATIONS.md`
 
 ## Current Position
 
@@ -833,7 +839,8 @@ Last activity: 2026-06-24 — post-GSD live iteration log added
 
 ## Operator Next Steps
 
-- Read `.planning/POST-GSD-LIVE-ITERATIONS.md`.
+- Read `docs/current-live-strategy.md` and
+  `.planning/POST-GSD-LIVE-ITERATIONS.md`.
 - Then run `$gsd-new-milestone` for a consolidation milestone, or continue from
   the latest code/server state with that log as the handoff baseline.
 

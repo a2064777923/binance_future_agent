@@ -58,9 +58,11 @@ Local secrets belong in `.env`, which is ignored by git. `.env.example` document
 variable names only.
 
 For another machine or agent taking over development, start with
-`docs/agent-handoff.md`. It summarizes the current architecture, server paths,
-live safety rules, and the exact local verification commands without including
-any secrets.
+`docs/current-live-strategy.md`, then `docs/agent-handoff.md`. Those files
+summarize the current live server state, strategy routing, server paths, safety
+rules, and local verification commands without including secrets. The older
+`.planning/phases/*` files are historical context; do not treat them as the
+latest live strategy state.
 
 Phases 1-8 implement the isolated project foundation, public market data,
 narrative ingestion, event-store replay, hot-coin candidate scoring,
@@ -202,16 +204,12 @@ notional after the proposed new entry using:
 - `BFA_MAX_PORTFOLIO_NOTIONAL_USDT`
 - `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT`
 
-`30u_10x_multi_dynamic` is available as a preview/apply profile for a 30 USDT
-account with 10x leverage, up to 10 concurrent bot-managed positions, 100 USDT
-effective notional per position, 650 USDT total bot-managed notional, and
-520 USDT same-direction bot-managed notional caps. Manual positions listed in
-`BFA_MANUAL_POSITION_SYMBOLS` remain visible in diagnostics but do not consume
-bot entry capacity. It remains confirmation-gated and should be treated as
-experimental until backtests and live evidence justify it. Profile readiness may
-carry a protected active position into this target profile only when
-exchange-side algo protection is present and the active exposure fits the target
-portfolio caps.
+Historical risk-profile tooling such as `30u_10x_multi_dynamic` still exists,
+but it is not the current live profile. Current live caps are environment-driven
+and must be read from `/etc/binance-futures-agent/env`; the latest checked
+profile is summarized in `docs/current-live-strategy.md`. Manual positions
+listed in `BFA_MANUAL_POSITION_SYMBOLS` remain visible in diagnostics but do
+not consume bot entry capacity.
 
 `ops pilot-learning-packet` is read-only. It composes current exposure capacity,
 manual-position exclusions, position lifecycle decisions, time-exit status,

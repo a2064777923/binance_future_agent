@@ -1,5 +1,9 @@
 # Live Scalping Ops Notes
 
+For the latest server-verified scalping profile, read
+`docs/current-live-strategy.md` first. This file explains the operational
+pieces; the current env values can drift and must be verified on the server.
+
 This note captures the current live micro-grid/scalping operational wiring.
 
 ## Raw Feed Coverage
@@ -24,8 +28,12 @@ rejections with `insufficient_cached_seconds`.
 
 ## Kill Switch Clearance
 
-Protective-order failures create `BFA_KILL_SWITCH_FILE` and risk rejects all new
-orders. Clear it only after checking exchange-side protection:
+`BFA_KILL_SWITCH_FILE` is still the global manual kill switch checked by the
+risk layer. If it exists, new live orders are rejected. Current protection
+failure handling records processed failure statuses and attempts reconciliation
+or fallback protection; do not assume every handled protective-order failure
+automatically creates the kill switch. Clear an active kill switch only after
+checking exchange-side protection:
 
 ```bash
 /opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops kill-switch-clearance \
@@ -68,6 +76,11 @@ When micro-grid intents reach the exchange but show
 `entry_order_expired_canceled`, the signal passed risk and submitted a post-only
 limit order, but price did not touch the limit within
 `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS`.
+
+Current live micro-grid behavior is also documented in
+`docs/current-live-strategy.md`: it is a quant-only fast lane, bypasses AI,
+uses `RANGE` regime routing, and has corrected side selection that favors
+upper-edge shorts and lower-edge longs.
 
 ## Processed Live Cycle Statuses
 
