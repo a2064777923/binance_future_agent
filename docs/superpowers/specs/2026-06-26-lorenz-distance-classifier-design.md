@@ -272,6 +272,33 @@ with `rsi`), `vol_change` (correlated with `taker_ratio`), 15m features
   applied (never refit) at inference.
 - **Size:** ~6 months × 23 symbols × 5m ≈ 50k–100k points. Loaded once and
   cached; D=5 does not need an approximate-NN library.
+- **Per-point symbol recorded:** the artifact stores the source symbol for
+  every reference point (a parallel `reference_symbols` array). This is
+  **diagnostic-only at inference** — the kNN vote itself is mixed-universe.
+  It exists to let the report measure whether queries' nearest neighbors are
+  dominated by the *same* symbol or spread across symbols (see
+  "Cross-symbol distance diagnostic" below). That measurement decides whether
+  per-symbol standardization is needed.
+
+### Cross-symbol scaler concern (measured, not assumed)
+
+Five features are not equally scale-comparable across the 23-symbol universe:
+`rsi` (0-100 bounded) and `taker_ratio` (~1 ratio) are inherently comparable;
+`ema_spread`, `mom_6`, and `atr_percent` are percents whose typical range
+differs sharply by symbol (BTC ATR% ≈ 0.5 vs meme ATR% ≈ 3-5). A single global
+scaler can map "BTC normal" and "meme normal" into the same standardized
+region, weakening kNN distance meaning for the percent features.
+
+However, `atr_percent` is itself a kNN dimension, so queries already separate
+from references in very different volatility regimes on that axis — the
+cross-symbol leakage is therefore smaller than it first appears. Rather than
+build per-symbol scalers up front (which would require per-symbol scaler
+storage, symbol-aware inference with an unseen-symbol fallback, and rework of
+the artifact format), the first version **measures the problem**: the report
+includes a cross-symbol neighbor-distribution diagnostic. If it shows queries
+retrieving neighbors mostly from other symbols' regimes, per-symbol
+standardization becomes a documented conditional follow-up. Measure before
+solving — YAGNI.
 
 ### Horizon note (honest)
 
@@ -324,6 +351,25 @@ This is the standard kNN-class validation approach, but it is **not** the
 real setup path — it is an approximation. The report must be read with that
 caveat; final live authorization remains an operator decision, not an
 automated verdict.
+
+### Proxy-side calibration (makes the honest note measurable)
+
+Because the proxy side (a simple `mom_6` sign) differs from the real setup
+side (14 factors + regime router + AI review), a `lift > 1.0` calibrated
+against the proxy could be miscalibrated against the real pipeline. The
+design therefore makes the approximation **measurable** instead of merely
+caveated: a read-only server-side script
+`scripts/server_ldc_proxy_calibration.py` (mirroring
+`scripts/server_live_trade_forensics.py`'s read-only pattern) reads
+`trade_setups` over a chosen window, extracts each recorded setup's features
+and `side`, recomputes the proxy side from the same features, and reports
+proxy-vs-actual side agreement.
+
+The release verdict is then **two-headed**: the local `lift > 1.0` report AND
+the server calibration agreement must be read together. High lift + low
+proxy-actual agreement means the lift is calibrated to the wrong baseline and
+must be discounted — the operator does not authorize live on lift alone. The
+calibration is a required pre-live step, not optional.
 
 ### Report JSON (`results/research/ldc_report.json`, schema `bfa_ldc_research_v1`)
 
@@ -390,13 +436,22 @@ ldc_confidence_ceiling: float = 0.95
 ```python
 confidence = _confidence(edge, factor_scores)
 if setup_profile.use_ldc_confidence_modifier:
+    confidence_before_ldc = confidence
     ldc_delta, ldc_diag = _ldc_confidence_modifier(features, side, setup_profile)
     confidence = min(max(confidence + ldc_delta, 0.0),
                      setup_profile.ldc_confidence_ceiling)
+    ldc_diag["ldc_confidence_before"] = round(confidence_before_ldc, 4)
+    ldc_diag["ldc_confidence_after"] = round(confidence, 4)
     price_basis_ldc = ldc_diag
 else:
     price_basis_ldc = None
 ```
+
+`ldc_confidence_before` / `ldc_confidence_after` are recorded so the
+testnet/dry-run stage can produce an apples-to-apples comparison of LDC-on
+vs LDC-off decisions from the same persisted setups, without needing to run
+the pipeline twice. The before/after pair is the evidence that lets the
+operator judge whether LDC improved or worsened decisions.
 
 `price_basis_ldc` is merged into `price_basis["ldc_diagnostics"]` during
 `_price_basis` assembly (mirrors where `ml_trend_probability` is surfaced,
@@ -564,10 +619,14 @@ Stage 1 — Code merged, flag default off (zero live impact)
 Stage 2 — testnet/dry-run with flag on (NOT a live "shadow" pretense)
   A confidence modifier is NOT a pure shadow: adjusted confidence flows
   into min_confidence and AI review and changes decisions. So Stage 2 is
-  testnet/dry-run with the flag on, comparing against the same-period
-  baseline (flag off). Per AGENTS.md, testnet/dry-run/replay/live stay
-  separated. A true zero-live-impact "shadow" is only the offline replay
-  in Stage 0's val segment — there is no fake live-shadow mode here.
+  testnet/dry-run with the flag on. To make the LDC-on vs LDC-off comparison
+  possible from a single run, every persisted setup records both
+  `ldc_confidence_before` and `ldc_confidence_after` in
+  `price_basis.ldc_diagnostics`, so the operator can reconstruct what the
+  decision would have been without LDC without re-running the pipeline.
+  Per AGENTS.md, testnet/dry-run/replay/live stay separated. A true
+  zero-live-impact "shadow" is only the offline replay in Stage 0's val
+  segment — there is no fake live-shadow mode here.
 
 Stage 3 — Live enablement (explicit operator authorization)
   After testnet validation, the operator switches the live trend variant to

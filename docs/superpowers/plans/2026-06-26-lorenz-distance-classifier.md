@@ -17,10 +17,12 @@
 - **Create** `src/bfa/strategy/ldc_classifier.py` — stateless inference: artifact dataclass + loader, Lorentzian distance, kNN voting, blend modes, `ldc_confidence_modifier()`. One responsibility: turn features + side into a confidence delta + diagnostics.
 - **Modify** `src/bfa/strategy/setup.py` — add `ldc_*` fields to `TradeSetupProfile`, add `_ldc_confidence_modifier()` helper + lazy-load cache, wire one block into `build_trade_setup` after the confidence recompute, inject diagnostics into `price_basis`.
 - **Modify** `src/bfa/backtest/models.py` — add `quant_setup_ldc` variant to `built_in_variants`.
-- **Create** `scripts/research/train_ldc_classifier.py` — offline training + lift-sweep validation, emits artifact + report.
+- **Create** `scripts/research/train_ldc_classifier.py` — offline training + lift-sweep validation, emits artifact + report (with cross-symbol neighbor diagnostic).
+- **Create** `scripts/server_ldc_proxy_calibration.py` — read-only server script comparing proxy setup side vs actual recorded setup side (two-headed release verdict).
 - **Create** `tests/test_strategy_ldc_classifier.py` — inference-layer unit tests.
 - **Create** `tests/test_strategy_setup_ldc.py` — wiring unit tests.
 - **Create** `tests/test_train_ldc_classifier_script.py` — training-script smoke test on synthetic data.
+- **Create** `tests/test_server_ldc_proxy_calibration_script.py` — calibration helper unit tests.
 
 `data/research/ldc/*.npz` artifacts and `results/research/ldc_report.json` are build outputs (gitignored under `data/` and `results/`), **not committed**.
 
@@ -105,6 +107,10 @@ class LdcArtifact:
     scaler_std: np.ndarray         # (D,)
     meta: dict[str, Any]
     blend_modes_supported: tuple[str, ...]
+    # Diagnostic-only: source symbol per reference point. The kNN vote is
+    # mixed-universe; this lets the offline report measure cross-symbol
+    # neighbor distribution (decides whether per-symbol scaling is needed).
+    reference_symbols: tuple[str, ...] = ()
 
 
 def lorentzian_distance(query: np.ndarray, reference: np.ndarray) -> np.ndarray:
@@ -415,6 +421,7 @@ def save_ldc_artifact(artifact: LdcArtifact, path: str | "Path") -> None:
         scaler_std=artifact.scaler_std,
         meta=np.array(json.dumps(artifact.meta), dtype=object),
         blend_modes_supported=np.array(artifact.blend_modes_supported, dtype=object),
+        reference_symbols=np.array(artifact.reference_symbols, dtype=object),
     )
 
 
@@ -424,6 +431,9 @@ def load_ldc_artifact(path: str | "Path") -> LdcArtifact:
 
     data = np.load(Path(path), allow_pickle=True)
     meta = json.loads(str(data["meta"].item()))
+    ref_syms = tuple() if "reference_symbols" not in data else tuple(
+        str(x) for x in data["reference_symbols"].tolist()
+    )
     return LdcArtifact(
         reference_x=np.asarray(data["reference_x"], dtype=float),
         reference_y=np.asarray(data["reference_y"], dtype=int),
@@ -432,6 +442,7 @@ def load_ldc_artifact(path: str | "Path") -> LdcArtifact:
         scaler_std=np.asarray(data["scaler_std"], dtype=float),
         meta=meta,
         blend_modes_supported=tuple(str(x) for x in data["blend_modes_supported"].tolist()),
+        reference_symbols=ref_syms,
     )
 
 
@@ -637,6 +648,11 @@ class LdcWiringTests(unittest.TestCase):
             self.assertEqual(diag["ldc_matching"], "aligned")
             self.assertGreater(diag["ldc_confidence_delta"], 0.0)
             self.assertIn("ldc_aligned", diag["ldc_reason_codes"])
+            # before/after recorded for testnet LDC-on-vs-off comparison
+            self.assertIn("ldc_confidence_before", diag)
+            self.assertIn("ldc_confidence_after", diag)
+            self.assertGreater(diag["ldc_confidence_after"],
+                               diag["ldc_confidence_before"])
 
     def test_opposed_depresses_confidence(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -815,12 +831,17 @@ Replace it with:
     # LDC confidence modifier retunes confidence from a Lorentzian kNN direction
     # prediction. Additive and fail-closed: any failure leaves confidence
     # untouched. Only the trend leg. Diagnostics are merged into price_basis.
+    # confidence_before/after are recorded so the testnet stage can compare
+    # LDC-on vs LDC-off decisions from a single persisted run.
     if setup_profile.use_ldc_confidence_modifier:
+        confidence_before_ldc = confidence
         ldc_delta, ldc_diag = _ldc_confidence_modifier(features, side, setup_profile)
         confidence = min(
             max(confidence + ldc_delta, 0.0),
             setup_profile.ldc_confidence_ceiling,
         )
+        ldc_diag["ldc_confidence_before"] = round(confidence_before_ldc, 4)
+        ldc_diag["ldc_confidence_after"] = round(confidence, 4)
         price_basis["ldc_diagnostics"] = ldc_diag
         reasons = _dedupe([*reasons, *ldc_diag.get("ldc_reason_codes", [])])
     if edge < setup_profile.min_edge:
@@ -1026,6 +1047,7 @@ class TrainLdcScriptTests(unittest.TestCase):
             self.assertGreater(len(ref["X"]), 0)
             self.assertEqual(ref["X"].shape[1], 5)
             self.assertEqual(len(ref["X"]), len(ref["y"]))
+            self.assertEqual(len(ref["X"]), len(ref["symbols"]))
             # labels in {-1, 0, +1}
             self.assertTrue(set(np.unique(ref["y"])).issubset({-1, 0, 1}))
 
@@ -1047,6 +1069,7 @@ class TrainLdcScriptTests(unittest.TestCase):
             self.assertEqual(loaded.feature_names, ref["feature_names"])
             self.assertEqual(loaded.reference_x.shape, ref["X"].shape)
             self.assertEqual(loaded.meta["horizon_bars"], 12)
+            self.assertEqual(len(loaded.reference_symbols), len(loaded.reference_x))
 
 
 if __name__ == "__main__":
@@ -1120,7 +1143,7 @@ def build_reference(
     """Build the (X, y, split, symbol) reference dataset across all symbols."""
     ema, rsi, atr_percent, load_csv = _import_indicators()
     symbols = sorted({p.name.rsplit("_", 1)[0] for p in klines_dir.glob("*_5m.csv")})
-    X_parts, y_parts, split_parts = [], [], []
+    X_parts, y_parts, split_parts, symbol_parts = [], [], [], []
     for sym in symbols:
         p = klines_dir / f"{sym}_5m.csv"
         if not p.exists():
@@ -1169,13 +1192,16 @@ def build_reference(
             X_parts.append(feats)
             y_parts.append(y)
             split_parts.append(split)
+            symbol_parts.append(sym)
     if not X_parts:
         return {"X": np.empty((0, len(FEATURE_NAMES))), "y": np.empty(0, dtype=int),
-                "split": np.empty(0, dtype=int), "feature_names": FEATURE_NAMES}
+                "split": np.empty(0, dtype=int), "symbols": [],
+                "feature_names": FEATURE_NAMES}
     return {
         "X": np.array(X_parts, dtype=float),
         "y": np.array(y_parts, dtype=int),
         "split": np.array(split_parts, dtype=int),
+        "symbols": symbol_parts,
         "feature_names": FEATURE_NAMES,
     }
 
@@ -1202,13 +1228,16 @@ def make_artifact(
     train_mask = ref["split"] == 0
     train_x = ref["X"][train_mask]
     train_y = ref["y"][train_mask]
+    train_syms = tuple(s for s, m in zip(ref.get("symbols", []), train_mask) if m)
+    distinct_syms = sorted(set(train_syms))
     meta = {
         "trained_at": "offline",
         "horizon_bars": horizon,
         "dead_zone_atr_mult": dead_zone_atr_mult,
         "k": k,
         "n_reference": int(len(train_x)),
-        "symbol_set": None,
+        "symbol_set": len(distinct_syms),
+        "symbols": distinct_syms,
     }
     return LdcArtifact(
         reference_x=train_x,
@@ -1218,6 +1247,7 @@ def make_artifact(
         scaler_std=std,
         meta=meta,
         blend_modes_supported=("linear", "asymmetric"),
+        reference_symbols=train_syms,
     )
 
 
@@ -1345,6 +1375,7 @@ class LiftSweepTests(unittest.TestCase):
             self.assertEqual(report["schema"], "bfa_ldc_research_v1")
             self.assertIn("blend_sweep", report)
             self.assertIn("recommended_blend", report)
+            self.assertIn("cross_symbol_diagnostic", report)
             self.assertIn(report["recommended_blend"]["reason"],
                           {"max_lift_subject_to_min_n_passed",
                            "no_sweep_meets_min_passed"})
@@ -1353,7 +1384,8 @@ class LiftSweepTests(unittest.TestCase):
         # When validation is empty, recommended lift stays <= 1.0.
         from scripts.research.train_ldc_classifier import run_lift_sweep
         ref = {"X": np.empty((0, 5)), "y": np.empty(0, dtype=int),
-               "split": np.empty(0, dtype=int), "feature_names":
+               "split": np.empty(0, dtype=int), "symbols": [],
+               "feature_names":
                ("ema_spread", "rsi", "atr_percent", "taker_ratio", "mom_6")}
         from bfa.strategy.ldc_classifier import LdcArtifact
         art = LdcArtifact(
@@ -1416,13 +1448,19 @@ def run_lift_sweep(ref, mean, std, art, args) -> dict[str, Any]:
             "n_train_reference": int(len(train_x)), "n_val": int(len(val_x)),
             "val_base_win_rate": round(base_win_rate, 4),
             "blend_sweep": [],
+            "cross_symbol_diagnostic": {"measured": False, "reason": "empty_val_or_train"},
             "recommended_blend": {"strength": 0.06, "mode": "linear", "lift": 0.0,
                                   "reason": "no_sweep_meets_min_passed"},
         }
 
-    # Precompute each val point's agreement + proxy side once.
+    # Precompute each val point's agreement + proxy side + neighbor symbols once.
     agreements = np.zeros(len(val_x))
     proxy_sides = []
+    neighbor_symbol_counts = []   # per val point: how many neighbors share its symbol
+    train_symbols = ref.get("symbols", [])
+    # val point symbols align positionally with val_x (val is the tail of each sym)
+    val_symbols_all = ref.get("symbols", [])
+    val_syms = [s for s, m in zip(val_symbols_all, ref["split"]) if m] if len(val_symbols_all) == len(ref["split"]) else []
     for i in range(len(val_x)):
         row = val_x[i]
         # proxy side: mom_6 sign (simplified direction hint, like train_trend_filter)
@@ -1437,9 +1475,17 @@ def run_lift_sweep(ref, mean, std, art, args) -> dict[str, Any]:
         voters = int(np.count_nonzero(labels != 0))
         if voters == 0:
             agreements[i] = 0.0
-            continue
-        same_votes = int(np.count_nonzero(labels == same))
-        agreements[i] = (same_votes - (voters - same_votes)) / voters
+        else:
+            same_votes = int(np.count_nonzero(labels == same))
+            agreements[i] = (same_votes - (voters - same_votes)) / voters
+        # cross-symbol diagnostic: of the k neighbors, how many came from the
+        # SAME symbol as the val point (None if val symbol unknown / no train syms)
+        if train_symbols and i < len(val_syms) and val_syms[i]:
+            neigh_syms = [train_symbols[j] if j < len(train_symbols) else "" for j in idx]
+            same_sym = sum(1 for s in neigh_syms if s == val_syms[i])
+            neighbor_symbol_counts.append({"same_symbol": same_sym, "k": int(k)})
+        else:
+            neighbor_symbol_counts.append(None)
 
     for strength in blend_strengths:
         for mode in blend_modes:
@@ -1484,13 +1530,31 @@ def run_lift_sweep(ref, mean, std, art, args) -> dict[str, Any]:
         best = max(candidates, key=lambda s: s["lift"])
         rec = {"strength": best["blend_strength"], "mode": best["blend_mode"],
                "lift": best["lift"], "reason": "max_lift_subject_to_min_n_passed"}
+    # Cross-symbol neighbor diagnostic: of val points with known symbol, mean
+    # fraction of neighbors from the SAME symbol. High = kNN is intra-symbol
+    # (global scaler fine); low = neighbors come from other symbols' regimes
+    # (per-symbol scaling may be needed). Measure before solving (YAGNI).
+    measured = [c for c in neighbor_symbol_counts if c is not None]
+    if measured:
+        same_sym_frac = float(np.mean([c["same_symbol"] / c["k"] for c in measured]))
+        cross_diag = {
+            "measured": True, "n_val_points_measured": len(measured),
+            "mean_same_symbol_neighbor_fraction": round(same_sym_frac, 4),
+            "interpretation": (
+                "high = kNN largely intra-symbol, global scaler adequate; "
+                "low = neighbors span other symbols' regimes, consider per-symbol scaling"
+            ),
+        }
+    else:
+        cross_diag = {"measured": False, "reason": "no_val_symbol_metadata"}
     return {
         "schema": "bfa_ldc_research_v1", "artifact_path": args.artifact,
         "feature_names": list(FEATURE_NAMES), "horizon_bars": args.horizon,
         "dead_zone_atr_mult": args.dead_zone_atr_mult, "k": args.k,
         "n_train_reference": int(len(train_x)), "n_val": int(len(val_x)),
         "val_base_win_rate": round(base_win_rate, 4),
-        "blend_sweep": sweep, "recommended_blend": rec,
+        "blend_sweep": sweep, "cross_symbol_diagnostic": cross_diag,
+        "recommended_blend": rec,
     }
 ```
 
@@ -1503,19 +1567,198 @@ Expected: PASS (all 4 tests)
 
 ```bash
 git add scripts/research/train_ldc_classifier.py tests/test_train_ldc_classifier_script.py
-git commit -m "feat(ldc): add lift sweep, report, and lift>1.0 release gate"
+git commit -m "feat(ldc): add lift sweep, report, cross-symbol diagnostic, and lift>1.0 release gate"
 ```
 
 ---
 
-## Task 8: Final verification
+## Task 8: Proxy-side calibration script (server, read-only)
+
+Makes the spec's "proxy vs actual setup side" honesty note measurable. This
+is a **required pre-live step**: the release verdict is two-headed (local
+`lift > 1.0` AND server proxy-actual agreement read together). High lift +
+low agreement means the lift was calibrated to the wrong baseline and must
+be discounted.
+
+**Files:**
+- Create: `scripts/server_ldc_proxy_calibration.py`
+- Test: `tests/test_server_ldc_proxy_calibration_script.py`
+
+- [ ] **Step 1: Write failing test for proxy-side computation + agreement report**
+
+Create `tests/test_server_ldc_proxy_calibration_script.py`:
+
+```python
+import unittest
+
+import numpy as np
+
+
+class ProxyCalibrationTests(unittest.TestCase):
+    def test_proxy_side_from_features(self):
+        from scripts.server_ldc_proxy_calibration import proxy_side_from_features
+        # proxy side mirrors train_ldc_classifier: mom_6 (kline_momentum_percent) sign
+        self.assertEqual(proxy_side_from_features({"kline_momentum_percent": 1.2}), "long")
+        self.assertEqual(proxy_side_from_features({"kline_momentum_percent": -0.8}), "short")
+        self.assertEqual(proxy_side_from_features({"kline_momentum_percent": 0.0}), "long")
+
+    def test_agreement_report_from_setups(self):
+        from scripts.server_ldc_proxy_calibration import agreement_report_from_setups
+        setups = [
+            {"side": "long", "candidate": {"features": {"kline_momentum_percent": 1.0}}},
+            {"side": "long", "candidate": {"features": {"kline_momentum_percent": -1.0}}},  # disagree
+            {"side": "short", "candidate": {"features": {"kline_momentum_percent": -2.0}}},
+            {"side": "short", "candidate": {"features": {"kline_momentum_percent": 1.5}}},  # disagree
+        ]
+        report = agreement_report_from_setups(setups)
+        self.assertEqual(report["n_setups"], 4)
+        self.assertEqual(report["n_agree"], 2)
+        self.assertAlmostEqual(report["agreement_fraction"], 0.5, places=4)
+        self.assertIn("interpretation", report)
+
+
+if __name__ == "__main__":
+    unittest.main()
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `python -m unittest tests.test_server_ldc_proxy_calibration_script -v`
+Expected: FAIL with `ModuleNotFoundError`.
+
+- [ ] **Step 3: Implement the calibration helpers**
+
+Create `scripts/server_ldc_proxy_calibration.py`:
+
+```python
+"""Proxy-side calibration for the LDC release verdict.
+
+The offline lift sweep calibrates LDC against a PROXY setup side (a simple
+mom_6 sign), not the real setup pipeline (14 factors + regime router + AI
+review). This script makes that approximation measurable: it reads recorded
+trade_setups over a window, recomputes the proxy side from each setup's
+features, and reports proxy-vs-actual side agreement.
+
+Read-only. It does not place orders, call signed Binance endpoints, or
+mutate SQLite — mirroring scripts/server_live_trade_forensics.py.
+
+The release verdict is two-headed: local lift > 1.0 AND this agreement read
+together. High lift + low agreement -> lift calibrated to wrong baseline,
+must be discounted. Run on the server where the DB lives.
+
+Usage:
+    python scripts/server_ldc_proxy_calibration.py \
+        --db /opt/binance-futures-agent/data/agent.sqlite \
+        --since 2026-06-01T00:00:00Z
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from pathlib import Path
+from typing import Any, Mapping
+
+
+def proxy_side_from_features(features: Mapping[str, Any]) -> str:
+    """Proxy side = sign of kline_momentum_percent (mirrors train_ldc_classifier)."""
+    mom = features.get("kline_momentum_percent")
+    try:
+        return "long" if float(mom) >= 0 else "short"
+    except (TypeError, ValueError):
+        return "long"   # neutral default; matches the training script's >= 0 branch
+
+
+def agreement_report_from_setups(setups: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Compare actual setup side to the proxy side recomputed from features."""
+    n = len(setups)
+    agree = 0
+    for s in setups:
+        actual = str(s.get("side") or "").lower()
+        feats = s.get("candidate", {}).get("features", {})
+        if actual and actual in {"long", "short"}:
+            if proxy_side_from_features(feats) == actual:
+                agree += 1
+    frac = agree / n if n else 0.0
+    return {
+        "n_setups": n,
+        "n_agree": agree,
+        "agreement_fraction": round(frac, 4),
+        "interpretation": (
+            ">= 0.8: proxy is a faithful stand-in, lift verdict trustworthy. "
+            "0.5-0.8: moderate divergence, discount lift somewhat. "
+            "< 0.5: proxy diverges systematically, lift calibrated to wrong baseline "
+            "- do NOT authorize live on lift alone."
+        ),
+    }
+
+
+def load_setups_from_db(db_path: str, *, since: str) -> list[dict[str, Any]]:
+    """Read trade_setups payloads since `since`. Read-only."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT payload FROM trade_setups WHERE occurred_at >= ? ORDER BY occurred_at",
+            (since,),
+        ).fetchall()
+        setups = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload"])
+                setup = payload.get("setup", {})
+                candidate = payload.get("candidate", {})
+                if setup.get("side"):
+                    setups.append({"side": setup["side"], "candidate": candidate})
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return setups
+    finally:
+        conn.close()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--db", required=True)
+    ap.add_argument("--since", default="2026-01-01T00:00:00Z")
+    args = ap.parse_args()
+    if not Path(args.db).exists():
+        print(f"db not found: {args.db}")
+        return 1
+    setups = load_setups_from_db(args.db, since=args.since)
+    report = agreement_report_from_setups(setups)
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `python -m unittest tests.test_server_ldc_proxy_calibration_script -v`
+Expected: PASS (2 tests)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/server_ldc_proxy_calibration.py tests/test_server_ldc_proxy_calibration_script.py
+git commit -m "feat(ldc): add server proxy-side calibration for two-headed release verdict"
+```
+
+---
+
+## Task 9: Final verification
 
 **Files:** none (verification only)
 
 - [ ] **Step 1: Run the full test suite**
 
 Run: `python -m unittest discover -s tests`
-Expected: PASS — all tests, including the new `test_strategy_ldc_classifier`, `test_strategy_setup_ldc`, `test_train_ldc_classifier_script`, and the existing suites (`test_strategy_setup`, `test_deploy_assets`, etc.).
+Expected: PASS — all tests, including the new `test_strategy_ldc_classifier`, `test_strategy_setup_ldc`, `test_train_ldc_classifier_script`, `test_server_ldc_proxy_calibration_script`, and the existing suites (`test_strategy_setup`, `test_deploy_assets`, etc.).
 
 - [ ] **Step 2: Run git diff --check**
 
