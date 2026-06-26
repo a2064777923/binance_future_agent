@@ -79,6 +79,16 @@ Trend positions use wider protection to avoid closing too often:
 - `BFA_POSITION_SENTINEL_TREND_GIVEBACK_R=0.65`
 - `BFA_POSITION_SENTINEL_TREND_TARGET_EXTENSION_R=0.75`
 - `BFA_POSITION_SENTINEL_TREND_GIVEBACK_RATIO=0.55`
+- `BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS=180`
+
+The trend profile deliberately does not behave like the micro-grid scalping
+profile. After a trend position emits a `trail_or_backfill` protection decision,
+the same symbol/position side is put on a three-minute trend-protection
+cooldown. During that window the sentinel records
+`trend_protection_cooldown_active` and does not rerun the full trend
+profit-protection decision for that position. Missing-protection backfill is
+still allowed immediately; the cooldown only applies to normal trend trailing
+judgement/stop movement.
 
 ## Verification
 
@@ -112,6 +122,7 @@ Current server tuning checked on 2026-06-26:
 - `BFA_MAX_RISK_PER_TRADE_USDT=6`
 - `BFA_MAX_DAILY_LOSS_USDT=25`
 - `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true`
+- `BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS=180`
 - `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 
 This keeps micro-grid entries passive and entry-time-limited: if the limit price is not hit quickly enough, the watchdog should let it expire instead of chasing. Filled positions are no longer closed only because a fixed micro-grid hold window expired; stop-loss, take-profit, and sentinel protection remain responsible for exits.

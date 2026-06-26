@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import json
+import sqlite3
 from typing import Any, Mapping
 
 from bfa.config import AppConfig, RuntimeMode
@@ -121,7 +123,12 @@ def build_position_sentinel_report(
         require_filters=True,
         ignore_normal_open_orders=True,
     )
-    signals = _reversal_signals_from_plan(config, plan, market_client=market)
+    cooldowns = _trend_cooldowns_from_store(
+        resolved_db_path,
+        checked_at=checked_at,
+        cooldown_seconds=_float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS"), 180.0),
+    )
+    signals = _reversal_signals_from_plan(config, plan, market_client=market, cooldowns=cooldowns)
     plan = _plan_with_sentinel_trailing_requests(
         config,
         plan,
@@ -164,20 +171,30 @@ def _reversal_signals_from_plan(
     plan: PositionAdjustmentPlanReport,
     *,
     market_client,
+    cooldowns: Mapping[tuple[str, str | None], dict[str, Any]] | None = None,
 ) -> list[ReversalRiskSignal]:
     review = plan.position_review
     if review is None:
         return []
     return [
-        _reversal_signal(config, item, market_client=market_client)
+        _reversal_signal(config, item, market_client=market_client, cooldowns=cooldowns or {})
         for item in review.positions
         if item.recommendation != "manual_hold" and item.position_amt != 0
     ]
 
 
-def _reversal_signal(config: AppConfig, item, *, market_client) -> ReversalRiskSignal:
+def _reversal_signal(
+    config: AppConfig,
+    item,
+    *,
+    market_client,
+    cooldowns: Mapping[tuple[str, str | None], dict[str, Any]],
+) -> ReversalRiskSignal:
     side = "LONG" if item.position_amt > 0 else "SHORT"
     profile = _protection_profile(config, item)
+    cooldown = _cooldown_for_item(item, profile=profile, cooldowns=cooldowns)
+    if cooldown is not None and item.algo_protection_count >= 2:
+        return _cooldown_signal(item, profile=profile, cooldown=cooldown)
     threshold = profile["threshold"]
     min_profit_r = profile["min_profit_r"]
     min_progress = profile["min_progress"]
@@ -246,6 +263,106 @@ def _reversal_signal(config: AppConfig, item, *, market_client) -> ReversalRiskS
         decision=decision,
         reasons=_dedupe(reasons or ["no_reversal_action"]),
         metrics={**metrics, "protection_profile": profile["name"]},
+    )
+
+
+def _trend_cooldowns_from_store(
+    db_path: str,
+    *,
+    checked_at: str,
+    cooldown_seconds: float,
+) -> dict[tuple[str, str | None], dict[str, Any]]:
+    if cooldown_seconds <= 0:
+        return {}
+    checked = _parse_iso(checked_at)
+    if checked is None:
+        return {}
+    since = checked - timedelta(seconds=cooldown_seconds)
+    result: dict[tuple[str, str | None], dict[str, Any]] = {}
+    try:
+        connection = connect(db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT occurred_at, payload_json
+                FROM events
+                WHERE event_type = ?
+                  AND occurred_at >= ?
+                  AND occurred_at < ?
+                ORDER BY occurred_at DESC, id DESC
+                """,
+                (
+                    "position_sentinel",
+                    since.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                    checked.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                ),
+            ).fetchall()
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error):
+        return {}
+
+    for row in rows:
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        occurred_at = str(row["occurred_at"])
+        occurred = _parse_iso(occurred_at)
+        if occurred is None:
+            continue
+        elapsed = (checked - occurred).total_seconds()
+        if elapsed < 0 or elapsed >= cooldown_seconds:
+            continue
+        for signal in payload.get("reversal_signals") or []:
+            if not isinstance(signal, Mapping):
+                continue
+            metrics = signal.get("metrics") if isinstance(signal.get("metrics"), Mapping) else {}
+            if str(metrics.get("protection_profile") or "").lower() != "trend":
+                continue
+            if str(signal.get("decision") or "").lower() != "trail_or_backfill":
+                continue
+            key = (
+                str(signal.get("symbol") or "").upper(),
+                str(signal.get("position_side") or "").upper() or None,
+            )
+            if not key[0] or key in result:
+                continue
+            result[key] = {
+                "last_decision_at": occurred_at,
+                "remaining_seconds": max(cooldown_seconds - elapsed, 0.0),
+            }
+    return result
+
+
+def _cooldown_for_item(
+    item,
+    *,
+    profile: Mapping[str, Any],
+    cooldowns: Mapping[tuple[str, str | None], dict[str, Any]],
+) -> dict[str, Any] | None:
+    if str(profile.get("name") or "") != "trend":
+        return None
+    return cooldowns.get((str(item.symbol).upper(), str(item.position_side or "").upper() or None))
+
+
+def _cooldown_signal(item, *, profile: Mapping[str, Any], cooldown: Mapping[str, Any]) -> ReversalRiskSignal:
+    remaining_seconds = int(max(_float_or_none(cooldown.get("remaining_seconds")) or 0.0, 0.0))
+    return ReversalRiskSignal(
+        symbol=item.symbol,
+        position_side=item.position_side,
+        score=0.0,
+        decision="observe",
+        reasons=[
+            f"protection_profile:{profile['name']}",
+            "trend_protection_cooldown_active",
+            f"trend_protection_cooldown_remaining_seconds:{remaining_seconds}",
+        ],
+        metrics={
+            "protection_profile": profile["name"],
+            "trend_protection_cooldown_remaining_seconds": remaining_seconds,
+            "trend_protection_last_decision_at": cooldown.get("last_decision_at"),
+        },
     )
 
 
@@ -836,6 +953,13 @@ def _now_iso(now: str | None) -> str:
             "Z",
         )
     return datetime.now(tz=UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _parse_iso(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(UTC)
+    except (TypeError, ValueError):
+        return None
 
 
 def _json(payload: Mapping[str, Any]) -> str:

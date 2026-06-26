@@ -320,6 +320,7 @@ Current automation posture:
 - `BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED=true`
 - `BFA_POSITION_SENTINEL_ENABLED=true`
 - `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true`
+- `BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS=180`
 - `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 
 That means the watchdog can backfill missing protection for pending limit fills
@@ -329,6 +330,12 @@ profit-giveback evidence. Verify these env values before assuming live can or
 cannot move protective orders. If `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`,
 the sentinel is observe-only: it will keep logging `trail_or_backfill` plans but
 will not actually move the exchange-side stop.
+
+Trend protection is intentionally slower than micro-grid protection. The live
+trend profile enforces a same-symbol/same-side cooldown of at least 180 seconds
+between trend protection judgements that could move protective orders. During
+that cooldown the sentinel records `trend_protection_cooldown_active` and only
+observes the position. Emergency missing-protection backfill is not delayed.
 
 2026-06-26 review: after reconciling exchange fills from
 `2026-06-25T16:00:00Z`, 93 closed outcomes were available. Trend-leg outcomes
