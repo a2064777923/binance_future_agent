@@ -41,6 +41,7 @@ from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.pending_limit_watchdog import execute_pending_limit_watchdog
 from bfa.ops.position_adjustment import build_position_adjustment_plan_report, execute_position_adjustment_plan_report
 from bfa.strategy.candidates import CandidateSignal, StrategyConfig, generate_candidates
+from bfa.strategy.features import extract_features
 from bfa.strategy.micro_grid_live import (
     MicroGridLiveConfig,
     build_micro_grid_live_candidates,
@@ -337,6 +338,10 @@ def run_agent_once(
                 *_narrative_records(narrative_event_ids, narrative_records),
             ],
         }
+        micro_market_context = _market_context_by_symbol_for_micro_grid(
+            replay_packet,
+            config=config,
+        )
         base_sizing = compute_position_sizing(
             sizing_input_from_config(config),
             enabled=dynamic_sizing_enabled(config),
@@ -363,6 +368,7 @@ def run_agent_once(
             scan_symbols=scan_symbols,
             generated_at=started_at,
             max_position_notional_usdt=base_sizing.max_position_notional_usdt,
+            market_context_by_symbol=micro_market_context,
         )
         source_health["micro_grid"] = micro_health
         normal_candidates = candidates.candidates
@@ -1170,6 +1176,27 @@ def _micro_grid_source_health_summary(health) -> dict[str, Any]:
             if isinstance(item, dict)
         ]
     return payload
+
+
+def _market_context_by_symbol_for_micro_grid(
+    replay_packet: Mapping[str, Any],
+    *,
+    config: AppConfig,
+) -> dict[str, dict[str, Any]]:
+    features = extract_features(
+        replay_packet,
+        spike_reversal_enabled=_truthy(config.get("BFA_SPIKE_REVERSAL_SIGNAL_ENABLED")),
+        spike_min_wick_percent=float(config.get("BFA_SPIKE_REVERSAL_MIN_WICK_PERCENT")),
+        spike_min_wick_to_body_ratio=float(config.get("BFA_SPIKE_REVERSAL_MIN_WICK_TO_BODY_RATIO")),
+    )
+    result: dict[str, dict[str, Any]] = {}
+    for symbol, item in features.items():
+        payload = item.to_dict()
+        payload["market_context_source"] = "market_snapshots"
+        if item.min_executable_notional is not None:
+            payload["min_executable_notional_source"] = "exchange_symbol"
+        result[symbol.upper()] = payload
+    return result
 
 
 def _market_snapshot_context_summary(market_snapshots) -> dict[str, Any]:
@@ -2185,13 +2212,12 @@ def _live_candidate_rank(candidate) -> tuple[float, float, str]:
         )
         if features.get("route_decision") == "allow":
             regime_confidence = _float_or_zero(features.get("regime_confidence"))
-        # Micro candidates carry an artificial 80-point base offset (see
-        # _candidate_from_order: 80.0 + score*10.0) which dwarfs the trend
-        # candidate scores (~10-50) and made the fuser prefer micro legs almost
-        # unconditionally. Strip the base offset so regime routing, not a
-        # magnitude bias, decides which leg ranks first.
+        # Older micro-grid candidates carried an artificial 80-point base
+        # offset. Strip only that legacy shape; current candidates keep their
+        # raw quality score so paper/live/backtest do not rank them by a hidden
+        # magnitude bias.
         if str(features.get("strategy_leg") or "").lower() == "micro_grid":
-            raw_score = max(raw_score - 80.0, 0.0) / 10.0
+            raw_score = max(raw_score - 80.0, 0.0) / 10.0 if raw_score >= 80.0 else raw_score
     return (raw_score, regime_confidence, quality, str(getattr(candidate, "symbol", "")))
 
 

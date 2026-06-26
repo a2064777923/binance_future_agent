@@ -285,7 +285,7 @@ def _validate_trade(
     if risk > risk_limits.max_risk_per_trade_usdt:
         errors.append("risk_exceeds_cap")
     reference_price = _reference_price(context)
-    if reference_price is not None and _entry_deviation_percent(decision.entry_price, reference_price) > 1.5:
+    if reference_price is not None and _entry_deviation_percent(decision.entry_price, reference_price) > 1.75:
         errors.append("entry_too_far_from_reference_price")
     min_executable_notional = _min_executable_notional(context)
     if (

@@ -65,6 +65,7 @@ def build_micro_grid_live_candidates(
     scan_symbols: list[str],
     generated_at: str,
     max_position_notional_usdt: float | None,
+    market_context_by_symbol: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[list[CandidateSignal], dict[str, Any]]:
     live_config = MicroGridLiveConfig.from_app(config)
     health: dict[str, Any] = {
@@ -101,8 +102,14 @@ def build_micro_grid_live_candidates(
         health.update({"status": "cache_invalid", "error": "symbols_missing"})
         return [], health
 
+    market_context = {
+        str(symbol).upper(): dict(context)
+        for symbol, context in (market_context_by_symbol or {}).items()
+        if isinstance(context, Mapping)
+    }
     allowed = [symbol.upper() for symbol in scan_symbols]
     for symbol in allowed:
+        context = market_context.get(symbol, {})
         raw_bars = symbols_payload.get(symbol) or symbols_payload.get(symbol.lower())
         seconds = _continuous_seconds(symbol, raw_bars if isinstance(raw_bars, list) else [])
         symbol_health = {
@@ -110,8 +117,15 @@ def build_micro_grid_live_candidates(
             "status": "not_evaluated",
             "reasons": [],
             "order_count": 0,
+            "market_context_status": _market_context_status(context),
         }
         health["symbols"][symbol] = symbol_health
+        context_reasons = _market_context_rejections(context)
+        if context_reasons:
+            symbol_health.update({"status": "rejected", "reasons": context_reasons})
+            for reason in context_reasons:
+                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            continue
         if len(seconds) <= profile.required_history_seconds:
             reason = "insufficient_cached_seconds"
             symbol_health.update({"status": "rejected", "reasons": [reason]})
@@ -171,6 +185,7 @@ def build_micro_grid_live_candidates(
                 max_position_notional_usdt=max_position_notional_usdt,
                 live_config=live_config,
                 cache_updated_at_ms=updated_at_ms,
+                market_context=context,
             )
         )
 
@@ -202,6 +217,10 @@ def micro_grid_setup_from_candidate(
     target = _positive_float(features.get("micro_grid_target_price"))
     if side not in {"long", "short"} or entry is None or stop is None or target is None:
         return _pass_setup(symbol, reasons=["micro_grid_candidate_missing_prices"])
+    if _positive_float(features.get("quote_volume")) is None:
+        return _pass_setup(symbol, reasons=["micro_grid_missing_quote_volume"])
+    if _positive_float(features.get("min_executable_notional")) is None:
+        return _pass_setup(symbol, reasons=["micro_grid_missing_min_executable_notional"])
     stop_distance_percent = abs(entry - stop) / entry * 100.0
     target_distance_percent = abs(target - entry) / entry * 100.0
     risk_reward = target_distance_percent / stop_distance_percent if stop_distance_percent > 0 else None
@@ -307,9 +326,11 @@ def _candidate_from_order(
     max_position_notional_usdt: float | None,
     live_config: MicroGridLiveConfig,
     cache_updated_at_ms: int | None,
+    market_context: Mapping[str, Any] | None = None,
 ) -> CandidateSignal:
     state = order.state
     side = order.side
+    context = dict(market_context or {})
     signal_time_ms = _iso_to_epoch_ms(state.signal_time)
     candidate_generated_at_ms = int(time.time() * 1000)
     latency = {
@@ -326,6 +347,9 @@ def _candidate_from_order(
         ),
         "ai_expected": False,
     }
+    taker_ratio = _float_or_none(context.get("taker_buy_sell_ratio"))
+    if taker_ratio is None:
+        taker_ratio = _taker_buy_sell_ratio(state.entry_taker_buy_ratio)
     features = {
         "strategy_leg": "micro_grid",
         "strategy_source": "strategy.micro_grid",
@@ -348,13 +372,23 @@ def _candidate_from_order(
         "micro_grid_candidate_generated_at_ms": candidate_generated_at_ms,
         "micro_grid_cache_updated_at_ms": cache_updated_at_ms,
         "micro_grid_latency": latency,
-        "quote_volume": 50_000_000.0,
-        "min_executable_notional": 5.0,
+        "price_change_percent": _float_or_none(context.get("price_change_percent")),
+        "quote_volume": _positive_float(context.get("quote_volume")),
+        "open_interest": _positive_float(context.get("open_interest")),
+        "open_interest_value": _positive_float(context.get("open_interest_value")),
+        "open_interest_change_percent": _float_or_none(context.get("open_interest_change_percent")),
+        "funding_rate": _float_or_none(context.get("funding_rate")),
+        "min_qty": _positive_float(context.get("min_qty")),
+        "step_size": _positive_float(context.get("step_size")),
+        "min_notional": _positive_float(context.get("min_notional")),
+        "min_executable_notional": _positive_float(context.get("min_executable_notional")),
+        "market_context_source": context.get("market_context_source") or "market_snapshots",
+        "min_executable_notional_source": context.get("min_executable_notional_source") or "exchange_symbol",
         "kline_range_percent": float(state.width_percent),
         "kline_range_mean_percent": float(state.width_percent),
         "realized_volatility_percent": float(state.instantaneous_vol_percent),
         "atr_percent": float(state.instantaneous_vol_percent),
-        "taker_buy_sell_ratio": _taker_buy_sell_ratio(state.entry_taker_buy_ratio),
+        "taker_buy_sell_ratio": taker_ratio,
         "support_price": float(state.lower_price),
         "resistance_price": float(state.upper_price),
         "vwap": float(state.center_price),
@@ -389,25 +423,63 @@ def _candidate_from_order(
         },
         "max_position_notional_usdt": max_position_notional_usdt,
     }
+    data_quality_notes = _micro_grid_data_quality_notes(features)
+    reason_codes = _dedupe(
+        [
+            "strategy_leg:micro_grid",
+            f"micro_grid_quality_scale:{round(float(quality_scale), 6)}",
+            *(f"micro_grid_{reason}" for reason in quality_reasons),
+            *order.reason_codes,
+            *data_quality_notes,
+        ]
+    )
     return CandidateSignal(
         symbol=order.symbol,
-        score=round(80.0 + score * 10.0, 6),
+        score=round(score, 6),
         narrative_score=0.0,
-        market_score=round(score * 10.0, 6),
-        reason_codes=_dedupe(
-            [
-                "strategy_leg:micro_grid",
-                f"micro_grid_quality_scale:{round(float(quality_scale), 6)}",
-                *(f"micro_grid_{reason}" for reason in quality_reasons),
-                *order.reason_codes,
-            ]
-        ),
-        data_quality_notes=[],
+        market_score=round(score, 6),
+        reason_codes=reason_codes,
+        data_quality_notes=data_quality_notes,
         source_event_ids=[],
         market_event_ids=[],
         generated_at=generated_at,
         features=features,
     )
+
+
+def _market_context_status(context: Mapping[str, Any]) -> str:
+    if not context:
+        return "missing"
+    if _positive_float(context.get("quote_volume")) is None:
+        return "missing_quote_volume"
+    if _positive_float(context.get("min_executable_notional")) is None:
+        return "missing_min_executable_notional"
+    return "available"
+
+
+def _market_context_rejections(context: Mapping[str, Any]) -> list[str]:
+    if not context:
+        return ["micro_grid_missing_market_context"]
+    reasons: list[str] = []
+    if _positive_float(context.get("quote_volume")) is None:
+        reasons.append("micro_grid_missing_quote_volume")
+    if _positive_float(context.get("min_executable_notional")) is None:
+        reasons.append("micro_grid_missing_min_executable_notional")
+    return reasons
+
+
+def _micro_grid_data_quality_notes(features: Mapping[str, Any]) -> list[str]:
+    checks = {
+        "missing_quote_volume": _positive_float(features.get("quote_volume")) is None,
+        "missing_min_executable_notional": _positive_float(features.get("min_executable_notional")) is None,
+        "missing_funding": _float_or_none(features.get("funding_rate")) is None,
+        "missing_taker_flow": _float_or_none(features.get("taker_buy_sell_ratio")) is None,
+        "missing_open_interest": (
+            _positive_float(features.get("open_interest_value")) is None
+            and _positive_float(features.get("open_interest")) is None
+        ),
+    }
+    return [note for note, missing in checks.items() if missing]
 
 
 def _continuous_seconds(symbol: str, raw_bars: list[Any]) -> list[BacktestBar]:

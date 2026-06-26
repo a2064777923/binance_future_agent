@@ -320,6 +320,7 @@ def build_trade_setup(
         sizing_diagnostics=sizing_diagnostics,
     )
     warnings.extend(sizing_warnings)
+    warnings.extend(_geometry_missing_input_warnings(entry_basis, stop_basis))
     reasons = _setup_reasons(side, factor_scores, regime, warnings)
     reasons = _dedupe([*reasons, f"signal_mode:{signal_diagnostics['mode']}", *_entry_order_reason_codes(entry_basis)])
     decision = "trade"
@@ -348,7 +349,10 @@ def build_trade_setup(
     if limit_entry_rejections:
         decision = "pass"
         reasons = _dedupe([*reasons, *limit_entry_rejections])
-    if _high_crowding(features, side):
+    crowding_risk, crowding_warnings = _high_crowding(features, side)
+    warnings.extend(crowding_warnings)
+    reasons = _dedupe([*reasons, *crowding_warnings])
+    if crowding_risk:
         warnings.append("crowding_risk")
         reasons = _dedupe([*reasons, "crowding_risk"])
     # ML-learned trend filter short-circuits the boolean-gate stack when
@@ -688,7 +692,11 @@ def _entry_price(
     order_type = str(profile.entry_order_type or "market").lower()
     if order_type == "limit":
         return _limit_entry_price(reference, side, volatility, features, profile)
-    slippage_buffer = min(max((volatility or 1.0) * 0.015, 0.0005), 0.0015)
+    volatility_basis = volatility
+    missing_volatility = volatility_basis is None
+    if volatility_basis is None:
+        volatility_basis = 2.0
+    slippage_buffer = min(max(volatility_basis * 0.015, 0.0005), 0.0015)
     if side == "long":
         entry = reference * (1.0 + slippage_buffer)
     else:
@@ -697,6 +705,9 @@ def _entry_price(
         "order_type": "market",
         "anchor": "reference_with_slippage_buffer",
         "slippage_buffer_percent": slippage_buffer * 100.0,
+        "volatility_basis_percent": volatility_basis,
+        "volatility_fallback_used": missing_volatility,
+        **({"missing_input": "missing_volatility_for_slippage_buffer"} if missing_volatility else {}),
         "limit_entry_max_wait_seconds": 0,
     }
 
@@ -925,7 +936,10 @@ def _stop_distance_percent(
 ) -> tuple[float, dict[str, Any]]:
     atr = _float(features.get("atr_percent"))
     realized_volatility = _float(features.get("realized_volatility_percent"))
-    base_volatility = atr or volatility or 1.0
+    base_volatility = atr or volatility or realized_volatility
+    missing_volatility = base_volatility is None
+    if base_volatility is None:
+        base_volatility = 2.0
     if profile.adaptive_stop_enabled:
         adaptive_candidates = [0.65]
         if atr is not None:
@@ -964,6 +978,9 @@ def _stop_distance_percent(
         "atr_percent": atr,
         "realized_volatility_percent": realized_volatility,
         "volatility_percent": volatility,
+        "base_volatility_percent": base_volatility,
+        "volatility_fallback_used": missing_volatility,
+        **({"missing_input": "missing_volatility_for_stop_geometry"} if missing_volatility else {}),
         "structure_distance_percent": structure_distance,
         "raw_stop_distance_percent": raw_stop_distance,
         "profile_adjusted_stop_distance_percent": profile_adjusted,
@@ -1248,6 +1265,7 @@ def _price_basis(
             "step_size": _float(features.get("step_size")),
             "min_notional": _float(features.get("min_notional")),
             "min_executable_notional": _float(features.get("min_executable_notional")),
+            "min_executable_notional_source": features.get("min_executable_notional_source"),
         },
         "spike_reversal_reference": _spike_reversal_reference(features),
         "missing_inputs": _missing_geometry_inputs(features),
@@ -1999,12 +2017,28 @@ def _sequence(value: Any) -> list[Any]:
     return [value]
 
 
-def _high_crowding(features: Mapping[str, Any], side: str) -> bool:
-    funding = _float(features.get("funding_rate")) or 0.0
-    taker = _float(features.get("taker_buy_sell_ratio")) or 1.0
+def _geometry_missing_input_warnings(*basis_items: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for basis in basis_items:
+        missing = str(basis.get("missing_input") or "").strip()
+        if missing:
+            warnings.append(missing)
+    return _dedupe(warnings)
+
+
+def _high_crowding(features: Mapping[str, Any], side: str) -> tuple[bool, list[str]]:
+    funding = _float(features.get("funding_rate"))
+    taker = _float(features.get("taker_buy_sell_ratio"))
+    warnings: list[str] = []
+    if funding is None:
+        warnings.append("missing_funding_for_crowding")
+    if taker is None:
+        warnings.append("missing_taker_flow_for_crowding")
+    if funding is None or taker is None:
+        return False, warnings
     if side == "long":
-        return funding > 0.0008 and taker > 1.8
-    return funding < -0.0008 and taker < 0.55
+        return funding > 0.0008 and taker > 1.8, warnings
+    return funding < -0.0008 and taker < 0.55, warnings
 
 
 def _factor_guard_rejections(factors: list[FactorScore], profile: TradeSetupProfile) -> list[str]:

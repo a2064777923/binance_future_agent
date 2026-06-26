@@ -129,6 +129,25 @@ snapshots:
 Use those fields when analyzing a trade. Do not guess the leg from the symbol
 or side.
 
+## Data Provenance And Bias Notes
+
+- Real Binance market data is used for normal feature extraction through
+  `MarketDataCollector` and `src/bfa/strategy/features.py`.
+- Micro-grid live used to be missing the same market context and previously
+  injected fake-looking liquidity / tradability defaults. That path now
+  receives a per-symbol market context built from the same live snapshots and
+  exchange filters. Missing context is recorded as `missing_*` and may reject
+  the candidate.
+- `market_context_source=market_snapshots` means the field came from live
+  market snapshots, not a synthetic fallback.
+- `min_executable_notional_source=exchange_symbol` means the value came from
+  exchange filters. `simulation_default` means a backtest / forward-paper
+  assumption, not a live exchange constraint.
+- Regime scores such as the `0.52` / `0.60` priors in `src/bfa/strategy/regime.py`
+  are router priors, not external market measurements.
+- Confidence floors such as the `0.45` base in `_confidence()` are model
+  priors from feature coverage, not market data.
+
 ## Trend Leg
 
 The trend leg is the normal candidate path. It uses `strategy_leg=trend` and

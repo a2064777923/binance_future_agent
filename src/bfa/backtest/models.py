@@ -106,6 +106,7 @@ class BacktestConfig:
     trailing_activate_r: float = 0.8
     trailing_lock_r: float = 0.2
     trailing_giveback_r: float = 0.55
+    simulation_min_executable_notional_usdt: float = 5.0
     setup_profile: dict[str, Any] = field(default_factory=dict)
 
     def with_overrides(self, **overrides: Any) -> "BacktestConfig":
@@ -137,6 +138,7 @@ class BacktestConfig:
             "trailing_activate_r": self.trailing_activate_r,
             "trailing_lock_r": self.trailing_lock_r,
             "trailing_giveback_r": self.trailing_giveback_r,
+            "simulation_min_executable_notional_usdt": self.simulation_min_executable_notional_usdt,
             "setup_profile": dict(self.setup_profile),
         }
 

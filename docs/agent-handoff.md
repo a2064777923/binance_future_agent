@@ -143,6 +143,12 @@ fields so signal-to-submit delay can be audited. Trend candidates still use the
 AI review path when enabled. See `docs/current-live-strategy.md` before
 changing routing or risk.
 
+Micro-grid live now consumes real per-symbol market context derived from the
+same Binance snapshots used elsewhere in the system. Do not reintroduce fake
+liquidity or synthetic `min_executable_notional` values in the live path. If a
+symbol lacks market context, the candidate should carry explicit `missing_*`
+diagnostics or be rejected.
+
 ## Runtime Data Policy
 
 These are intentionally ignored and must not be committed:

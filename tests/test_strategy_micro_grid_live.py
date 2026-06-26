@@ -4,7 +4,13 @@ from dataclasses import replace
 from bfa.ai.schema import RiskLimits
 from bfa.config import load_config
 from bfa.strategy.candidates import CandidateSignal
-from bfa.strategy.micro_grid_live import MicroGridLiveConfig, _order_score, micro_grid_setup_from_candidate
+from bfa.strategy.micro_grid_live import (
+    MicroGridLiveConfig,
+    _candidate_from_order,
+    _market_context_rejections,
+    _order_score,
+    micro_grid_setup_from_candidate,
+)
 
 from scripts import run_micro_grid_research as research
 
@@ -40,6 +46,8 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
                 "micro_grid_max_hold_seconds": max_hold_seconds,
                 "micro_grid_order_wait_seconds": order_wait_seconds,
                 "micro_grid_quality_scale": 1.0,
+                "quote_volume": 25_000_000.0,
+                "min_executable_notional": 5.0,
                 "micro_grid_latency": {
                     "source": "micro_grid_live",
                     "signal_time_ms": 1_700_000_000_000,
@@ -47,7 +55,6 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
                     "signal_to_candidate_ms": 1250,
                     "ai_expected": False,
                 },
-                "min_executable_notional": 5.0,
                 "reference_price": 100.1,
             },
         )
@@ -210,6 +217,44 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         short_score = _order_score(short_order, research)
 
         self.assertGreater(long_score, short_score)
+
+    def test_micro_grid_market_context_missing_rejects_instead_of_faking_liquidity(self):
+        self.assertEqual(_market_context_rejections({}), ["micro_grid_missing_market_context"])
+        self.assertEqual(
+            _market_context_rejections({"quote_volume": 25_000_000.0}),
+            ["micro_grid_missing_min_executable_notional"],
+        )
+
+    def test_candidate_from_order_uses_real_market_context_without_score_offset(self):
+        state = self.micro_state(close_position_percent=6.0, long_ready=True, short_ready=False)
+        order = self.grid_order(side="long", state=state)
+
+        candidate = _candidate_from_order(
+            order,
+            generated_at="2026-06-24T00:00:01Z",
+            score=4.2,
+            quality_scale=0.91,
+            quality_reasons=["quality_ok"],
+            max_position_notional_usdt=200.0,
+            live_config=MicroGridLiveConfig.from_app(load_config(env={"BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS": "0"})),
+            cache_updated_at_ms=1_700_000_000_000,
+            market_context={
+                "quote_volume": 12_345_678.0,
+                "min_executable_notional": 6.25,
+                "min_executable_notional_source": "exchange_symbol",
+                "funding_rate": "0.0001",
+                "taker_buy_sell_ratio": "1.23",
+                "open_interest_value": "9000000",
+            },
+        )
+
+        self.assertEqual(candidate.score, 4.2)
+        self.assertEqual(candidate.market_score, 4.2)
+        self.assertEqual(candidate.features["quote_volume"], 12_345_678.0)
+        self.assertEqual(candidate.features["min_executable_notional"], 6.25)
+        self.assertEqual(candidate.features["min_executable_notional_source"], "exchange_symbol")
+        self.assertNotIn("missing_quote_volume", candidate.data_quality_notes)
+        self.assertNotIn("missing_min_executable_notional", candidate.data_quality_notes)
 
 
 if __name__ == "__main__":

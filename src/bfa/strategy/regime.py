@@ -279,7 +279,7 @@ def _trend_evidence(diagnostics: Mapping[str, Any]) -> tuple[bool, list[str], fl
     micro_momentum = _float_or_none(diagnostics.get("kline_micro_momentum_percent"))
 
     reasons: list[str] = []
-    score = 0.52
+    score = 0.52  # Router prior, not a market measurement.
     path_trend = path is not None and path >= TREND_MIN_PATH_EFFICIENCY
     if path_trend:
         reasons.append("trend_path_efficiency")
@@ -312,7 +312,7 @@ def _range_evidence(diagnostics: Mapping[str, Any]) -> tuple[bool, list[str], fl
     drift = _float_or_none(diagnostics.get("drift_to_width"))
 
     reasons: list[str] = []
-    score = 0.52
+    score = 0.52  # Router prior, not a market measurement.
     path_ok = path is not None and path <= RANGE_MAX_PATH_EFFICIENCY
     if path_ok:
         reasons.append("range_low_path_efficiency")
@@ -390,7 +390,7 @@ def _micro_grid_wick_reversal_evidence(
     continuation_ok = continuation <= 0.35
     if not (edge_ok and flow_ok and reversal_ok and continuation_ok):
         return False, [], 0.0
-    score = 0.60
+    score = 0.60  # Router prior for wick-reversal opportunity, not a market measurement.
     score += min(max(reversal, 0.0), 0.45) * 0.25
     score += min(max(pullback, 0.0), 1.0) * 0.10
     if edge_alternations is not None:
