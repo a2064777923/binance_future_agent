@@ -111,7 +111,7 @@ Current server tuning checked on 2026-06-26:
 - `BFA_LIVE_MICRO_GRID_TOP_N=12`
 - `BFA_MAX_RISK_PER_TRADE_USDT=6`
 - `BFA_MAX_DAILY_LOSS_USDT=25`
-- `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`
+- `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true`
 - `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 
 This keeps micro-grid entries passive and entry-time-limited: if the limit price is not hit quickly enough, the watchdog should let it expire instead of chasing. Filled positions are no longer closed only because a fixed micro-grid hold window expired; stop-loss, take-profit, and sentinel protection remain responsible for exits.
@@ -134,6 +134,30 @@ by normal volatility. With `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`, the
 sentinel only records plans and diagnostics. With
 `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`, live-cycle full-close or backfill
 plans are not executed automatically.
+
+## 2026-06-26 Observe-Only Regression
+
+A live review found that trend protection was being calculated but not executed.
+After reconciling closed exchange fills from `2026-06-25T16:00:00Z`, the ledger
+showed 37 trend-leg closed outcomes with 11 wins, 26 losses, and net
+`-20.9909U`. The position sentinel logged 13,930 `trail_or_backfill` signals in
+the same window, including trend positions with profit thresholds, target
+progress, flow fade, adverse reversal, and reversal-score triggers. It executed
+zero protective replacements because the server env had
+`BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`.
+
+Root cause: the high-frequency sentinel service was running and recording
+diagnostics every few seconds, but the execution gate made every plan
+observe-only. This is easy to misread because `binance-futures-agent-position-
+sentinel.timer` is still active and healthy while no stop replacement is ever
+submitted.
+
+Fix: live must run with `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true` when active
+positions are expected to receive profit protection. `config-check` now warns
+when live mode leaves the sentinel observe-only. Keep
+`BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false` if full-close/partial-reduce
+automation should remain disabled; the sentinel execution gate only permits
+protective backfill and `trail_protective_orders`.
 
 ## Latency Telemetry
 

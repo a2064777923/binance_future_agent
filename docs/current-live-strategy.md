@@ -319,13 +319,26 @@ Current automation posture:
 - `BFA_PENDING_LIMIT_WATCHDOG_ENABLED=true`
 - `BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED=true`
 - `BFA_POSITION_SENTINEL_ENABLED=true`
-- `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`
+- `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true`
 - `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 
 That means the watchdog can backfill missing protection for pending limit fills
-when enabled, while the sentinel currently records diagnostics/plans but does
-not automatically replace trailing protection. Verify these env values before
-assuming live can or cannot move protective orders.
+when enabled, while the sentinel can replace existing stop/take-profit algo
+orders when a protected position has enough favorable progress and reversal or
+profit-giveback evidence. Verify these env values before assuming live can or
+cannot move protective orders. If `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`,
+the sentinel is observe-only: it will keep logging `trail_or_backfill` plans but
+will not actually move the exchange-side stop.
+
+2026-06-26 review: after reconciling exchange fills from
+`2026-06-25T16:00:00Z`, 93 closed outcomes were available. Trend-leg outcomes
+were 37 trades, 11 wins, 26 losses, net `-20.9909U`; micro-grid outcomes were
+56 trades, 21 wins, 35 losses, net `-6.0623U`. The sentinel produced 13,930
+`trail_or_backfill` signals in that window, including many trend signals with
+`profit_r_threshold_met`, `target_progress_threshold_met`, `flow_fade_detected`,
+and `reversal_risk_threshold_met`, but executed zero replacements because
+`BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`. The live env was corrected to
+`true` so profitable trend positions are no longer observation-only.
 
 Protection failure statuses such as `protective_order_failed_open` are
 processed live-cycle statuses so the timer can continue scanning. They are not

@@ -296,6 +296,42 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(result.valid)
         self.assertIn("BFA_POSITION_MODE=hedge sends explicit Binance positionSide values", result.warnings)
 
+    def test_live_warns_when_position_sentinel_is_observe_only(self):
+        config = load_config(
+            base_env(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                BFA_POSITION_SENTINEL_ENABLED="true",
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="false",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertTrue(result.valid)
+        self.assertIn(
+            "BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false leaves live position profit protection observe-only",
+            result.warnings,
+        )
+
+    def test_live_sentinel_execution_enabled_does_not_warn(self):
+        config = load_config(
+            base_env(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                BFA_POSITION_SENTINEL_ENABLED="true",
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertTrue(result.valid)
+        self.assertNotIn(
+            "BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false leaves live position profit protection observe-only",
+            result.warnings,
+        )
+
     def test_unknown_mode_fails(self):
         config = load_config(base_env(BFA_MODE="reckless"))
         result = validate_config(config)

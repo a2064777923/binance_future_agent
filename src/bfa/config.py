@@ -441,6 +441,12 @@ def validate_config(config: AppConfig) -> ValidationResult:
             warnings.append("BFA_MARGIN_MODE=cross uses account-level cross margin under pilot caps")
         if config.get("BFA_POSITION_MODE").strip().lower() == "hedge":
             warnings.append("BFA_POSITION_MODE=hedge sends explicit Binance positionSide values")
+        if _truthy(config.get("BFA_POSITION_SENTINEL_ENABLED")) and not _truthy(
+            config.get("BFA_POSITION_SENTINEL_EXECUTE_ENABLED")
+        ):
+            warnings.append(
+                "BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false leaves live position profit protection observe-only"
+            )
 
     if config.get("BFA_MARGIN_MODE").strip().lower() not in {"isolated", "cross"}:
         errors.append("BFA_MARGIN_MODE must be isolated or cross")
