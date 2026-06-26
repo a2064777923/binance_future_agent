@@ -67,8 +67,15 @@ def load_setups_from_db(db_path: str, *, since: str) -> list[dict[str, Any]]:
     conn = sqlite3.connect(db_path)
     try:
         conn.row_factory = sqlite3.Row
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(trade_setups)").fetchall()
+        }
+        payload_col = "payload_json" if "payload_json" in columns else "payload"
+        if payload_col not in columns:
+            return []
         rows = conn.execute(
-            "SELECT payload FROM trade_setups WHERE occurred_at >= ? ORDER BY occurred_at",
+            f"SELECT {payload_col} AS payload FROM trade_setups WHERE occurred_at >= ? ORDER BY occurred_at",
             (since,),
         ).fetchall()
         setups = []
