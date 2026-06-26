@@ -1,9 +1,12 @@
 import unittest
+from dataclasses import replace
 
 from bfa.ai.schema import RiskLimits
 from bfa.config import load_config
 from bfa.strategy.candidates import CandidateSignal
-from bfa.strategy.micro_grid_live import MicroGridLiveConfig, micro_grid_setup_from_candidate
+from bfa.strategy.micro_grid_live import MicroGridLiveConfig, _order_score, micro_grid_setup_from_candidate
+
+from scripts import run_micro_grid_research as research
 
 
 class MicroGridLiveAdapterTests(unittest.TestCase):
@@ -95,6 +98,110 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         live_config = MicroGridLiveConfig.from_app(load_config(env={}))
 
         self.assertEqual(live_config.order_wait_seconds, 20)
+
+    def micro_state(self, *, close_position_percent: float, long_ready: bool, short_ready: bool):
+        return research.MicroGridState(
+            signal_index=100,
+            signal_time="2026-06-24T00:00:00Z",
+            center_price=100.0,
+            projected_center_price=100.0,
+            lower_price=99.0,
+            upper_price=101.0,
+            width_percent=2.0,
+            close_position_percent=close_position_percent,
+            center_cross_count=4,
+            turn_count=5,
+            lower_touch_count=2,
+            upper_touch_count=2,
+            edge_alternation_count=3,
+            reversal_response_rate=0.6,
+            path_efficiency=0.25,
+            drift_percent=0.0,
+            drift_to_width=0.0,
+            recent_path_efficiency=0.2,
+            recent_drift_percent=0.0,
+            recent_drift_to_width=0.0,
+            amplitude_percent=1.0,
+            score=1.0,
+            trend_pause=False,
+            trend_direction=None,
+            current_price=99.2 if close_position_percent <= 30 else 100.8 if close_position_percent >= 70 else 100.0,
+            instantaneous_vol_percent=0.08,
+            long_reversal_ready=long_ready,
+            short_reversal_ready=short_ready,
+            long_reversal_reason="ok" if long_ready else "not_edge",
+            short_reversal_reason="ok" if short_ready else "not_edge",
+            long_entry_reversal_fraction=0.42 if long_ready else 0.05,
+            short_entry_reversal_fraction=0.42 if short_ready else 0.05,
+            long_entry_continuation_fraction=0.02 if long_ready else 0.28,
+            short_entry_continuation_fraction=0.02 if short_ready else 0.28,
+            triple_ema_mid=100.0,
+            triple_ema_slow=100.0,
+            long_pullback_quality=0.85 if long_ready else 0.1,
+            short_pullback_quality=0.85 if short_ready else 0.1,
+        )
+
+    def grid_order(self, *, side: str, state):
+        entry = 99.1 if side == "long" else 100.9
+        return research.GridOrder(
+            symbol="TESTUSDT",
+            side=side,
+            signal_index=state.signal_index,
+            signal_time=state.signal_time,
+            entry_price=entry,
+            stop_price=98.7 if side == "long" else 101.3,
+            target_price=100.0 if side == "long" else 100.0,
+            state=state,
+            reason_codes=[
+                "signal_mode:micro_smart_grid",
+                f"edge_reversal_ready:{state.long_reversal_ready if side == 'long' else state.short_reversal_ready}",
+                f"entry_reversal_fraction:{state.long_entry_reversal_fraction if side == 'long' else state.short_entry_reversal_fraction}",
+                f"entry_continuation_fraction:{state.long_entry_continuation_fraction if side == 'long' else state.short_entry_continuation_fraction}",
+                f"long_pullback_quality:{state.long_pullback_quality}",
+                f"short_pullback_quality:{state.short_pullback_quality}",
+                "wick_success_rate:0.45",
+                "wick_score:0.4",
+                "net_notional_reward_percent:0.12",
+                "basket_size_weight:0.75",
+                "entry_edge_fraction:-0.08",
+                "stop_span_fraction:0.24",
+            ],
+            max_hold_seconds=180,
+            size_weight=1.0,
+        )
+
+    def test_live_score_prefers_short_at_upper_edge_wick_reversal(self):
+        state = self.micro_state(close_position_percent=94.0, long_ready=False, short_ready=True)
+
+        long_score = _order_score(self.grid_order(side="long", state=state), research)
+        short_score = _order_score(self.grid_order(side="short", state=state), research)
+
+        self.assertGreater(short_score, long_score + 3.0)
+
+    def test_live_score_prefers_long_at_lower_edge_wick_reversal(self):
+        state = self.micro_state(close_position_percent=6.0, long_ready=True, short_ready=False)
+
+        long_score = _order_score(self.grid_order(side="long", state=state), research)
+        short_score = _order_score(self.grid_order(side="short", state=state), research)
+
+        self.assertGreater(long_score, short_score + 3.0)
+
+    def test_live_score_penalizes_opposite_ready_side_even_when_raw_reward_matches(self):
+        state = self.micro_state(close_position_percent=24.0, long_ready=True, short_ready=False)
+        short_order = replace(
+            self.grid_order(side="short", state=state),
+            reason_codes=[
+                code
+                if not code.startswith("net_notional_reward_percent:")
+                else "net_notional_reward_percent:2.0"
+                for code in self.grid_order(side="short", state=state).reason_codes
+            ],
+        )
+
+        long_score = _order_score(self.grid_order(side="long", state=state), research)
+        short_score = _order_score(short_order, research)
+
+        self.assertGreater(long_score, short_score)
 
 
 if __name__ == "__main__":

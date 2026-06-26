@@ -533,23 +533,97 @@ def _order_score(order, research) -> float:
     side = order.side
     pullback_key = "long_pullback_quality" if side == "long" else "short_pullback_quality"
     pullback_quality = research.code_float(values, pullback_key, 0.0)
+    reversal_ready = 1.0 if values.get("edge_reversal_ready") == "True" else 0.0
+    entry_reversal = research.code_float(values, "entry_reversal_fraction", 0.0)
     wick_success = research.code_float(values, "wick_success_rate", 0.0)
     wick_score = research.code_float(values, "wick_score", 0.0)
     net_reward = research.code_float(values, "net_notional_reward_percent", 0.0)
     entry_continuation = research.code_float(values, "entry_continuation_fraction", 0.0)
     basket_weight = research.code_float(values, "basket_size_weight", 0.75)
+    stop_fraction = research.code_float(values, "stop_span_fraction", 0.0)
+    entry_edge = research.code_float(values, "entry_edge_fraction", 0.0)
     state = order.state
+    side_context_score = _mean_reversion_side_context_score(order, values, research)
     raw_score = (
         max(float(state.score), 0.0)
         + pullback_quality * 1.7
+        + reversal_ready * 1.05
+        + min(entry_reversal, 0.6) * 1.15
         + wick_success * 1.2
         + wick_score * 0.65
         + max(net_reward, 0.0) * 2.0
+        + min(max(-entry_edge, 0.0), 0.24) * 1.1
         + min(float(state.reversal_response_rate), 1.0) * 0.7
         - max(basket_weight - 0.75, 0.0) * 0.55
         - entry_continuation * 2.2
+        - max(stop_fraction - 0.32, 0.0) * 0.75
     )
-    return raw_score * quality_scale
+    return raw_score * quality_scale + side_context_score
+
+
+def _mean_reversion_side_context_score(order, values: Mapping[str, str], research) -> float:
+    """Prefer lower-edge longs and upper-edge shorts for live micro scalps."""
+
+    side = str(getattr(order, "side", "")).lower()
+    state = getattr(order, "state", None)
+    if side not in {"long", "short"} or state is None:
+        return 0.0
+
+    close_position = _float_or_default(getattr(state, "close_position_percent", None), 50.0)
+    lower_edge = 1.0 - _clip(close_position / 38.0, 0.0, 1.0)
+    upper_edge = 1.0 - _clip((100.0 - close_position) / 38.0, 0.0, 1.0)
+    side_edge = lower_edge if side == "long" else upper_edge
+    opposite_edge = upper_edge if side == "long" else lower_edge
+
+    side_ready = values.get("edge_reversal_ready") == "True"
+    opposite_ready = bool(
+        getattr(state, "short_reversal_ready", False)
+        if side == "long"
+        else getattr(state, "long_reversal_ready", False)
+    )
+
+    entry_reversal = research.code_float(values, "entry_reversal_fraction", 0.0)
+    entry_continuation = research.code_float(values, "entry_continuation_fraction", 0.0)
+    score = side_edge * 2.6 - opposite_edge * 3.4
+    score += (1.25 if side_ready else -0.35)
+    score += min(entry_reversal, 0.75) * 1.35
+    score -= min(entry_continuation, 0.75) * 1.6
+    if opposite_ready and not side_ready:
+        score -= 2.2
+
+    # Use current price displacement from the triple-EMA/center reference as a
+    # second mean-reversion cue: price stretched above mean favors short, below
+    # mean favors long.
+    current = _positive_float(getattr(state, "current_price", None))
+    ema_ref = (
+        _positive_float(getattr(state, "triple_ema_mid", None))
+        or _positive_float(getattr(state, "triple_ema_slow", None))
+        or _positive_float(getattr(state, "center_price", None))
+    )
+    if current is not None and ema_ref is not None:
+        deviation_percent = (current - ema_ref) / current * 100.0
+        width = max(_float_or_default(getattr(state, "width_percent", None), 0.0), 0.0)
+        vol = max(_float_or_default(getattr(state, "instantaneous_vol_percent", None), 0.0), 0.0)
+        normalizer = max(width * 0.22, vol * 4.0, 0.04)
+        mean_reversion_bias = _clip(deviation_percent / normalizer, -1.5, 1.5)
+        score += (-mean_reversion_bias if side == "long" else mean_reversion_bias) * 0.95
+
+    if close_position >= 70.0:
+        edge_strength = _clip((close_position - 70.0) / 30.0, 0.0, 2.0)
+        if side == "short":
+            score += 7.0 + edge_strength * 4.0
+        else:
+            score -= 80.0 + edge_strength * 30.0
+    elif close_position <= 30.0:
+        edge_strength = _clip((30.0 - close_position) / 30.0, 0.0, 2.0)
+        if side == "long":
+            score += 7.0 + edge_strength * 4.0
+        else:
+            score -= 80.0 + edge_strength * 30.0
+    elif 38.0 <= close_position <= 62.0 and not side_ready:
+        score -= 0.65
+
+    return score
 
 
 def _micro_notional(

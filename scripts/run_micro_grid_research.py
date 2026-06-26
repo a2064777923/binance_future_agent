@@ -35,9 +35,11 @@ from run_second_agg_compound_backtest import fetch_zip, load_symbol_seconds, rea
 
 SECOND_MS = 1_000
 BLOCKED_EDGE_REVERSAL_REASONS = {
+    "entry_path_too_directional",
+}
+SOFT_EDGE_REVERSAL_REASONS = {
     "upper_extreme_too_fresh",
     "lower_extreme_too_fresh",
-    "entry_path_too_directional",
 }
 
 
@@ -1138,6 +1140,9 @@ def micro_trade_quality_scale_from_values(values: dict[str, str]) -> tuple[float
     edge_reason = str(values.get("edge_reversal_reason") or "")
     if edge_reason in BLOCKED_EDGE_REVERSAL_REASONS:
         return 0.0, [f"quality_edge_reversal_blocked:{edge_reason}"]
+    if edge_reason in SOFT_EDGE_REVERSAL_REASONS:
+        scale *= 0.65
+        reasons.append(f"quality_edge_reversal_fresh:{edge_reason}")
 
     if "basket_size_weight" in values:
         basket_weight = max(0.01, code_float(values, "basket_size_weight", 0.75))

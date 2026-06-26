@@ -1001,6 +1001,31 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertGreater(target, 98.58)
         self.assertGreaterEqual(research.percent_delta(98.5, target), 0.095)
 
+    def test_fresh_edge_reversal_reasons_reduce_quality_but_do_not_block(self):
+        scale, reasons = research.micro_trade_quality_scale_from_reason_codes(
+            [
+                "stable_width_percent:0.6",
+                "edge_reversal_reason:upper_extreme_too_fresh",
+                "basket_size_weight:0.75",
+            ]
+        )
+
+        self.assertGreater(scale, 0.0)
+        self.assertLess(scale, 1.0)
+        self.assertIn("quality_edge_reversal_fresh:upper_extreme_too_fresh", reasons)
+
+    def test_directional_entry_path_still_blocks_micro_grid_quality(self):
+        scale, reasons = research.micro_trade_quality_scale_from_reason_codes(
+            [
+                "stable_width_percent:0.6",
+                "edge_reversal_reason:entry_path_too_directional",
+                "basket_size_weight:0.75",
+            ]
+        )
+
+        self.assertEqual(scale, 0.0)
+        self.assertIn("quality_edge_reversal_blocked:entry_path_too_directional", reasons)
+
     def test_default_cost_aware_target_only_requires_nominal_fee_coverage(self):
         state = self.state()
 
