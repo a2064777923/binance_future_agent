@@ -215,6 +215,22 @@ class TradeSetupProfile:
     use_ml_trend_filter: bool = False
     ml_trend_model_path: str = ""
     ml_trend_threshold: float = 0.55
+    # Lorenzian Distance Classifier confidence modifier for the trend leg: when
+    # enabled, a kNN-over-Lorentzian-distance model predicts the future price
+    # direction from a small feature subset, and the agreement between that
+    # prediction and the setup side shifts confidence symmetrically (aligned
+    # lifts, opposed depresses). It does NOT short-circuit the decision like
+    # the ML trend filter; it only retunes confidence, so existing
+    # min_confidence gates absorb the effect. The artifact (reference dataset
+    # + scaler) is built offline by scripts/research/train_ldc_classifier.py.
+    # Additive and defaults off; enabled via a built_in_variants entry selected
+    # by BFA_LIVE_QUANT_SETUP_VARIANT (mirrors quant_setup_ml_trend).
+    use_ldc_confidence_modifier: bool = False
+    ldc_artifact_path: str = ""
+    ldc_blend_strength: float = 0.06
+    ldc_blend_mode: str = "linear"          # "linear" | "asymmetric"
+    ldc_min_voters: int = 3
+    ldc_confidence_ceiling: float = 0.95
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -328,6 +344,22 @@ def build_trade_setup(
         decision = "pass"
         reasons = _dedupe([*reasons, "notional_not_executable"])
     confidence = _confidence(edge, factor_scores)
+    # LDC confidence modifier retunes confidence from a Lorentzian kNN direction
+    # prediction. Additive and fail-closed: any failure leaves confidence
+    # untouched. Only the trend leg. Diagnostics are merged into price_basis.
+    # confidence_before/after are recorded so the testnet stage can compare
+    # LDC-on vs LDC-off decisions from a single persisted run.
+    if setup_profile.use_ldc_confidence_modifier:
+        confidence_before_ldc = confidence
+        ldc_delta, ldc_diag = _ldc_confidence_modifier(features, side, setup_profile)
+        confidence = min(
+            max(confidence + ldc_delta, 0.0),
+            setup_profile.ldc_confidence_ceiling,
+        )
+        ldc_diag["ldc_confidence_before"] = round(confidence_before_ldc, 4)
+        ldc_diag["ldc_confidence_after"] = round(confidence, 4)
+        price_basis["ldc_diagnostics"] = ldc_diag
+        reasons = _dedupe([*reasons, *ldc_diag.get("ldc_reason_codes", [])])
     if edge < setup_profile.min_edge:
         decision = "pass"
         reasons = _dedupe([*reasons, "factor_edge_too_small"])
@@ -1288,6 +1320,63 @@ def _spike_reversal_reference(features: Mapping[str, Any]) -> dict[str, Any] | N
 
 # Cached ML booster so repeated setup calls do not re-read the model file.
 _ML_TREND_MODEL_CACHE: dict[str, Any] = {}
+
+
+# Cached LDC artifact so repeated setup calls do not re-read the .npz file.
+_LDC_ARTIFACT_CACHE: dict[str, Any] = {}
+
+
+def _ldc_confidence_modifier(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> tuple[float, dict[str, Any]]:
+    """Run the LDC confidence modifier; return (delta, diagnostics).
+
+    Only applies to the trend leg. Fail-closed: any failure returns delta=0
+    and a reason code, never raises. The artifact is loaded lazily and cached
+    by path. Diagnostics are merged into price_basis by the caller.
+    """
+    if str(features.get("strategy_leg") or "trend").lower() != "trend":
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": ["ldc_leg_not_trend"]}
+    if not profile.ldc_artifact_path:
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": ["ldc_artifact_path_missing"]}
+    try:
+        from bfa.strategy.ldc_classifier import ldc_confidence_modifier, load_ldc_artifact
+    except Exception as exc:  # pragma: no cover - defensive
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": [f"ldc_unavailable:{exc.__class__.__name__}"]}
+    artifact = _LDC_ARTIFACT_CACHE.get(profile.ldc_artifact_path)
+    if artifact is None:
+        try:
+            artifact = load_ldc_artifact(profile.ldc_artifact_path)
+            _LDC_ARTIFACT_CACHE[profile.ldc_artifact_path] = artifact
+        except Exception as exc:
+            return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                         "ldc_reason_codes": [
+                             f"ldc_artifact_load_failed:{exc.__class__.__name__}"]}
+    # Map live feature field names -> the artifact's short feature names, mirroring
+    # how _ml_trend_filter_rejection builds its feature_snapshot. The inference
+    # module reads by artifact.feature_names, so it stays field-name agnostic.
+    feature_snapshot = {
+        "ema_spread": _float(features.get("ema_spread_percent")),
+        "rsi": _float(features.get("rsi")),
+        "atr_percent": _float(features.get("atr_percent")),
+        "taker_ratio": _float(features.get("taker_buy_sell_ratio")),
+        "mom_6": _float(features.get("kline_momentum_percent")),
+    }
+    try:
+        return ldc_confidence_modifier(
+            feature_snapshot, side=side, artifact=artifact,
+            blend_strength=profile.ldc_blend_strength,
+            blend_mode=profile.ldc_blend_mode,
+            min_voters=profile.ldc_min_voters,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": [f"ldc_unavailable:{exc.__class__.__name__}"]}
 
 
 def _ml_trend_filter_rejection(
