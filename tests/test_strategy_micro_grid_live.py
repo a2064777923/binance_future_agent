@@ -98,6 +98,14 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         live_config = MicroGridLiveConfig.from_app(load_config(env={}))
 
         self.assertEqual(live_config.order_wait_seconds, 20)
+        self.assertEqual(live_config.max_signal_age_seconds, 12.0)
+
+    def test_config_reads_micro_grid_max_signal_age(self):
+        live_config = MicroGridLiveConfig.from_app(
+            load_config(env={"BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS": "9"})
+        )
+
+        self.assertEqual(live_config.max_signal_age_seconds, 9.0)
 
     def micro_state(self, *, close_position_percent: float, long_ready: bool, short_ready: bool):
         return research.MicroGridState(

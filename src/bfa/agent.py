@@ -1632,6 +1632,20 @@ def _evaluate_candidate_queue(
         )
         risk_limits = RiskLimits.from_config(config, sizing_result=candidate_sizing)
         micro_grid = is_micro_grid_candidate(candidate)
+        if micro_grid:
+            stale_reason = _micro_grid_execution_stale_reason(config, candidate_evaluation)
+            if stale_reason:
+                last_status = "quant_pass"
+                last_validation_errors = [stale_reason]
+                skipped_risk_reasons.append(f"{candidate.symbol}:{stale_reason}")
+                _finish_candidate_evaluation(
+                    candidate_evaluation,
+                    execution_status="quant_pass",
+                    risk_reasons=[stale_reason],
+                    continued=True,
+                    end_reason="micro_grid_stale_before_setup",
+                )
+                continue
         setup_started_at_ms = _epoch_ms()
         setup = (
             micro_grid_setup_from_candidate(
@@ -2246,6 +2260,22 @@ def _candidate_latency_summary(candidate) -> dict[str, Any]:
         if generated_at_ms is not None:
             payload["signal_to_candidate_ms"] = max(generated_at_ms - latest_market_at_ms, 0)
     return payload
+
+
+def _micro_grid_execution_stale_reason(config: AppConfig, candidate_evaluation: dict[str, Any]) -> str | None:
+    latency = candidate_evaluation.get("latency")
+    if not isinstance(latency, dict):
+        return "micro_grid_signal_age_missing"
+    signal_time_ms = _int_or_none(latency.get("signal_time_ms"))
+    if signal_time_ms is None:
+        return "micro_grid_signal_age_missing"
+    max_age_seconds = max(_float_or_none(config.get("BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS")) or 12.0, 1.0)
+    age_ms = max(_epoch_ms() - signal_time_ms, 0)
+    latency["signal_to_execution_gate_ms"] = age_ms
+    latency["micro_grid_max_signal_age_ms"] = int(max_age_seconds * 1000)
+    if age_ms > max_age_seconds * 1000:
+        return f"micro_grid_signal_too_stale:{round(age_ms / 1000.0, 3)}s>{round(max_age_seconds, 3)}s"
+    return None
 
 
 def _record_latency_stage(

@@ -231,6 +231,9 @@ class MicroGridProfile:
     planner_max_stop_fraction: float = 0.44
     planner_max_target_fraction: float = 0.68
     planner_history_min_fills: int = 3
+    spike_depth_tail_buffer_fraction: float = 0.18
+    spike_depth_max_entry_edge_fraction: float = -1.45
+    spike_depth_max_stop_fraction: float = 1.20
     reentry_cooldown_seconds: int = 8
     maker_fee_bps: float = 2.0
     taker_fee_bps: float = 4.0
@@ -682,6 +685,9 @@ def main() -> int:
     parser.add_argument("--planner-max-stop-fraction", type=float, default=MicroGridProfile.planner_max_stop_fraction)
     parser.add_argument("--planner-max-target-fraction", type=float, default=MicroGridProfile.planner_max_target_fraction)
     parser.add_argument("--planner-history-min-fills", type=int, default=MicroGridProfile.planner_history_min_fills)
+    parser.add_argument("--spike-depth-tail-buffer-fraction", type=float, default=MicroGridProfile.spike_depth_tail_buffer_fraction)
+    parser.add_argument("--spike-depth-max-entry-edge-fraction", type=float, default=MicroGridProfile.spike_depth_max_entry_edge_fraction)
+    parser.add_argument("--spike-depth-max-stop-fraction", type=float, default=MicroGridProfile.spike_depth_max_stop_fraction)
     parser.add_argument("--max-symbol-losses-per-day", type=int, default=MicroGridProfile.max_symbol_losses_per_day)
     parser.add_argument("--max-candidate-trades-per-symbol", type=int, default=0)
     parser.add_argument("--quiet", action="store_true", help="write JSON output without printing the full payload")
@@ -820,6 +826,9 @@ def main() -> int:
         planner_max_stop_fraction=args.planner_max_stop_fraction,
         planner_max_target_fraction=args.planner_max_target_fraction,
         planner_history_min_fills=args.planner_history_min_fills,
+        spike_depth_tail_buffer_fraction=args.spike_depth_tail_buffer_fraction,
+        spike_depth_max_entry_edge_fraction=args.spike_depth_max_entry_edge_fraction,
+        spike_depth_max_stop_fraction=args.spike_depth_max_stop_fraction,
         max_symbol_losses_per_day=args.max_symbol_losses_per_day,
     )
     coverage: dict[str, Any] = {}
@@ -1827,7 +1836,11 @@ def dynamic_exit_span_fractions(
     )
     stop_widen = max(0.0, profile.dynamic_exit_stop_widen_fraction) * stop_pressure * (0.70 + quality * 0.30) * (1.0 - chaos * 0.45)
     stop_fraction = max(base_stop_fraction, base_stop_fraction + stop_widen)
-    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, min(profile.dynamic_exit_max_stop_fraction, profile.wick_max_stop_fraction + 0.32))
+    stop_cap = max(
+        base_stop_fraction,
+        min(profile.dynamic_exit_max_stop_fraction, profile.wick_max_stop_fraction + 0.32),
+    )
+    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, stop_cap)
 
     mean_distance = max(0.0, 0.50 - edge_fraction)
     target_mean_ratio = clamp(
@@ -1849,6 +1862,7 @@ def dynamic_exit_span_fractions(
         f"dynamic_exit_chaos_pressure:{round(chaos, 6)}",
         f"dynamic_exit_stop_pressure:{round(stop_pressure, 6)}",
         f"dynamic_exit_stop_widen_fraction:{round(stop_widen, 6)}",
+        f"dynamic_exit_stop_cap_fraction:{round(stop_cap, 6)}",
         f"dynamic_exit_mean_distance_fraction:{round(mean_distance, 6)}",
         f"dynamic_exit_target_mean_ratio:{round(target_mean_ratio, 6)}",
         f"dynamic_exit_beyond_mean_fraction:{round(beyond_mean, 6)}",
@@ -1870,6 +1884,7 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
     sell_target_fraction = profile.target_fraction
     buy_hold_seconds = int(profile.max_hold_seconds)
     sell_hold_seconds = int(profile.max_hold_seconds)
+    entry_min_edge_fraction = minimum_entry_edge_fraction(profile)
     if profile.dynamic_wick_enabled:
         buy_entry = state.lower_price + span * state.long_entry_edge_fraction
         sell_entry = state.upper_price - span * state.short_entry_edge_fraction
@@ -1910,21 +1925,57 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         width_frac = state.width_percent / 100.0
         if width_frac > 0:
             depth_in_span = spike_pct / width_frac
-            # entry at 85% of predicted depth beyond the band edge (negative edge = outside)
-            spike_entry_edge = -depth_in_span * profile.spike_depth_entry_fraction
-            spike_stop_frac = depth_in_span * profile.spike_depth_stop_fraction
+            tail_buffer = max(0.0, profile.spike_depth_tail_buffer_fraction)
+            spike_entry_cap = min(profile.spike_depth_max_entry_edge_fraction, entry_min_edge_fraction)
+            spike_stop_cap = max(profile.spike_depth_max_stop_fraction, profile.wick_min_stop_fraction)
+            # Entry is posted just beyond the observed spike depth plus a
+            # tail-risk buffer. The buffer is strongest when flow/momentum are
+            # still pushing into the wick; this is the SLXUSDT failure mode.
+            buy_pressures = dynamic_entry_pressure_components("long", state, profile)
+            sell_pressures = dynamic_entry_pressure_components("short", state, profile)
+            buy_tail_pressure = clamp(
+                buy_pressures["flow_pressure"] * 0.28
+                + buy_pressures["momentum_pressure"] * 0.30
+                + buy_pressures["volatility_pressure"] * 0.18
+                + buy_pressures["wick_pressure"] * 0.14
+                + buy_pressures["continuation_pressure"] * 0.10,
+                0.0,
+                1.0,
+            )
+            sell_tail_pressure = clamp(
+                sell_pressures["flow_pressure"] * 0.28
+                + sell_pressures["momentum_pressure"] * 0.30
+                + sell_pressures["volatility_pressure"] * 0.18
+                + sell_pressures["wick_pressure"] * 0.14
+                + sell_pressures["continuation_pressure"] * 0.10,
+                0.0,
+                1.0,
+            )
+            buy_spike_entry_edge = -depth_in_span * (profile.spike_depth_entry_fraction + tail_buffer * buy_tail_pressure)
+            sell_spike_entry_edge = -depth_in_span * (profile.spike_depth_entry_fraction + tail_buffer * sell_tail_pressure)
+            buy_spike_entry_edge = clamp(buy_spike_entry_edge, spike_entry_cap, profile.max_reservation_edge_fraction)
+            sell_spike_entry_edge = clamp(sell_spike_entry_edge, spike_entry_cap, profile.max_reservation_edge_fraction)
+            spike_stop_frac = min(spike_stop_cap, depth_in_span * profile.spike_depth_stop_fraction * (1.0 + tail_buffer * max(buy_tail_pressure, sell_tail_pressure)))
             spike_target_frac = depth_in_span * profile.spike_depth_target_fraction
             # only override if it posts deeper (more passive) than the current edge
-            buy_edge_fraction = min(buy_edge_fraction, spike_entry_edge)
-            sell_edge_fraction = min(sell_edge_fraction, spike_entry_edge)
+            buy_edge_fraction = min(buy_edge_fraction, buy_spike_entry_edge)
+            sell_edge_fraction = min(sell_edge_fraction, sell_spike_entry_edge)
             buy_stop_fraction = max(buy_stop_fraction, spike_stop_frac)
             sell_stop_fraction = max(sell_stop_fraction, spike_stop_frac)
             buy_target_fraction = max(buy_target_fraction, spike_target_frac)
             sell_target_fraction = max(sell_target_fraction, spike_target_frac)
+            entry_min_edge_fraction = min(entry_min_edge_fraction, buy_edge_fraction, sell_edge_fraction)
             spike_reasons = [
-                f"spike_depth_entry_edge_fraction:{round(spike_entry_edge, 6)}",
+                f"spike_depth_entry_edge_fraction:{round(min(buy_spike_entry_edge, sell_spike_entry_edge), 6)}",
+                f"spike_depth_long_entry_edge_fraction:{round(buy_spike_entry_edge, 6)}",
+                f"spike_depth_short_entry_edge_fraction:{round(sell_spike_entry_edge, 6)}",
                 f"spike_depth_percent:{round(state.recent_spike_depth_percent, 6)}",
                 f"spike_depth_in_span:{round(depth_in_span, 6)}",
+                f"spike_depth_tail_buffer_fraction:{round(tail_buffer, 6)}",
+                f"spike_depth_long_tail_pressure:{round(buy_tail_pressure, 6)}",
+                f"spike_depth_short_tail_pressure:{round(sell_tail_pressure, 6)}",
+                f"spike_depth_stop_span_fraction:{round(spike_stop_frac, 6)}",
+                f"spike_depth_dynamic_min_edge_fraction:{round(entry_min_edge_fraction, 6)}",
             ]
             entry_reason_codes["long"].extend(spike_reasons)
             entry_reason_codes["short"].extend(spike_reasons)
@@ -1992,7 +2043,7 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
     layers = max(1, int(profile.grid_layer_count))
     layer_spacing = grid_range_fraction * max(0.0, profile.grid_layer_spacing_fraction) / max(1, layers - 1)
     seen_entries: set[tuple[str, int]] = set()
-    min_edge_fraction = minimum_entry_edge_fraction(profile)
+    min_edge_fraction = entry_min_edge_fraction
     for side, base_edge_fraction, target_fraction, stop_fraction, hold_seconds, plan, side_entry_reasons in (
         ("long", buy_edge_fraction, buy_target_fraction, buy_stop_fraction, buy_hold_seconds, long_plan, entry_reason_codes["long"]),
         ("short", sell_edge_fraction, sell_target_fraction, sell_stop_fraction, sell_hold_seconds, short_plan, entry_reason_codes["short"]),
@@ -2505,7 +2556,11 @@ def dynamic_level_plan(
     else:
         stop_fraction += profile.planner_vol_stop_multiplier * vol_fraction * 0.25 * intervention
         mode = "balanced"
-    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, min(profile.planner_max_stop_fraction, profile.wick_max_stop_fraction + 0.18))
+    planner_stop_cap = max(
+        base_stop_fraction,
+        min(profile.planner_max_stop_fraction, profile.wick_max_stop_fraction + 0.18),
+    )
+    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, planner_stop_cap)
 
     target_fraction = max(base_target_fraction, profile.wick_min_target_fraction)
     target_from_vol = profile.planner_vol_target_multiplier * vol_fraction
@@ -2587,6 +2642,7 @@ def dynamic_level_plan(
             f"planner_intervention:{round(intervention, 6)}",
             f"planner_base_entry_edge_fraction:{round(base_entry_edge_fraction, 6)}",
             f"planner_base_stop_fraction:{round(base_stop_fraction, 6)}",
+            f"planner_stop_cap_fraction:{round(planner_stop_cap, 6)}",
             f"planner_base_target_fraction:{round(base_target_fraction, 6)}",
             f"planner_entry_edge_fraction:{round(entry_edge, 6)}",
             f"planner_stop_span_fraction:{round(stop_fraction, 6)}",

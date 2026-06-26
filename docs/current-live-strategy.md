@@ -5,8 +5,8 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
-Snapshot checked from the server at `2026-06-26T03:10:39Z`
-(`2026-06-26 11:10:39` Asia/Hong_Kong).
+Snapshot checked from the server at `2026-06-26T04:45:00Z`
+(`2026-06-26 12:45:00` Asia/Hong_Kong).
 
 ## Source Of Truth Order
 
@@ -27,8 +27,8 @@ checking the newer sources above.
 
 - Local branch checked during this snapshot:
   `codex/protection-degrade-hotfix`.
-- Latest strategy commit before this doc update:
-  `cb3d876 fix: route micro-grid side selection to range edges`.
+- This snapshot includes the 2026-06-26 spike-depth/stale-signal micro-grid
+  hotfix. Use the latest Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
 - Hashes of the live deployed strategy files matched the local files at the
@@ -67,8 +67,8 @@ Selected non-secret server env values observed at the snapshot:
 - `BFA_MAX_OPEN_POSITIONS=5`
 - `BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`
 - `BFA_MAX_MARGIN_PER_POSITION_USDT=20`
-- `BFA_MAX_RISK_PER_TRADE_USDT=4`
-- `BFA_MAX_DAILY_LOSS_USDT=10`
+- `BFA_MAX_RISK_PER_TRADE_USDT=6`
+- `BFA_MAX_DAILY_LOSS_USDT=25`
 - `BFA_MAX_PORTFOLIO_MARGIN_USDT=160`
 - `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.80`
 - `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=2400`
@@ -156,6 +156,7 @@ Micro-grid is live and independent from AI:
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS=0`
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS=180`
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
+- `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_NOTIONAL_FRACTION=1.0`
 
 Micro-grid submits GTX/post-only limits and may expire or be canceled without a
@@ -177,13 +178,36 @@ Micro-grid entry geometry is dynamic:
 - flow, momentum, volatility, wick depth, and continuation pressure can push the
   limit deeper;
 - the existing deeper wick-derived entry is kept when it is more conservative;
+- spike-depth entries may extend beyond the old `-0.36` edge floor when recent
+  wick depth plus tail pressure says the next needle can overshoot further;
 - stop and target geometry are adjusted from the same volatility/quality
   context rather than using one fixed distance.
+
+SLXUSDT 2026-06-26 forensic note: the `03:54:38Z` micro-grid short was
+directionally correct but geometrically too shallow. The signal saw current
+price around `0.41896`, posted a short at `0.42088`, filled at `03:55:53Z`,
+hit the original stop around `0.4228` at `03:56:12Z`, then spiked to `0.4280`
+at `03:56:14Z` before eventually trading down through the original target
+`0.41785` at `04:04:15Z`. Root cause was not "micro-grid failed to identify a
+short"; it did identify the upper-wick short. The problem was that spike-depth
+entry/stop estimates were later constrained by old edge/stop caps and the
+candidate was still executed after roughly `49.6s` from signal to entry submit.
+Current code therefore adds:
+
+- spike-depth tail-pressure buffer for entry and stop geometry;
+- dynamic entry lower bounds that can follow the spike-depth estimate instead
+  of being clipped back to `-0.36`;
+- stop caps that never shrink a spike-depth base stop back to an older generic
+  cap;
+- `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS` and an execution-time stale
+  gate so stale micro-grid candidates are skipped before setup/execution.
 
 For future diagnostics, inspect these intent reason codes and metadata:
 
 - `dynamic_entry_*`
 - `dynamic_exit_*`
+- `spike_depth_*`
+- `planner_*`
 - `entry_edge_fraction`
 - `stop_span_fraction`
 - `target_span_fraction`

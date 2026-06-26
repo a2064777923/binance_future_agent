@@ -98,6 +98,7 @@ The live micro-grid leg exposes these speed controls:
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS`: maximum micro-grid hold window; set `0` to disable time-based position exit for micro-grid live orders.
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS`: internal micro-grid path horizon used to estimate entry/TP/SL when max hold is disabled; `0` follows the max hold value, or falls back to 180 seconds when max hold is disabled.
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS`: maximum raw-feed cache age before the micro-grid leg skips trading.
+- `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS`: maximum age from the second-level signal timestamp to setup/execution. This is separate from cache age; it prevents old micro-grid candidates from being submitted after queue or management delays.
 
 Current server tuning checked on 2026-06-26:
 
@@ -105,8 +106,11 @@ Current server tuning checked on 2026-06-26:
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS=0`
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS=180`
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
+- `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_MIN_SCORE=1.05`
 - `BFA_LIVE_MICRO_GRID_TOP_N=12`
+- `BFA_MAX_RISK_PER_TRADE_USDT=6`
+- `BFA_MAX_DAILY_LOSS_USDT=25`
 - `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`
 - `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 

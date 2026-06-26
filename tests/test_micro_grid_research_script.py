@@ -933,6 +933,57 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertTrue(any(code.startswith("dynamic_exit_quality:") for code in long.reason_codes))
         self.assertTrue(any(code.startswith("dynamic_exit_stop_pressure:") for code in long.reason_codes))
 
+    def test_spike_depth_entry_can_extend_beyond_legacy_min_edge_for_upper_wick_short(self):
+        state = research.replace(
+            self.state(),
+            current_price=101.2,
+            lower_price=98.0,
+            upper_price=102.0,
+            width_percent=4.0,
+            close_position_percent=92.0,
+            short_entry_edge_fraction=0.42,
+            short_stop_span_fraction=0.18,
+            short_target_span_fraction=0.35,
+            recent_spike_depth_percent=2.4,
+            recent_drift_percent=1.2,
+            instantaneous_vol_percent=0.5,
+            entry_taker_buy_ratio=0.62,
+            short_pullback_quality=0.55,
+            short_entry_continuation_fraction=0.02,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_exit_geometry_enabled=True,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=True,
+                spike_depth_entry_fraction=0.92,
+                spike_depth_tail_buffer_fraction=0.22,
+                spike_depth_stop_fraction=1.45,
+                spike_depth_max_entry_edge_fraction=-1.35,
+                spike_depth_max_stop_fraction=1.25,
+                min_reservation_edge_fraction=-0.36,
+                wick_min_entry_fraction=-1.35,
+                wick_max_stop_fraction=0.72,
+                dynamic_exit_max_stop_fraction=0.78,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        short = next(order for order in orders if order.side == "short")
+        values = research.reason_code_map(short.reason_codes)
+        short_edge = research.edge_fraction_for_order("short", short.entry_price, state)
+        stop_fraction = research.code_float(values, "stop_span_fraction", 0.0)
+
+        self.assertLess(short_edge, -0.36)
+        self.assertGreater(stop_fraction, 0.56)
+        self.assertIn("spike_depth_dynamic_min_edge_fraction:-", " ".join(short.reason_codes))
+        self.assertTrue(any(code.startswith("spike_depth_short_tail_pressure:") for code in short.reason_codes))
+
     def test_directional_path_is_rejected_as_trend_pause(self):
         state, reasons = research.build_micro_grid_state(trend_seconds(count=120), 80, self.profile())
 

@@ -31,6 +31,7 @@ class MicroGridLiveConfig:
     order_wait_seconds: int
     max_hold_seconds: int | None
     model_horizon_seconds: int
+    max_signal_age_seconds: float
 
     @classmethod
     def from_app(cls, config: AppConfig) -> "MicroGridLiveConfig":
@@ -51,6 +52,10 @@ class MicroGridLiveConfig:
             order_wait_seconds=max(_int_or_default(config.get("BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS"), 20), 1),
             max_hold_seconds=max_hold_seconds,
             model_horizon_seconds=max(model_horizon_seconds, 1),
+            max_signal_age_seconds=max(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS"), 12.0),
+                1.0,
+            ),
         )
 
 
@@ -129,10 +134,16 @@ def build_micro_grid_live_candidates(
         selected = ranked[0]
         score = _order_score(selected, research)
         quality_scale, quality_reasons = research.micro_trade_quality_scale_from_reason_codes(selected.reason_codes)
+        signal_time_ms = _iso_to_epoch_ms(selected.signal_time)
+        candidate_generated_at_ms = int(time.time() * 1000)
+        signal_age_seconds = (
+            (candidate_generated_at_ms - signal_time_ms) / 1000.0 if signal_time_ms is not None else None
+        )
         symbol_health.update(
             {
                 "status": "candidate" if score >= live_config.min_score else "below_min_score",
                 "score": round(score, 6),
+                "signal_age_seconds": round(signal_age_seconds, 3) if signal_age_seconds is not None else None,
                 "trade_quality_scale": round(float(quality_scale), 6),
                 "trade_quality_reasons": list(quality_reasons),
                 "order_count": len(orders),
@@ -142,6 +153,11 @@ def build_micro_grid_live_candidates(
                 "target_price": selected.target_price,
             }
         )
+        if signal_age_seconds is None or signal_age_seconds > live_config.max_signal_age_seconds:
+            reason = "micro_grid_signal_too_stale"
+            symbol_health.update({"status": "rejected", "reasons": [reason]})
+            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            continue
         if score < live_config.min_score:
             rejection_counts["micro_grid_score_below_min"] = rejection_counts.get("micro_grid_score_below_min", 0) + 1
             continue
@@ -473,11 +489,20 @@ def _live_profile(research, live_config: MicroGridLiveConfig):
         dynamic_exit_target_mean_ratio=0.92,
         dynamic_exit_target_quality_ratio=0.08,
         dynamic_exit_target_beyond_mean_fraction=0.14,
-        dynamic_exit_max_target_fraction=1.05,
+        dynamic_exit_max_target_fraction=1.12,
         dynamic_exit_min_target_stop_ratio=0.88,
-        wick_min_entry_fraction=-0.36,
+        wick_min_entry_fraction=-1.35,
         wick_max_entry_fraction=0.7,
-        wick_max_stop_fraction=0.5,
+        wick_max_stop_fraction=0.72,
+        spike_depth_entry_fraction=0.92,
+        spike_depth_stop_fraction=1.45,
+        spike_depth_tail_buffer_fraction=0.22,
+        spike_depth_max_entry_edge_fraction=-1.35,
+        spike_depth_max_stop_fraction=1.25,
+        dynamic_level_planner_enabled=True,
+        planner_max_stop_fraction=1.0,
+        planner_max_target_fraction=1.15,
+        planner_history_min_fills=4,
         max_drift_to_width=0.9,
         min_width_percent=0.22,
         pullback_model_enabled=True,
