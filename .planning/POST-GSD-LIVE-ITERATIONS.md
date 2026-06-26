@@ -292,6 +292,65 @@ This snapshot supersedes older planning text that says current capital is 45U,
 that Phase 70 commit `7a55ece` is the latest deployed behavior, or that regime
 routing is only shadow/observe.
 
+### 13. Lorenzian Distance Classifier (LDC) Code Was Added (Dormant, NOT Live)
+
+On 2026-06-26 an instance-based future-direction predictor was implemented as a
+**trend-leg confidence modifier** and merged on branch
+`codex/protection-degrade-hotfix`. It is **code-complete but dormant**: the
+flag defaults off, the `quant_setup_ldc` variant is not the selected live
+variant, and **live strategy behavior is unchanged**. It has not been deployed
+to the server and is not part of the live snapshot in
+`docs/current-live-strategy.md`.
+
+What it does (when eventually enabled): a kNN over Lorentzian distance on a
+5-feature subset predicts the future price direction; the agreement between
+that prediction and the setup side retunes confidence symmetrically (aligned
+lifts, opposed depresses). It never hard-rejects; the existing `min_confidence`
+gate absorbs the effect. It is orthogonal to the LightGBM `ml_trend_filter`
+(which predicts P(win)).
+
+Key files:
+
+- `src/bfa/strategy/ldc_classifier.py` - stateless inference (distance, kNN
+  voting, blend modes, fail-closed `ldc_confidence_modifier`).
+- `src/bfa/strategy/setup.py` - `ldc_*` profile fields, `_ldc_confidence_modifier`
+  helper with live->short feature mapping, confidence-chain wiring recording
+  `ldc_confidence_before`/`ldc_confidence_after`.
+- `src/bfa/backtest/models.py` - `quant_setup_ldc` variant (mirrors
+  `quant_setup_ml_trend`).
+- `scripts/research/train_ldc_classifier.py` - offline training + lift sweep +
+  cross-symbol neighbor diagnostic + `lift > 1.0` release gate.
+- `scripts/server_ldc_proxy_calibration.py` - read-only server script comparing
+  proxy setup side vs actual recorded setup side (two-headed release verdict).
+- Design: `docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md`.
+- Plan: `docs/superpowers/plans/2026-06-26-lorenz-distance-classifier.md`.
+
+Release path (must be followed before any live enablement):
+
+1. **Stage 0 (offline):** run `train_ldc_classifier.py` on real klines; the
+   script gates on `lift > 1.0` with a min-passed floor. No lift -> not wired.
+2. **Stage 0.5 (server, read-only):** run `server_ldc_proxy_calibration.py`
+   against the live DB; high lift + low proxy-actual agreement means the lift
+   was calibrated to the wrong baseline and must be discounted.
+3. **Stage 2 (testnet/dry-run):** set `BFA_LIVE_QUANT_SETUP_VARIANT=
+   quant_setup_ldc` only in testnet/dry-run. This is NOT a pure shadow —
+   adjusted confidence changes decisions — so it cannot be "observed" on live
+   with the flag on.
+4. **Stage 3 (live):** explicit operator authorization only, after verifying
+   the server picked up the new variant env value.
+
+A confidence modifier is not a pure shadow mode: unlike the regime router's
+`shadow_only` flag, LDC's adjusted confidence flows into `min_confidence` and
+AI review and changes decisions once enabled. The `ldc_confidence_before`/
+`ldc_confidence_after` diagnostics exist so the testnet LDC-on-vs-off
+comparison is reconstructable from a single persisted run.
+
+Known open item: per-symbol standardization is NOT built. The artifact records
+per-point source symbols and the lift sweep emits a `cross_symbol_diagnostic`
+measuring same-symbol neighbor fraction; per-symbol scaling is a
+measured-conditional follow-up if that diagnostic shows neighbors spanning
+other symbols' regimes.
+
 ## Live Server Notes
 
 Known deployment shape:

@@ -131,6 +131,14 @@ The current system is a fused live strategy with a regime router:
   post-only limit entry, short pending wait, and fast protection management.
 - `CHOP`: no new entry.
 
+A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
+implemented on 2026-06-26 but is **dormant**: flag defaults off, the
+`quant_setup_ldc` variant is not the live variant, and live behavior is
+unchanged. It is gated on offline `lift > 1.0` validation plus a server
+proxy-side calibration before any testnet/live enablement. See
+`docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md` and
+iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`.
+
 Micro-grid can use extra slots and an extra same-direction notional allowance so
 trend positions do not fully crowd out scalping attempts. Protective SL/TP is
 required for live fills, and the pending-limit watchdog plus position sentinel

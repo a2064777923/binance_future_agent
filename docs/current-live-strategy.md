@@ -184,6 +184,18 @@ The ENAUSDT forensic replay that originally produced a `0.07881` short now
 replays locally and on the server as a passive rebound short near `0.079588`,
 with stop and target recalculated from the new entry.
 
+A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
+implemented on 2026-06-26 but is **dormant and NOT part of the live strategy**:
+its flag defaults off, the `quant_setup_ldc` variant is not the selected live
+variant, and live behavior is unchanged. When eventually enabled it would
+retune confidence from a kNN direction prediction (never hard-rejecting). It is
+gated on an offline `lift > 1.0` validation plus a server proxy-side
+calibration before any testnet or live enablement. See
+`docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md` and
+iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`. Do not treat
+LDC as live until an operator has explicitly switched
+`BFA_LIVE_QUANT_SETUP_VARIANT` to `quant_setup_ldc` and verified the server.
+
 ## Micro-Grid Fast Lane
 
 Micro-grid is live and independent from AI:
