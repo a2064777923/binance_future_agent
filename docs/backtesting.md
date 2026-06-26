@@ -1,5 +1,10 @@
 # Backtesting Runbook
 
+This file documents the early candle-based hot-momentum backtest harness. It is
+not a full replay of the current live fused strategy. For the live regime router
+plus micro-grid fast lane state, read `docs/current-live-strategy.md`; for
+trade-level live forensics, use `scripts/server_live_trade_forensics.py`.
+
 The first backtest layer is a small-capital, short-window sanity check for the
 hot-momentum strategy family. It is deliberately conservative:
 

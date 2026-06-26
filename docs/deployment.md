@@ -1,5 +1,9 @@
 # Deployment Runbook
 
+For the latest checked live profile and server state, read
+`docs/current-live-strategy.md` before using this runbook. This file explains
+how to deploy and operate the service; current env values live on the server.
+
 This project deploys into an isolated server prefix:
 
 - App root: `/opt/binance-futures-agent`
@@ -63,11 +67,11 @@ and AI provider credentials, then set:
 
 ```bash
 BFA_MODE=live
-BFA_AI_PROVIDER=openai
+BFA_AI_PROVIDER=deepseek
 BFA_OPENAI_ENABLED=true
 BFA_REQUIRE_PROTECTIVE_ORDERS=true
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=https://api.openai.com/v1
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 OPENAI_TIMEOUT_SECONDS=5
 OPENAI_MAX_OUTPUT_TOKENS=400
 OPENAI_RETRY_AFTER_SECONDS=300
@@ -83,6 +87,15 @@ BFA_OPENAI_ENABLED=true
 DEEPSEEK_API_KEY=...
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-v4-flash
+```
+
+OpenAI remains available as a fallback/provider option when explicitly chosen:
+
+```bash
+BFA_AI_PROVIDER=openai
+BFA_OPENAI_ENABLED=true
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
 `OPENAI_TIMEOUT_SECONDS`, `OPENAI_MAX_OUTPUT_TOKENS`, and
@@ -104,6 +117,13 @@ margin even when the configured account capital is larger: notional is divided
 by leverage after those caps. If this is too small, raise the margin/portfolio
 caps and governor ceiling together; raising leverage alone does not necessarily
 raise notional.
+
+The latest live handoff profile increased the configured account capital to
+`BFA_ACCOUNT_CAPITAL_USDT=200` and portfolio margin cap to
+`BFA_MAX_PORTFOLIO_MARGIN_USDT=160`. Treat those values as operator-tuned live
+env settings, not source-code defaults; verify `/etc/binance-futures-agent/env`
+before reasoning about current capacity. `docs/current-live-strategy.md`
+contains the latest checked non-secret env snapshot.
 
 Keep the kill-switch path configured. Creating that file stops future live
 orders:
@@ -290,6 +310,36 @@ down, the runner writes `/opt/binance-futures-agent/runtime/openai_backoff.json`
 and returns `openai_backoff` until `OPENAI_RETRY_AFTER_SECONDS` has elapsed;
 the next timer cycle then checks the API again.
 
+### Live Cycle Status Semantics
+
+Not every non-submitted live result is a systemd failure. The live runner treats
+the following execution statuses as processed cycles so the timer can continue
+scanning after the state has been recorded:
+
+- `entry_order_expired_canceled`: a passive limit entry reached the exchange,
+  waited through its configured window, and was canceled unfilled.
+- `entry_order_unknown_canceled`: Binance returned an unknown entry state, no
+  matching position was found, and cleanup succeeded.
+- `entry_order_reconciled_from_position`: Binance returned an unknown entry
+  state but a matching position exists, so the fill path was reconciled from
+  position risk.
+- `protective_order_failed_no_position`: protection placement failed, but the
+  matching position no longer exists.
+- `protective_order_failed_open`: protection placement failed and the position
+  remains open. This is urgent follow-up evidence, but the service should not
+  falsely stop future scans just because the cycle reported it.
+
+`entry_order_unknown_cancel_failed` remains a failed live result because neither
+the entry state nor cleanup was resolved. Protection failure statuses should
+still be investigated in `order_intents`, exchange responses, current positions,
+and open algo orders; they are "processed" for service health, not safe to
+ignore.
+
+The kill switch is still honored when the configured kill-switch file exists.
+Current handled protective-order failure paths do not mean "stop the whole
+system forever"; they mean record the failure, reconcile/fallback when possible,
+then keep timer health separate from urgent risk investigation.
+
 When Square exports and RSS feeds are empty, the live runner can derive a
 clearly labelled `market_heat` fallback narrative from Binance USD-M public
 metrics. This is controlled by `BFA_MARKET_HEAT_NARRATIVE_ENABLED` and the
@@ -332,6 +382,12 @@ already-filled positions, because a pending limit order elsewhere must not block
 backfilling protection on a newly filled position. It still requires live mode,
 Binance credentials, exchange symbol filters, a matching submitted intent, and
 agent-managed position evidence.
+
+If `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`, the sentinel is observe-only:
+it may emit backfill or replacement plans, but it will not place or replace
+exchange orders. If `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`, full-close or
+backfill lifecycle plans from the live cycle are also not executed
+automatically.
 
 The reversal-aware trailing path is not a fixed "small profit means breakeven"
 rule. The sentinel scores the active position using target progress, R multiple,
@@ -403,6 +459,12 @@ systemctl list-timers 'binance-futures-agent-pending-limit-watchdog*' --no-pager
 This service does not open new positions. It only protects pending limit entries
 that the agent already wrote to the event store, and it skips symbols listed in
 `BFA_MANUAL_POSITION_SYMBOLS`.
+
+The watchdog does not manage manual or unmatched exchange positions. If
+`ops position-hold-check` reports an active position with
+`matching_intent=null`, the watchdog has no pending intent to reconcile. First
+classify the position with the operator, then protect or close it through the
+explicit confirmation flow if it is agent-managed.
 
 ## Forward-Paper Recorder
 

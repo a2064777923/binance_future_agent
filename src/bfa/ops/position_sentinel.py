@@ -412,19 +412,26 @@ def _signal_allows_trailing(
 ) -> bool:
     if item.algo_protection_count < 2:
         return True
-    profitable = (item.stop_r_multiple is not None and item.stop_r_multiple >= min_profit_r) or (
-        item.target_progress is not None and item.target_progress >= min_progress
-    )
+    if str(profile.get("name") or "") == "micro_grid":
+        profitable = _micro_profit_gate_met(item, metrics, profile=profile)
+        loss_control_ready = (
+            _micro_stagnation_detected(item, metrics, profile=profile)
+            or _micro_setup_invalidated(item, metrics, profile=profile)
+        ) and _micro_loss_control_ready(item, metrics, profile=profile)
+        if not loss_control_ready and not _micro_profit_protection_ready(item, metrics, profile=profile):
+            return False
+    else:
+        profitable = (item.stop_r_multiple is not None and item.stop_r_multiple >= min_profit_r) or (
+            item.target_progress is not None and item.target_progress >= min_progress
+        )
     if not profitable:
-        profitable = _recent_mfe_threshold_met(metrics, min_profit_r=min_profit_r, min_progress=min_progress)
+        return False
     if (_micro_stagnation_detected(item, metrics, profile=profile) or _micro_setup_invalidated(item, metrics, profile=profile)) and _micro_loss_control_ready(
         item,
         metrics,
         profile=profile,
     ):
         return True
-    if not profitable:
-        return False
     if score >= threshold:
         return True
     return (
@@ -462,6 +469,9 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
             "loss_control_min_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_GIVEBACK_R"), 0.35),
             "loss_control_hard_adverse_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_HARD_ADVERSE_R"), 0.55),
             "loss_control_target_extension_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_TARGET_EXTENSION_R"), 0.08),
+            "profit_protection_min_seconds": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_SECONDS"), 45.0),
+            "profit_protection_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_PROGRESS"), 0.35),
+            "profit_protection_min_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_R"), 0.45),
         }
     return {
         "name": "trend",
@@ -486,14 +496,8 @@ def _recent_mfe_threshold_met(metrics: Mapping[str, Any], *, min_profit_r: float
 def _micro_loss_control_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
     if str(profile.get("name") or "") != "micro_grid":
         return True
-    min_profit_r = _float_or_default(profile.get("min_profit_r"), 0.08)
-    min_progress = _float_or_default(profile.get("min_progress"), 0.22)
-    if (item.stop_r_multiple is not None and item.stop_r_multiple >= min_profit_r) or (
-        item.target_progress is not None and item.target_progress >= min_progress
-    ):
-        return True
-    if _recent_mfe_threshold_met(metrics, min_profit_r=min_profit_r, min_progress=min_progress):
-        return True
+    if not _micro_profit_gate_met(item, metrics, profile=profile):
+        return False
     elapsed = _float_or_none(metrics.get("elapsed_seconds"))
     min_seconds = _float_or_default(profile.get("loss_control_min_seconds"), 90.0)
     if elapsed is None or elapsed < min_seconds:
@@ -507,6 +511,30 @@ def _micro_loss_control_ready(item, metrics: Mapping[str, Any], *, profile: Mapp
     )
     hard_adverse_r = _float_or_default(profile.get("loss_control_hard_adverse_r"), 0.55)
     return adverse_r >= hard_adverse_r and _micro_setup_invalidated(item, metrics, profile=profile)
+
+
+def _micro_profit_protection_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
+    if str(profile.get("name") or "") != "micro_grid":
+        return True
+    if not _micro_profit_gate_met(item, metrics, profile=profile):
+        return False
+    elapsed = _float_or_none(metrics.get("elapsed_seconds"))
+    min_seconds = _float_or_default(profile.get("profit_protection_min_seconds"), 45.0)
+    return elapsed is None or elapsed >= min_seconds
+
+
+def _micro_profit_gate_met(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
+    current_r = _float_or_none(item.stop_r_multiple) or 0.0
+    current_progress = _float_or_none(item.target_progress) or 0.0
+    min_r = max(
+        _float_or_default(profile.get("min_profit_r"), 0.08),
+        _float_or_default(profile.get("profit_protection_min_r"), 0.45),
+    )
+    min_progress = max(
+        _float_or_default(profile.get("min_progress"), 0.22),
+        _float_or_default(profile.get("profit_protection_min_progress"), 0.35),
+    )
+    return current_r >= min_r or current_progress >= min_progress
 
 
 def _profit_giveback_detected(metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
@@ -674,11 +702,15 @@ def _sentinel_item_reason_codes(config: AppConfig, item, signal: ReversalRiskSig
     target_extension_r = (
         profile["loss_control_target_extension_r"] if loss_control else profile["target_extension_r"]
     )
+    min_profit_r = max(profile["min_profit_r"], profile.get("profit_protection_min_r", profile["min_profit_r"]))
+    min_progress = max(profile["min_progress"], profile.get("profit_protection_min_progress", profile["min_progress"]))
     return _dedupe(
         [
             "sentinel_loss_control" if loss_control else "sentinel_profit_protection",
             *signal.reasons,
             f"sentinel_reversal_score:{signal.score}",
+            f"sentinel_min_profit_r:{min_profit_r}",
+            f"sentinel_min_target_progress:{min_progress}",
             f"sentinel_lock_r:{lock_r}",
             f"sentinel_giveback_r:{giveback_r}",
             *([f"sentinel_min_giveback_r:{min_giveback_r}"] if min_giveback_r is not None else []),

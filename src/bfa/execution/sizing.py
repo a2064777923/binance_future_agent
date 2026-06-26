@@ -710,7 +710,7 @@ def _portfolio_remaining_margin(config: AppConfig, risk_state: RiskState | None)
     cap = _portfolio_margin_cap(config)
     if cap <= 0:
         return None
-    return cap - risk_state.total_initial_margin_usdt
+    return cap - risk_state.active_initial_margin_usdt
 
 
 def _portfolio_margin_cap(config: AppConfig) -> float:

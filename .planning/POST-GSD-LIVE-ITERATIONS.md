@@ -1,6 +1,7 @@
 # Post-GSD Live Iterations
 
 **Created:** 2026-06-24
+**Latest live snapshot:** 2026-06-26, see `docs/current-live-strategy.md`.
 **Purpose:** Record live strategy and operations work that happened after the
 formal GSD v1.27 phase artifacts were closed.
 
@@ -30,13 +31,15 @@ The phase files do not explain all behavior added by `c0cdfe1` and `4fc0539`.
 
 Use this precedence when continuing work:
 
-1. Current code and tests in `main`.
-2. Current live server evidence from `/opt/binance-futures-agent/app`,
+1. Current code and tests in the active GitHub branch.
+2. `docs/current-live-strategy.md` for the latest checked live strategy and
+   server snapshot.
+3. Current live server evidence from `/opt/binance-futures-agent/app`,
    `/etc/binance-futures-agent/env`, Binance account state, and the SQLite DB.
-3. This post-GSD iteration log.
-4. `docs/agent-handoff.md`, `docs/live-scalping-ops.md`, and
+4. This post-GSD iteration log.
+5. `docs/agent-handoff.md`, `docs/live-scalping-ops.md`, and
    `docs/position-profit-protection.md`.
-5. Historical `.planning/phases/*` artifacts.
+6. Historical `.planning/phases/*` artifacts.
 
 The phase artifacts are still valuable for why the system was built, but they
 are stale for the latest live strategy shape.
@@ -229,102 +232,65 @@ The GitHub handoff now includes:
 These docs are newer than the GSD phase files. They are concise on purpose and
 should be read before starting implementation.
 
-### 11. Protective Order Failure Was Hardened (2026-06-24)
+### 11. Processed Live Statuses No Longer Stop The Timer
 
-Live trade replay (scripts/research/replay_live_trades.py) found that
-protective order replacement during sentinel trailing could leave a position
-naked when Binance rejected the new algo order with `-4509` (TIF GTE race).
-The executor now uses a three-layer fail-closed:
+Live debugging found that several resolved execution states were being treated
+as failed systemd cycles even though the runner had already handled and recorded
+the exchange state. `AgentRunResult.ok` now treats these as processed cycles:
 
-1. Check if existing protective orders are still present (the trail cancel may
-   have failed, leaving old SL/TP intact).
-2. If missing, place fallback SL/TP at conservative prices.
-3. If fallback also fails, emergency market-close the position.
+- `entry_order_expired_canceled`
+- `entry_order_unknown_canceled`
+- `entry_order_reconciled_from_position`
+- `protective_order_failed_no_position`
+- `protective_order_failed_open`
 
-A single protective failure no longer trips the global kill switch that froze
-all trading. Key file: `src/bfa/execution/executor.py::_resolve_protective_order_failure`.
+This is a service-health rule, not a risk waiver. In particular,
+`protective_order_failed_open` still means an open position needs urgent
+exchange-side protection review. `entry_order_unknown_cancel_failed` remains a
+failed status.
 
-### 12. Trailing Stop Safety Was Fixed (2026-06-24)
+Key files:
 
-`lock_r=0` placed the trailing stop exactly at entry (break-even), but
-fees+slippage made break-even a guaranteed small loss. The trailing logic now
-floors `lock_r` to cover at least one round-trip cost (~0.08% of entry), clamps
-the lock price to stay below mark for valid geometry, and re-places the original
-SL/TP as a fail-closed fallback when the trailing replacement fails. Micro
-`lock_r` tightened 0.10→0.18R; trend `min_profit_r` widened 0.25→0.35R to let
-trends run longer before trailing activates. Key file:
-`src/bfa/ops/position_adjustment.py`.
+- `src/bfa/agent.py`
+- `tests/test_agent_runner.py`
+- `docs/deployment.md`
+- `docs/live-scalping-ops.md`
 
-### 13. Edge-Exhausted Trend Entries Blocked (2026-06-24)
+### 12. Current Live Strategy Snapshot Was Consolidated
 
-Live replay showed trades entering at range extremes (close_position>68%)
-with fading volume, then reverting. A new profile gate
-`block_trend_edge_exhaustion` rejects trend entries in the exhaustion zone.
-Key file: `src/bfa/strategy/setup.py::_trend_edge_exhaustion_rejections`.
+On 2026-06-26 the handoff docs were synchronized with the actual server state
+after several direct live iterations. The canonical current-state doc is now:
 
-### 14. Micro Wick Reversals Routed As RANGE (2026-06-24)
+- `docs/current-live-strategy.md`
 
-Wick-reversal signals now force the regime label to RANGE so they route to the
-micro-grid leg instead of being misclassified as trend. Micro sentinel loss
-control is now gated: it only activates after `min_profit_r` is reached or a
-hard-adverse threshold is confirmed, avoiding premature cuts on micro positions.
-Key files: `src/bfa/strategy/regime.py`, `src/bfa/ops/position_sentinel.py`.
+Important current facts from that snapshot:
 
-### 15. ML Trend Filter + Spike-Depth Entry + Wick Filter (2026-06-24)
+- `/opt/binance-futures-agent/app` is a deployed copy, not a git checkout.
+- Live strategy files on the server matched the local branch by hash at the
+  snapshot.
+- Live routing is enforced, not shadow-only:
+  `BFA_REGIME_ROUTER_ENABLED=true` and
+  `BFA_REGIME_ROUTER_SHADOW_ONLY=false`.
+- Micro-grid is enabled as an independent fast lane:
+  `BFA_LIVE_MICRO_GRID_ENABLED=true` and
+  `BFA_LIVE_MICRO_GRID_FAST_LANE_ENABLED=true`.
+- Micro-grid uses AI bypass, `RANGE` routing, GTX/passive limit entries, a
+  20-second wait window, and no fixed max-hold time exit.
+- Current non-secret risk profile is 200U configured capital, 30x max leverage,
+  5 base bot positions, 2 extra micro-grid slots, 20U max margin per position,
+  4U max single-trade risk, 10U daily loss cap, and 160U portfolio margin cap.
+- Manual positions are `BTWUSDT`, `DRAMUSDT`, and `BABAUSDT` and must not
+  consume bot slots/caps.
+- Raw feed and DB maintenance are active; market snapshots are not persisted at
+  full volume, while decision snapshots and raw feed remain the main analysis
+  substrate.
+- Recent live order intents showed micro-grid scanning and exchange-handled
+  limits; do not rely only on stale `outcomes` when diagnosing whether live is
+  active.
 
-Research tooling added under `scripts/research/`:
-
-- `train_trend_filter.py`: LightGBM trend-leg filter from 6 months / 23 symbols.
-  Validation AUC 0.559, threshold 0.55 → 56.6% win rate, lift 1.49x over
-  baseline. Model persisted to `data/research/trend_filter_v1.txt`.
-- `ml_trend_filter.py`: inference + threshold gate, wired into `setup.py`
-  via `use_ml_trend_filter` profile flag (defaults off; `quant_setup_ml_trend`
-  backtest variant demonstrates it).
-- `fetch_history.py` + `select_universe.py`: 23-symbol stratified universe
-  selector and 6-month kline downloader.
-- Spike-depth entry prediction (B) added to `run_micro_grid_research.py`:
-  scouts recent spike depth and posts the passive entry at predicted wick depth.
-- `train_wick_filter.py`: ML wick-reversal classifier (A) from real aggTrades.
-  Validated on WLD 6 high-vol days: B-only 40% WR → A+B 82% WR.
-- `backtest_micro_tick_precise.py`: tick-precise micro backtest using
-  `TickReplaySource` so瞬時插針 are captured (1-second-bar simulation
-  flattened spikes and showed false 0% WR).
-
-### 16. State-Machine Protection Tests (2026-06-24)
-
-`scripts/research/state_machine_full_pipeline_test.py` runs 2400 simulations
-(6 market scenarios × 2 sides × 2 profiles × 100 seeds) verifying fail-closed
-protection across trend/range/spike/flash-crash/stagnation dynamics. Result:
-**0 protection violations, 0 naked-position events**. Trend vs micro sensitivity
-profiles are independently exercised.
-
-### 17. Alpha Walk-Forward Validation Framework + First Trend Verdict (2026-06-25)
-
-Implemented a reusable, fail-closed OOS validation pipeline in
-`src/bfa/backtest/`:
-
-- `cost.py`: unified per-symbol CostModel (fees + slippage + funding).
-- `adapters.py`: `FoldRunner` contract + `TrendFoldRunner`.
-- `walk_forward.py`: expanding-window month folds, grid search on train only,
-  operator pass bar (`>=30` trades, `min_reward_cost_ratio >= 1.8`, post-cost
-  post-funding positive, full candidate flow).
-- `scripts/research/run_alpha_validation.py`: CLI entry producing
-  `data/research/alpha_validation/trend_verdict.json`.
-
-First trend-leg verdict (22 symbols, Dec 2025 -> Mar 2026, 5m klines, public
-fee tier default maker 2.0 / taker 4.0 bps, funding included):
-
-- **Verdict:** `unverified`
-- **OOS aggregate:** 19 trades, net PnL `-1.24 USDT`, profit factor `0.79`
-- **Selected params:** `min_post_cost_edge_ratio = 1.0` on all folds (higher
-  ratios did not produce enough training trades to clear the anti-overfit
-  floor of 10).
-- **Why unverified:** fails the sample-count bar (<30 OOS trades), the
-  reward/cost bar (selected ratio < 1.8), and post-cost positivity.
-
-This means `quant_setup_live_action_flow` does **not** currently have
-sufficient OOS, post-cost+funding evidence to resume live. Micro and
-limit-range legs are still pending Phase 2 adapter work.
+This snapshot supersedes older planning text that says current capital is 45U,
+that Phase 70 commit `7a55ece` is the latest deployed behavior, or that regime
+routing is only shadow/observe.
 
 ## Live Server Notes
 
@@ -336,6 +302,9 @@ Known deployment shape:
 - Env: `/etc/binance-futures-agent/env`
 - DB: `/opt/binance-futures-agent/data/agent.sqlite`
 - Runtime: `/opt/binance-futures-agent/runtime`
+
+The live app directory should be treated as a deployed copy. Check file hashes
+or redeploy from Git before assuming server code equals the local branch.
 
 Before making live claims, run read-only checks on the server:
 
@@ -355,31 +324,18 @@ switch state, open orders, or service/timer state.
 
 ## Current Open Questions For Next Work
 
-1. ~~Are micro-grid orders still mostly expiring unfilled?~~ Partially
-   answered: spike-depth entry (B) posts deeper and fills more often; the
-   wick filter (A) raises win rate to 82% on high-vol days. Remaining
-   question: can the micro target/stop ratio be improved from ~0.38 to >0.8
-   so the leg is net positive after costs?
-2. ~~Are live losses concentrated in CHOP, wrong regime route, bad entry
-   geometry, stale raw feed, or protection/trailing behavior?~~ Answered by
-   replay: the dominant failure mode was "winning-then-reverted" (88% of
-   trades hit profit at peak, 52% reverted to loss). Root cause was
-   `lock_r=0` + protective-order nakedness on `-4509`. Both fixed (items 11-12).
-3. ~~Does the server env enforce regime routing or only shadow it?~~ Confirmed
-   enforced (`BFA_REGIME_ROUTER_SHADOW_ONLY=false`). Wick-reversal signals now
-   force RANGE routing (item 14).
-4. ~~Are active positions always protected within seconds after fill?~~ The
-   three-layer fail-closed (item 11) now guarantees this. Verify on fresh live
-   data after the 2026-06-24 deploy.
+1. Are micro-grid orders still mostly expiring unfilled? If yes, analyze entry
+   distance, post-only repricing, wait time, and immediate post-cancel price
+   path before loosening risk.
+2. Are live losses concentrated in `CHOP`, wrong regime route, bad entry
+   geometry, stale raw feed, or protection/trailing behavior?
+3. Does the server env enforce regime routing or only shadow it? Decide based
+   on current live outcome attribution, not phase docs.
+4. Are active positions always protected within seconds after fill? Verify with
+   pending-limit watchdog and exchange algo-order evidence.
 5. Is DB/raw-feed retention sufficient for later high-resolution backtests?
-   Still open — DB hit 6 GB; db-maintenance timer is active.
-6. The ML trend filter (`quant_setup_ml_trend`) has validation edge but is NOT
-   yet the live variant. Live still runs `quant_setup_live_action_flow`. The
-   ML filter needs live deployment + 200+ trades to confirm OOS edge holds.
-7. The micro leg's edge on real tick data is thin (-0.054U/trade at current
-   target/stop geometry). Improving the target fraction from 0.5×spike to
-   0.8-1.0×spike, or restricting to only the deepest wicks, is the path to
-   net-positive micro. This is the single biggest remaining improvement.
+6. Should the next formal GSD milestone be v1.28 "Post-GSD Live Strategy
+   Consolidation" to convert these ad hoc iterations into planned phases?
 
 ## Guidance For Future Agents
 

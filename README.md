@@ -5,9 +5,12 @@ system focuses first on hot-coin discovery from Binance Square and other
 narrative sources, then combines those events with futures-market anomalies and
 AI-provider structured trade decisions.
 
-The first live target is a 100 USDT pilot account. The project must default to
-dry-run/test modes until explicit live mode, API credentials, leverage limits,
-loss limits, and the server kill switch are all configured.
+The first live target was a 100 USDT pilot account. Live sizing is now
+environment-driven; as of the latest handoff the server profile has been tested
+with `BFA_ACCOUNT_CAPITAL_USDT=200` and
+`BFA_MAX_PORTFOLIO_MARGIN_USDT=160`. The project must default to dry-run/test
+modes until explicit live mode, API credentials, leverage limits, loss limits,
+and the server kill switch are all configured.
 
 In this project, `notional_usdt` means contract position notional, not the
 initial margin consumed by a futures position. Approximate initial margin is
@@ -17,7 +20,7 @@ rules.
 ## Scope
 
 - Exchange: Binance USD-M futures.
-- Initial account size: 100 USDT.
+- Initial account size: 100 USDT pilot, now configurable by environment profile.
 - Initial strategy family: hot narrative coin + futures anomaly confirmation.
 - AI provider: DeepSeek for live use, with OpenAI Responses still available as
   a fallback provider.
@@ -55,9 +58,11 @@ Local secrets belong in `.env`, which is ignored by git. `.env.example` document
 variable names only.
 
 For another machine or agent taking over development, start with
-`docs/agent-handoff.md`. It summarizes the current architecture, server paths,
-live safety rules, and the exact local verification commands without including
-any secrets.
+`docs/current-live-strategy.md`, then `docs/agent-handoff.md`. Those files
+summarize the current live server state, strategy routing, server paths, safety
+rules, and local verification commands without including secrets. The older
+`.planning/phases/*` files are historical context; do not treat them as the
+latest live strategy state.
 
 Phases 1-8 implement the isolated project foundation, public market data,
 narrative ingestion, event-store replay, hot-coin candidate scoring,
@@ -112,6 +117,14 @@ python -m bfa.cli ops position-review --env-file .env --db runtime/agent.sqlite
 python -m bfa.cli ops position-adjustment-plan --env-file .env --db runtime/agent.sqlite
 python -m bfa.cli ops time-exit-plan --env-file .env --db runtime/agent.sqlite
 ```
+
+The live systemd timer can be healthy even when no new position is opened. GTX
+or post-only entries may expire unfilled, unknown entry orders may be reconciled
+as canceled or filled, and protection failures may be logged as processed live
+cycle statuses instead of service failures. Treat an exchange-side active
+position with no matching submitted intent, or no confirmed exchange algo
+protection, as urgent risk evidence: classify it as manual only after operator
+confirmation, otherwise use the read-only position checks before any mutation.
 
 `ops position-review` is read-only. It turns the active exchange position plus
 the matching submitted trade plan into hold/watch/trail-or-reduce/close-review
@@ -191,16 +204,12 @@ notional after the proposed new entry using:
 - `BFA_MAX_PORTFOLIO_NOTIONAL_USDT`
 - `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT`
 
-`30u_10x_multi_dynamic` is available as a preview/apply profile for a 30 USDT
-account with 10x leverage, up to 10 concurrent bot-managed positions, 100 USDT
-effective notional per position, 650 USDT total bot-managed notional, and
-520 USDT same-direction bot-managed notional caps. Manual positions listed in
-`BFA_MANUAL_POSITION_SYMBOLS` remain visible in diagnostics but do not consume
-bot entry capacity. It remains confirmation-gated and should be treated as
-experimental until backtests and live evidence justify it. Profile readiness may
-carry a protected active position into this target profile only when
-exchange-side algo protection is present and the active exposure fits the target
-portfolio caps.
+Historical risk-profile tooling such as `30u_10x_multi_dynamic` still exists,
+but it is not the current live profile. Current live caps are environment-driven
+and must be read from `/etc/binance-futures-agent/env`; the latest checked
+profile is summarized in `docs/current-live-strategy.md`. Manual positions
+listed in `BFA_MANUAL_POSITION_SYMBOLS` remain visible in diagnostics but do
+not consume bot entry capacity.
 
 `ops pilot-learning-packet` is read-only. It composes current exposure capacity,
 manual-position exclusions, position lifecycle decisions, time-exit status,

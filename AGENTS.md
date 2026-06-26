@@ -23,8 +23,11 @@ user explicitly asks for a comparison.
 - Use structured JSON/SQLite records for all signals, decisions, orders, and
   trade outcomes.
 - Before using `.planning/phases/*` as current strategy context, read
+  `docs/current-live-strategy.md` and
   `.planning/POST-GSD-LIVE-ITERATIONS.md`. Several live strategy and ops
   iterations happened after the formal v1.27 GSD phase files were closed.
+  The current live app on the server is a deployed copy under
+  `/opt/binance-futures-agent/app`, not the planning history.
 
 ## Verification
 

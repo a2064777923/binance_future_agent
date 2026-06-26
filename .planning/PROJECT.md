@@ -34,11 +34,12 @@ control of downside.
 
 Formal GSD phase records currently end at v1.27 Phase 70, but the live strategy
 continued to change afterward. Before using this project file as current
-implementation context, read `.planning/POST-GSD-LIVE-ITERATIONS.md`. Current
-`main` includes post-GSD regime routing, micro-grid/scalping live flow,
-raw-feed auto-hot collection, pending-limit watchdog, position sentinel, DB
-maintenance, and protective order replacement hardening that are newer than the
-Phase 70 artifacts.
+implementation context, read `docs/current-live-strategy.md` and
+`.planning/POST-GSD-LIVE-ITERATIONS.md`. Current code includes post-GSD regime
+routing, micro-grid/scalping live flow, raw-feed auto-hot collection,
+pending-limit watchdog, position sentinel, DB maintenance, protective order
+replacement hardening, and later live-side micro-grid geometry fixes that are
+newer than the Phase 70 artifacts.
 
 ### Validated
 
@@ -353,8 +354,10 @@ The user's chosen direction:
 - Deployment target: server `64.83.34.222`, root user, isolated path
   `/opt/binance-futures-agent`.
 - Trading venue: Binance USD-M futures.
-- Current configured pilot capital: 45 USDT, after starting from an initial
-  100 USDT planning profile and later 30 USDT trial profile.
+- Current configured pilot capital is env-driven. The latest checked server
+  snapshot in `docs/current-live-strategy.md` showed
+  `BFA_ACCOUNT_CAPITAL_USDT=200`; older 100U, 30U, and 45U references are
+  historical planning profiles.
 - Execution intent: live small-capital pilot, not only paper trading.
 - First strategy focus: hot coins, especially Binance Square narratives.
 - AI provider: DeepSeek for live use, with OpenAI Responses provider still
@@ -368,16 +371,18 @@ The user's chosen direction:
 - **Isolation**: The project must not modify `F:\stock` or server-side existing
   services. Use its own repo, virtualenv, systemd unit, data directory, logs,
   and runtime files.
-- **Capital**: Current configured pilot capital is 45 USDT, so the live risk
-  model must still assume very small orders and high sensitivity to
-  fees/slippage.
+- **Capital**: Current configured pilot capital is read from server env. The
+  latest checked live snapshot showed 200 USDT configured capital, but the live
+  risk model must still assume small, fee-sensitive orders because final size is
+  constrained by margin, notional, stop-risk, portfolio, exchange-filter, and
+  adaptive-sizing caps.
 - **Execution**: Live mode is allowed, but default code paths must start in
   dry-run/test mode and require explicit environment configuration for live.
-- **Risk**: Current live pilot caps are max 10x leverage, max 200 USDT
-  contract notional per bot-managed position, max 0.7 USDT risk per trade,
-  max 2 USDT daily loss, and max 20 bot-managed concurrent positions, with
-  portfolio margin/notional and same-direction caps still enforced. Contract
-  notional is not the same as initial margin; approximate margin is
+- **Risk**: Current live caps are env-driven and must be verified on the server
+  before action. The latest checked snapshot showed 30x max leverage, 20U max
+  margin per position, 4U max trade risk, 10U daily loss cap, 5 base bot
+  positions plus 2 extra micro-grid slots, and 160U portfolio margin cap.
+  Contract notional is not the same as initial margin; approximate margin is
   `notional / leverage`.
 - **Exchange API**: Use official Binance USD-M futures APIs for market data,
   account state, and order placement.
@@ -449,13 +454,11 @@ secret-safe health check passed after deployment.
 
 The server deployment is installed under `/opt/binance-futures-agent` with a
 dedicated env file and systemd units. Binance and AI credentials are configured
-out of band. The active trial profile is 45 USDT configured account capital,
-10x max leverage, 300 USDT max bot-managed position notional, 30 USDT max
-margin per position, 0.7 USDT max per-trade risk, 2 USDT max daily loss,
-30 bot-managed open positions, 2400 USDT portfolio notional cap, and 1800 USDT
-same-direction notional cap under dynamic sizing and portfolio caps. Manual
-symbols such as `BTWUSDT` remain visible in diagnostics but do not consume bot
-entry capacity.
+out of band. Historical profile text below this point records how the live
+pilot evolved through 30U/45U and other intermediate caps; it is not the
+current live profile. Current live env, manual symbols, services, and strategy
+routing are summarized in `docs/current-live-strategy.md` and must be verified
+against `/etc/binance-futures-agent/env` before acting.
 
 A real ZECUSDT LONG was submitted before or during the Phase 19 profile-change
 window under the prior 3x settings. It filled at `467.68` for quantity `0.032`
@@ -899,7 +902,7 @@ remains paused.
 | Active position management before more scaling | NEARUSDT reached `close_review` while time-exit planning stayed blocked, proving exits need the same evidence quality as entries. | v1.26 complete through lifecycle, guarded exits, live outcome ledger, and pilot learning packet |
 | Explain live cycles before widening scanners | Broader hot-symbol scanning should be built on a report that explains submitted, skipped, AI-pass, risk-blocked, and manual-symbol cycles. | Phase 66 complete |
 | Horizontal layer roadmap | User chose to build infrastructure layers before full assembly. | - Pending |
-| Live small-capital pilot allowed | User explicitly chose live small本金 over testnet-only; current live server caps are 45 USDT configured capital, 10x leverage, 500 USDT per-position/effective notional, 60 bot-managed open positions, 0.7 USDT per-trade risk, and 2 USDT daily loss. Manual `BTWUSDT` is excluded from bot management. | v1.27 shipped |
+| Live small-capital pilot allowed | User explicitly chose live small-capital automation over testnet-only. Current live caps are env-driven; the latest checked snapshot is documented in `docs/current-live-strategy.md` and supersedes older 45U/60-position Phase 70 notes. Manual symbols currently include `BTWUSDT`, `DRAMUSDT`, and `BABAUSDT`. | v1.27 shipped; post-GSD snapshot 2026-06-26 |
 | Post-GSD changes need their own handoff layer | Several live fixes and strategy changes were made after Phase 70 without formal GSD phase artifacts. | `.planning/POST-GSD-LIVE-ITERATIONS.md` is now required reading before future planning |
 
 ## Evolution
@@ -922,4 +925,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state.
 
 ---
-*Last updated: 2026-06-24 after post-GSD live iteration handoff update.*
+*Last updated: 2026-06-26 after current live strategy snapshot sync.*

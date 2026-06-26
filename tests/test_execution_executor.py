@@ -112,6 +112,31 @@ class LimitUnknownFilledPositionSignedClient(FakeSignedClient):
         ]
 
 
+class LimitUnknownNoPositionSignedClient(FakeSignedClient):
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/order",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2013,
+            binance_message="Order does not exist.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return [
+            {
+                "symbol": symbol or "BTCUSDT",
+                "positionAmt": "0",
+                "positionSide": "LONG",
+                "entryPrice": "0",
+                "markPrice": "100",
+            }
+        ]
+
+
 class PostOnlyRejectThenAcceptSignedClient(FakeSignedClient):
     def new_order(self, **kwargs):
         self.calls.append(("new_order", kwargs))
@@ -835,6 +860,43 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(result.exchange_response["stop_loss_order"]["order_type"], "STOP_MARKET")
         self.assertEqual(result.exchange_response["take_profit_order"]["order_type"], "TAKE_PROFIT_MARKET")
 
+    def test_live_limit_entry_unknown_state_without_position_cancels_instead_of_leaving_pending(self):
+        fake_client = LimitUnknownNoPositionSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_POSITION_MODE="hedge",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:1",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "entry_order_unknown_canceled")
+        self.assertFalse(result.submitted)
+        self.assertIn("entry_order_unknown_canceled", result.risk.reason_codes)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            ["account", "margin", "leverage", "new_order", "query_order", "position_risk", "cancel_order"],
+        )
+        self.assertNotIn("new_algo_order", [call[0] for call in fake_client.calls])
+        self.assertEqual(result.exchange_response["limit_entry_unknown_resolution"], "cancel_attempted_after_query_not_found")
+
     def test_live_post_only_entry_reprices_after_maker_reject(self):
         fake_client = PostOnlyRejectThenAcceptSignedClient()
         engine = ExecutionEngine(
@@ -871,6 +933,17 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(entry_calls[1]["new_client_order_id"], "bfa-btcusdt-20260620100000-r1")
         self.assertIn("post_only_repriced_attempt:2", result.intent.reason_codes)
         self.assertEqual(result.intent.entry_price, 99.8)
+        self.assertIn("micro_grid_reprice_reanchored_protective_prices", result.intent.reason_codes)
+        self.assertIn("micro_grid_fill_reanchored_protective_prices", result.intent.reason_codes)
+        self.assertAlmostEqual(result.intent.stop_price, 95.808)
+        self.assertEqual(result.intent.target_price, 108.0)
+        self.assertIn("micro_grid_reprice_reanchor", result.intent.metadata)
+        reanchor = result.intent.metadata["micro_grid_fill_reanchor"]
+        self.assertEqual(reanchor["fill_quality"], "better_or_equal")
+        stop_order = [call[1] for call in fake_client.calls if call[0] == "new_algo_order" and call[1]["order_type"] == "STOP_MARKET"][0]
+        target_order = [call[1] for call in fake_client.calls if call[0] == "new_algo_order" and call[1]["order_type"] == "TAKE_PROFIT_MARKET"][0]
+        self.assertAlmostEqual(stop_order["stop_price"], 95.808)
+        self.assertEqual(target_order["stop_price"], 108.0)
         reprice = result.exchange_response["entry_order"]["post_only_reprice"]
         self.assertTrue(reprice["enabled"])
         self.assertEqual([attempt["status"] for attempt in reprice["attempts"]], ["rejected", "accepted"])

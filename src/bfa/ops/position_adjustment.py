@@ -972,10 +972,13 @@ def _trail_prices(
     target_progress = _float_or_default(item.target_progress, 0.0)
     target_progress_activation = "sentinel_profit_protection" in item.reasons and target_progress > 0
     loss_control_activation = "sentinel_loss_control" in item.reasons
+    sentinel_activation = target_progress_activation or loss_control_activation
+    if sentinel_activation and not _sentinel_profit_gate_met(item, current_r=current_r, target_progress=target_progress):
+        rejections.append("sentinel_profit_gate_not_met")
     if current_r < max(activate_r, 0.0) and not target_progress_activation:
         if not loss_control_activation:
             rejections.append("trailing_activation_r_not_reached")
-    if current_r <= 0 and not loss_control_activation:
+    if current_r <= 0:
         rejections.append("position_not_in_profit")
     if rejections:
         return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
@@ -1078,6 +1081,26 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
         if parsed is not None and parsed >= 0:
             values[target] = parsed
     return values
+
+
+def _sentinel_profit_gate_met(item: PositionReviewItem, *, current_r: float, target_progress: float) -> bool:
+    reasons = [str(reason) for reason in item.reasons]
+    if not any(reason.startswith("sentinel_") for reason in reasons):
+        return True
+    configured_min_r = _reason_float(reasons, "sentinel_min_profit_r")
+    configured_min_progress = _reason_float(reasons, "sentinel_min_target_progress")
+    min_r = configured_min_r if configured_min_r is not None else 0.25
+    min_progress = configured_min_progress if configured_min_progress is not None else 0.25
+    return current_r >= max(min_r, 0.0) or target_progress >= max(min_progress, 0.0)
+
+
+def _reason_float(reasons: list[str], key: str) -> float | None:
+    prefix = f"{key}:"
+    for reason in reasons:
+        if not reason.startswith(prefix):
+            continue
+        return _float_or_none(reason[len(prefix) :])
+    return None
 
 
 def _position_direction(item: PositionReviewItem) -> str | None:
