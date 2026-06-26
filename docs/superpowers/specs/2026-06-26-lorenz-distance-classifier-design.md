@@ -79,8 +79,11 @@ decision.
 3. **`src/bfa/strategy/setup.py`** (modified) — adds profile flags, a
    `_ldc_confidence_modifier()` helper, a lazy-load cache, and the single
    wiring point in `build_trade_setup`.
-4. **`src/bfa/config.py`** (modified) — env → profile plumbing, mirroring
-   the existing `BFA_*` → `TradeSetupProfile` pattern.
+4. **`src/bfa/backtest/models.py`** (modified) — adds an LDC-enabled variant
+   (`quant_setup_ldc`) to `built_in_variants`, mirroring how
+   `quant_setup_ml_trend` enables the LightGBM filter. `src/bfa/agent.py` is
+   **not** modified: `_live_quant_setup_profile` already selects the live
+   variant from `BFA_LIVE_QUANT_SETUP_VARIANT`.
 5. **Tests** (new) — `tests/test_strategy_ldc_classifier.py` and
    `tests/test_strategy_setup_ldc.py`, plus a small-data smoke test for the
    training script.
@@ -409,13 +412,34 @@ but placed in `price_basis` to match the forensics read location).
   `ldc_classifier.ldc_confidence_modifier`.
 - Any exception → `delta=0`, `ldc_unavailable:<ExcClass>`, no bubble.
 
-### Config (`src/bfa/config.py`, env → profile, names follow existing `BFA_*` style)
+### Variant-based enablement (mirrors how `ml_trend_filter` is enabled)
 
-- `BFA_LDC_CONFIDENCE_MODIFIER_ENABLED` → `use_ldc_confidence_modifier` (default false)
-- `BFA_LDC_ARTIFACT_PATH` → `ldc_artifact_path`
-- `BFA_LDC_BLEND_STRENGTH` → `ldc_blend_strength`
-- `BFA_LDC_BLEND_MODE` → `ldc_blend_mode`
-- `BFA_LDC_MIN_VOTERS` → `ldc_min_voters`
+Profile flags are **not** wired through `config.py` env keys. The existing
+`ml_trend_filter` is enabled the same way: its flags live on
+`TradeSetupProfile`, and a variant in `src/bfa/backtest/models.py::built_in_variants`
+turns them on via its `setup_profile` dict (see the `quant_setup_ml_trend`
+variant, which sets `"use_ml_trend_filter": True`). The live trend profile is
+selected by `_live_quant_setup_profile(config)` in `src/bfa/agent.py`, which
+reads `BFA_LIVE_QUANT_SETUP_VARIANT` and returns that variant's
+`setup_profile`. `_setup_profile` in `setup.py` filters a Mapping through
+`TradeSetupProfile.__dataclass_fields__`, so any new field added to the
+dataclass is **automatically supported** by variant dicts with no extra
+plumbing.
+
+LDC therefore follows the identical pattern:
+
+1. Add the `ldc_*` fields to `TradeSetupProfile` (defaults off / empty).
+2. Add a new variant `quant_setup_ldc` in `built_in_variants` (mirroring
+   `quant_setup_ml_trend`) whose `setup_profile` dict sets
+   `"use_ldc_confidence_modifier": True` plus the artifact path and blend
+   settings. Optionally a `quant_setup_ml_trend_ldc` variant enabling both
+   LDC and LightGBM for dual confirmation.
+3. Live enablement = operator sets `BFA_LIVE_QUANT_SETUP_VARIANT` to the
+   LDC-enabled variant. No new `BFA_LDC_*` env keys are introduced; the
+   existing variant-selection env is the single control.
+
+This is more consistent with the codebase than ad-hoc env keys and keeps the
+single source of truth for "which flags are on" in the variant definition.
 
 ## Diagnostics
 
@@ -546,12 +570,12 @@ Stage 2 — testnet/dry-run with flag on (NOT a live "shadow" pretense)
   in Stage 0's val segment — there is no fake live-shadow mode here.
 
 Stage 3 — Live enablement (explicit operator authorization)
-  After testnet validation, the operator explicitly sets
-  BFA_LDC_CONFIDENCE_MODIFIER_ENABLED=true in the live env. Per
-  docs/current-live-strategy.md, after a live-env change the operator
-  must verify the server actually picked up the new value (ops
-  live-status) and continue monitoring adjusted-decision forensics
-  via price_basis.ldc_diagnostics.
+  After testnet validation, the operator switches the live trend variant to
+  an LDC-enabled variant by setting BFA_LIVE_QUANT_SETUP_VARIANT (e.g. to
+  quant_setup_ldc) in the live env. Per docs/current-live-strategy.md, after
+  a live-env change the operator must verify the server actually picked up
+  the new value (ops live-status) and continue monitoring adjusted-decision
+  forensics via price_basis.ldc_diagnostics.
 ```
 
 ## Out of Scope (YAGNI / honest boundaries)
