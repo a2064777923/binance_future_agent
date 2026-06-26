@@ -120,21 +120,24 @@ def load_ldc_artifact(path: str | "Path") -> LdcArtifact:
     """Load a persisted artifact. Raises on missing/corrupt file (caller wraps)."""
     from pathlib import Path
 
-    data = np.load(Path(path), allow_pickle=True)
-    meta = json.loads(str(data["meta"].item()))
-    ref_syms = tuple() if "reference_symbols" not in data else tuple(
-        str(x) for x in data["reference_symbols"].tolist()
-    )
-    return LdcArtifact(
-        reference_x=np.asarray(data["reference_x"], dtype=float),
-        reference_y=np.asarray(data["reference_y"], dtype=int),
-        feature_names=tuple(str(x) for x in data["feature_names"].tolist()),
-        scaler_mean=np.asarray(data["scaler_mean"], dtype=float),
-        scaler_std=np.asarray(data["scaler_std"], dtype=float),
-        meta=meta,
-        blend_modes_supported=tuple(str(x) for x in data["blend_modes_supported"].tolist()),
-        reference_symbols=ref_syms,
-    )
+    # Read arrays inside the context manager so the underlying file handle is
+    # closed promptly; np.load returns a lazy NpzFile that otherwise keeps the
+    # .npz open until GC, which leaks ResourceWarnings into the test process.
+    with np.load(Path(path), allow_pickle=True) as data:
+        meta = json.loads(str(data["meta"].item()))
+        ref_syms = tuple() if "reference_symbols" not in data else tuple(
+            str(x) for x in data["reference_symbols"].tolist()
+        )
+        return LdcArtifact(
+            reference_x=np.asarray(data["reference_x"], dtype=float),
+            reference_y=np.asarray(data["reference_y"], dtype=int),
+            feature_names=tuple(str(x) for x in data["feature_names"].tolist()),
+            scaler_mean=np.asarray(data["scaler_mean"], dtype=float),
+            scaler_std=np.asarray(data["scaler_std"], dtype=float),
+            meta=meta,
+            blend_modes_supported=tuple(str(x) for x in data["blend_modes_supported"].tolist()),
+            reference_symbols=ref_syms,
+        )
 
 
 def ldc_confidence_modifier(
