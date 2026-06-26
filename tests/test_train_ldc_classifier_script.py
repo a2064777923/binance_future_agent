@@ -70,5 +70,54 @@ class TrainLdcScriptTests(unittest.TestCase):
             self.assertEqual(len(loaded.reference_symbols), len(loaded.reference_x))
 
 
+class LiftSweepTests(unittest.TestCase):
+    def test_lift_sweep_schema_and_recommendation(self):
+        from scripts.research.train_ldc_classifier import (
+            build_reference, fit_scaler, make_artifact, run_lift_sweep,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_synthetic_klines(Path(tmp), bars=120)
+            ref = build_reference(Path(tmp), horizon=12, dead_zone_atr_mult=0.3,
+                                  min_lookback=30)
+            if len(ref["X"][ref["split"] == 1]) == 0:
+                self.skipTest("synthetic data produced no validation rows")
+            mean, std = fit_scaler(ref["X"][ref["split"] == 0])
+            art = make_artifact(ref, mean, std, k=4, horizon=12,
+                                dead_zone_atr_mult=0.3)
+            class _Args:
+                horizon = 12
+                dead_zone_atr_mult = 0.3
+                k = 4
+                artifact = "x.npz"
+                report = "x.json"
+            report = run_lift_sweep(ref, mean, std, art, _Args())
+            self.assertEqual(report["schema"], "bfa_ldc_research_v1")
+            self.assertIn("blend_sweep", report)
+            self.assertIn("recommended_blend", report)
+            self.assertIn("cross_symbol_diagnostic", report)
+            self.assertIn(report["recommended_blend"]["reason"],
+                          {"max_lift_subject_to_min_n_passed",
+                           "no_sweep_meets_min_passed"})
+
+    def test_release_gate_no_lift_returns_zero_exit(self):
+        from scripts.research.train_ldc_classifier import run_lift_sweep
+        ref = {"X": np.empty((0, 5)), "y": np.empty(0, dtype=int),
+               "split": np.empty(0, dtype=int), "symbols": [],
+               "feature_names":
+               ("ema_spread", "rsi", "atr_percent", "taker_ratio", "mom_6")}
+        from bfa.strategy.ldc_classifier import LdcArtifact
+        art = LdcArtifact(
+            reference_x=np.empty((0, 5)), reference_y=np.empty(0, dtype=int),
+            feature_names=("ema_spread", "rsi", "atr_percent", "taker_ratio", "mom_6"),
+            scaler_mean=np.zeros(5), scaler_std=np.ones(5),
+            meta={"k": 8}, blend_modes_supported=("linear",),
+        )
+        class _Args:
+            horizon = 36; dead_zone_atr_mult = 0.3; k = 8
+            artifact = "x"; report = "x"
+        report = run_lift_sweep(ref, np.zeros(5), np.ones(5), art, _Args())
+        self.assertLessEqual(report["recommended_blend"]["lift"], 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()

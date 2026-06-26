@@ -215,20 +215,148 @@ def main() -> int:
 
 
 def run_lift_sweep(ref, mean, std, art, args) -> dict[str, Any]:
-    # Lift sweep is implemented in Task 7; placeholder returns a no-lift report.
+    """Lift sweep over the validation segment.
+
+    For each val point, run kNN against the TRAIN reference set (train is
+    entirely time-before val per symbol, so this is leak-free), assume a
+    proxy setup side from the features (mirror train_trend_filter side
+    logic), compute agreement, adjust a virtual base_confidence, and measure
+    whether the realized direction matched. Report win-rate lift of
+    adjusted-vs-unadjusted passing sets, plus net rejected/promoted. The
+    release gate is lift > 1.0 with a min-passed floor.
+    """
+    from bfa.strategy.ldc_classifier import lorentzian_distance
+
+    train_mask = ref["split"] == 0
+    val_mask = ref["split"] == 1
+    train_x, train_y = ref["X"][train_mask], ref["y"][train_mask]
+    val_x, val_y = ref["X"][val_mask], ref["y"][val_mask]
+    std_safe = np.where(std == 0, 1.0, std)
+
+    # Fraction of val points that had a real direction (non-dead-zone).
+    base_win_rate = float((val_y != 0).mean()) if len(val_y) else 0.0
+
+    blend_strengths = [0.03, 0.05, 0.06, 0.08, 0.10]
+    blend_modes = ["linear", "asymmetric"]
+    base_confs = [0.50, 0.58, 0.66]
+    min_conf_gate = 0.55
+    min_passed = max(1, int(len(val_y) * 0.005))
+    sweep = []
+
+    if len(val_x) == 0 or len(train_x) == 0:
+        return {
+            "schema": "bfa_ldc_research_v1", "artifact_path": args.artifact,
+            "feature_names": list(FEATURE_NAMES), "horizon_bars": args.horizon,
+            "dead_zone_atr_mult": args.dead_zone_atr_mult, "k": args.k,
+            "n_train_reference": int(len(train_x)), "n_val": int(len(val_x)),
+            "val_base_win_rate": round(base_win_rate, 4),
+            "blend_sweep": [],
+            "cross_symbol_diagnostic": {"measured": False, "reason": "empty_val_or_train"},
+            "recommended_blend": {"strength": 0.06, "mode": "linear", "lift": 0.0,
+                                  "reason": "no_sweep_meets_min_passed"},
+        }
+
+    # Precompute each val point's agreement + proxy side + neighbor symbols once.
+    agreements = np.zeros(len(val_x))
+    proxy_sides = []
+    neighbor_symbol_counts = []   # per val point: how many neighbors share its symbol
+    train_symbols = ref.get("symbols", [])
+    val_symbols_all = ref.get("symbols", [])
+    val_syms = [s for s, m in zip(val_symbols_all, ref["split"]) if m] if len(val_symbols_all) == len(ref["split"]) else []
+    for i in range(len(val_x)):
+        row = val_x[i]
+        # proxy side: mom_6 sign (simplified direction hint, like train_trend_filter)
+        side = "long" if row[FEATURE_NAMES.index("mom_6")] >= 0 else "short"
+        proxy_sides.append(side)
+        q = (row - mean) / std_safe
+        d = lorentzian_distance(q, (train_x - mean) / std_safe)
+        k = min(args.k, len(train_x))
+        idx = np.argpartition(d, k - 1)[:k]
+        labels = train_y[idx]
+        same = 1 if side == "long" else -1
+        voters = int(np.count_nonzero(labels != 0))
+        if voters == 0:
+            agreements[i] = 0.0
+        else:
+            same_votes = int(np.count_nonzero(labels == same))
+            agreements[i] = (same_votes - (voters - same_votes)) / voters
+        # cross-symbol diagnostic: of the k neighbors, how many came from the
+        # SAME symbol as the val point (None if val symbol unknown / no train syms)
+        if train_symbols and i < len(val_syms) and val_syms[i]:
+            neigh_syms = [train_symbols[j] if j < len(train_symbols) else "" for j in idx]
+            same_sym = sum(1 for s in neigh_syms if s == val_syms[i])
+            neighbor_symbol_counts.append({"same_symbol": same_sym, "k": int(k)})
+        else:
+            neighbor_symbol_counts.append(None)
+
+    for strength in blend_strengths:
+        for mode in blend_modes:
+            for base in base_confs:
+                from bfa.strategy.ldc_classifier import _blend_delta
+                adjusted = np.array([
+                    min(max(base + _blend_delta(agreements[i],
+                                                blend_strength=strength,
+                                                blend_mode=mode), 0.0), 0.95)
+                    for i in range(len(val_x))
+                ])
+                unadj_pass = np.full(len(val_x), base) >= min_conf_gate
+                adj_pass = adjusted >= min_conf_gate
+                # win = the proxy side matched realized direction
+                # (proxy long correct when val_y == 1; proxy short when val_y == -1)
+                correct = np.array([
+                    (val_y[i] == 1 and proxy_sides[i] == "long")
+                    or (val_y[i] == -1 and proxy_sides[i] == "short")
+                    for i in range(len(val_x))
+                ])
+                n_unadj = int(unadj_pass.sum())
+                n_adj = int(adj_pass.sum())
+                wr_unadj = float(correct[unadj_pass].mean()) if n_unadj else 0.0
+                wr_adj = float(correct[adj_pass].mean()) if n_adj else 0.0
+                lift = wr_adj / wr_unadj if wr_unadj > 0 else 0.0
+                sweep.append({
+                    "blend_strength": strength, "blend_mode": mode, "base_conf": base,
+                    "n_passed_unadjusted": n_unadj,
+                    "win_rate_unadjusted": round(wr_unadj, 4),
+                    "n_passed_adjusted": n_adj,
+                    "win_rate_adjusted": round(wr_adj, 4),
+                    "lift": round(lift, 4),
+                    "net_rejected": int((unadj_pass & ~adj_pass).sum()),
+                    "net_promoted": int((~unadj_pass & adj_pass).sum()),
+                })
+
+    candidates = [s for s in sweep if s["n_passed_adjusted"] >= min_passed and s["lift"] > 1.0]
+    if not candidates:
+        rec = {"strength": 0.06, "mode": "linear", "lift": 0.0,
+               "reason": "no_sweep_meets_min_passed"}
+    else:
+        best = max(candidates, key=lambda s: s["lift"])
+        rec = {"strength": best["blend_strength"], "mode": best["blend_mode"],
+               "lift": best["lift"], "reason": "max_lift_subject_to_min_n_passed"}
+    # Cross-symbol neighbor diagnostic: of val points with known symbol, mean
+    # fraction of neighbors from the SAME symbol. High = kNN is intra-symbol
+    # (global scaler fine); low = neighbors come from other symbols' regimes
+    # (per-symbol scaling may be needed). Measure before solving (YAGNI).
+    measured = [c for c in neighbor_symbol_counts if c is not None]
+    if measured:
+        same_sym_frac = float(np.mean([c["same_symbol"] / c["k"] for c in measured]))
+        cross_diag = {
+            "measured": True, "n_val_points_measured": len(measured),
+            "mean_same_symbol_neighbor_fraction": round(same_sym_frac, 4),
+            "interpretation": (
+                "high = kNN largely intra-symbol, global scaler adequate; "
+                "low = neighbors span other symbols' regimes, consider per-symbol scaling"
+            ),
+        }
+    else:
+        cross_diag = {"measured": False, "reason": "no_val_symbol_metadata"}
     return {
-        "schema": "bfa_ldc_research_v1",
-        "artifact_path": args.artifact,
-        "feature_names": list(FEATURE_NAMES),
-        "horizon_bars": args.horizon,
-        "dead_zone_atr_mult": args.dead_zone_atr_mult,
-        "k": args.k,
-        "n_train_reference": int(len(ref["X"][ref["split"] == 0])),
-        "n_val": int(len(ref["X"][ref["split"] == 1])),
-        "blend_sweep": [],
-        "cross_symbol_diagnostic": {"measured": False, "reason": "lift_sweep_not_yet_implemented"},
-        "recommended_blend": {"strength": 0.06, "mode": "linear", "lift": 0.0,
-                              "reason": "lift_sweep_not_yet_implemented"},
+        "schema": "bfa_ldc_research_v1", "artifact_path": args.artifact,
+        "feature_names": list(FEATURE_NAMES), "horizon_bars": args.horizon,
+        "dead_zone_atr_mult": args.dead_zone_atr_mult, "k": args.k,
+        "n_train_reference": int(len(train_x)), "n_val": int(len(val_x)),
+        "val_base_win_rate": round(base_win_rate, 4),
+        "blend_sweep": sweep, "cross_symbol_diagnostic": cross_diag,
+        "recommended_blend": rec,
     }
 
 
