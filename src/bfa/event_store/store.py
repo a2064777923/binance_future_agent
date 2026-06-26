@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from typing import Any, Mapping
 
 from bfa.event_store.migrations import CATEGORY_TABLES, migrate
 from bfa.event_store.models import StoredEvent
 from bfa.market.models import NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
+
+
+SQLITE_LOCK_RETRY_DELAYS_SECONDS = (0.05, 0.15, 0.35)
 
 
 class EventStore:
@@ -55,6 +59,29 @@ class EventStore:
     ) -> int:
         _validate_category(category)
         payload_json = _to_json(payload)
+        return self._with_lock_retry(
+            lambda: self._insert_artifact_once(
+                category,
+                occurred_at=occurred_at,
+                payload_json=payload_json,
+                source=source,
+                symbol=symbol,
+                ref_id=ref_id,
+                event_type=event_type,
+            )
+        )
+
+    def _insert_artifact_once(
+        self,
+        category: str,
+        *,
+        occurred_at: str,
+        payload_json: str,
+        source: str | None,
+        symbol: str | None,
+        ref_id: str | None,
+        event_type: str | None,
+    ) -> int:
         event_cursor = self.connection.execute(
             """
             INSERT INTO events (event_type, occurred_at, source, symbol, ref_id, payload_json)
@@ -72,6 +99,18 @@ class EventStore:
         )
         self.connection.commit()
         return event_id
+
+    def _with_lock_retry(self, operation):
+        delays = (*SQLITE_LOCK_RETRY_DELAYS_SECONDS, None)
+        for delay in delays:
+            try:
+                return operation()
+            except sqlite3.OperationalError as exc:
+                if not _is_database_locked(exc) or delay is None:
+                    raise
+                self.connection.rollback()
+                time.sleep(delay)
+        raise RuntimeError("unreachable sqlite lock retry state")
 
     def events_between(
         self,
@@ -105,6 +144,10 @@ def _validate_category(category: str) -> None:
 
 def _to_json(payload: Mapping[str, Any]) -> str:
     return json.dumps(dict(payload), sort_keys=True, ensure_ascii=False)
+
+
+def _is_database_locked(exc: sqlite3.OperationalError) -> bool:
+    return "database is locked" in str(exc).lower()
 
 
 def _row_to_event(row: sqlite3.Row) -> StoredEvent:

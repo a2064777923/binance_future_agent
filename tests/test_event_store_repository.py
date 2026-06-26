@@ -1,7 +1,8 @@
 import sqlite3
 import unittest
+from unittest.mock import patch
 
-from bfa.event_store.store import EventStore
+from bfa.event_store.store import EventStore, SQLITE_LOCK_RETRY_DELAYS_SECONDS
 from bfa.market.models import NormalizedMarketSnapshot
 from bfa.narrative.models import normalize_narrative_record
 
@@ -105,9 +106,57 @@ class EventStoreRepositoryTests(unittest.TestCase):
                 payload={},
             )
 
+    def test_insert_artifact_retries_transient_database_lock(self):
+        flaky = _FlakyConnection()
+        store = EventStore(flaky)
+
+        with patch("bfa.event_store.store.time.sleep") as sleep:
+            event_id = store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-06-19T10:00:00Z",
+                source="test",
+                symbol="BTCUSDT",
+                ref_id="order-1",
+                payload={"status": "pending"},
+            )
+
+        self.assertEqual(event_id, 42)
+        self.assertEqual(flaky.rollback_count, 1)
+        sleep.assert_called_once_with(SQLITE_LOCK_RETRY_DELAYS_SECONDS[0])
+
 
 def _count(connection, table):
     return connection.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]
+
+
+class _Cursor:
+    lastrowid = 42
+
+
+class _FlakyConnection:
+    row_factory = None
+
+    def __init__(self):
+        self.rollback_count = 0
+        self._event_insert_attempts = 0
+
+    def executescript(self, _script):
+        return None
+
+    def execute(self, sql, _params=()):
+        if "INSERT INTO schema_version" in sql:
+            return _Cursor()
+        if "INSERT INTO events" in sql:
+            self._event_insert_attempts += 1
+            if self._event_insert_attempts == 1:
+                raise sqlite3.OperationalError("database is locked")
+        return _Cursor()
+
+    def commit(self):
+        return None
+
+    def rollback(self):
+        self.rollback_count += 1
 
 
 if __name__ == "__main__":

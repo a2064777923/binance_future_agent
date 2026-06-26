@@ -340,6 +340,14 @@ and `reversal_risk_threshold_met`, but executed zero replacements because
 `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`. The live env was corrected to
 `true` so profitable trend positions are no longer observation-only.
 
+The same deployment review found a separate persistence issue: the event-store
+SQLite connection had `PRAGMA busy_timeout=0`, so concurrent writes from the
+two-minute live runner, five-second sentinel, ten-second pending-limit watchdog,
+and forward-paper timer could fail immediately with `sqlite3.OperationalError:
+database is locked`. The store now opens file-backed SQLite databases with WAL,
+`busy_timeout=30000`, and a short retry around event writes so transient writer
+contention does not abort a live trading cycle.
+
 Protection failure statuses such as `protective_order_failed_open` are
 processed live-cycle statuses so the timer can continue scanning. They are not
 safe-to-ignore statuses. Check exchange algo orders and position ownership
