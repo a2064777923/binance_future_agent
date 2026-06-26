@@ -186,11 +186,20 @@ with stop and target recalculated from the new entry.
 
 A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
 implemented on 2026-06-26 but is **dormant and NOT part of the live strategy**:
-its flag defaults off, the `quant_setup_ldc` variant is not the selected live
-variant, and live behavior is unchanged. When eventually enabled it would
-retune confidence from a kNN direction prediction (never hard-rejecting). It is
-gated on an offline `lift > 1.0` validation plus a server proxy-side
-calibration before any testnet or live enablement. See
+its flag defaults off, the live server still selects
+`BFA_LIVE_QUANT_SETUP_VARIANT=quant_setup_live_action_flow`, and live behavior
+is unchanged. Local training produced an artifact and an offline lift report
+(`lift=1.0043`, `linear`, `strength=0.05`), but that lift is too thin and the
+server read-only proxy-side calibration was poor: 2,717 / 16,906 recorded
+setups agreed with the offline proxy side (`agreement_fraction=0.1607`) for
+setups since `2026-06-20T00:00:00Z`. Therefore **do not enable
+`quant_setup_ldc` live from this artifact**. It needs a retrained label/proxy
+aligned with the real routed trend setup, or a stronger server-side validation,
+before any testnet or live enablement.
+
+The LDC code is deployed to the server for research tooling, but not selected
+by env. When eventually enabled it would retune confidence from a kNN direction
+prediction (never hard-rejecting). See
 `docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md` and
 iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`. Do not treat
 LDC as live until an operator has explicitly switched

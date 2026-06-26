@@ -135,7 +135,12 @@ A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
 implemented on 2026-06-26 but is **dormant**: flag defaults off, the
 `quant_setup_ldc` variant is not the live variant, and live behavior is
 unchanged. It is gated on offline `lift > 1.0` validation plus a server
-proxy-side calibration before any testnet/live enablement. See
+proxy-side calibration before any testnet/live enablement. The first real
+artifact passed the offline gate only barely (`lift=1.0043`) and failed the
+server proxy-side sanity check (`agreement_fraction=0.1607` since
+`2026-06-20T00:00:00Z`), so future agents must not switch
+`BFA_LIVE_QUANT_SETUP_VARIANT=quant_setup_ldc` without retraining/revalidating
+against the actual routed trend setup. See
 `docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md` and
 iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`.
 

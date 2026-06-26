@@ -298,9 +298,30 @@ On 2026-06-26 an instance-based future-direction predictor was implemented as a
 **trend-leg confidence modifier** and merged on branch
 `codex/protection-degrade-hotfix`. It is **code-complete but dormant**: the
 flag defaults off, the `quant_setup_ldc` variant is not the selected live
-variant, and **live strategy behavior is unchanged**. It has not been deployed
-to the server and is not part of the live snapshot in
-`docs/current-live-strategy.md`.
+variant, and **live strategy behavior is unchanged**. The code has been
+deployed to the server for research/calibration tooling, but the live env still
+uses `BFA_LIVE_QUANT_SETUP_VARIANT=quant_setup_live_action_flow`; it is not
+part of live decision-making.
+
+Follow-up verification on 2026-06-26:
+
+- Local research klines were fetched for 24 symbols over roughly 6 months of
+  5m data.
+- `scripts/research/train_ldc_classifier.py` produced
+  `data/research/ldc/ldc_reference.npz` and `results/research/ldc_report.json`
+  locally. Those outputs are intentionally gitignored.
+- Offline report: recommended `linear` blend, `strength=0.05`, `lift=1.0043`
+  on a deterministic 6,000-point validation sample. This is only a very thin
+  lift.
+- Cross-symbol diagnostic: same-symbol neighbor fraction was `0.05`, so the
+  global kNN reference is mostly mixing symbols rather than finding
+  same-symbol analogues.
+- Server read-only proxy calibration:
+  `n_setups=16906`, `n_agree=2717`, `agreement_fraction=0.1607` since
+  `2026-06-20T00:00:00Z`.
+- Release verdict: **do not enable `quant_setup_ldc` live from this artifact**.
+  The offline proxy side is not a faithful stand-in for the real routed trend
+  setup side.
 
 What it does (when eventually enabled): a kNN over Lorentzian distance on a
 5-feature subset predicts the future price direction; the agreement between
@@ -350,6 +371,10 @@ per-point source symbols and the lift sweep emits a `cross_symbol_diagnostic`
 measuring same-symbol neighbor fraction; per-symbol scaling is a
 measured-conditional follow-up if that diagnostic shows neighbors spanning
 other symbols' regimes.
+
+Additional open item after server calibration: the LDC training proxy must be
+rebuilt from actual recorded trend setups or a closer replay of
+`build_trade_setup`, not just the sign of `kline_momentum_percent`.
 
 ## Live Server Notes
 
