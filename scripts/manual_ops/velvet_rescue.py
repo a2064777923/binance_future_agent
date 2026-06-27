@@ -95,6 +95,11 @@ def market_context() -> dict[str, float]:
     pos30 = (last - lo30) / (hi30 - lo30) * 100.0 if hi30 > lo30 else 50.0
     pos120 = (last - lo120) / (hi120 - lo120) * 100.0 if hi120 > lo120 else 50.0
     volume_mean_30 = sum(item["quote_volume"] for item in bars1[-30:]) / 30.0
+    change_5m = (closes[-1] / closes[-6] - 1.0) * 100.0 if len(closes) >= 6 and closes[-6] > 0 else 0.0
+    change_15m = (closes[-1] / closes[-16] - 1.0) * 100.0 if len(closes) >= 16 and closes[-16] > 0 else 0.0
+    change_30m = (closes[-1] / closes[-31] - 1.0) * 100.0 if len(closes) >= 31 and closes[-31] > 0 else 0.0
+    pullback_from_hi30_pct = (hi30 - last) / max(last, 1e-9) * 100.0
+    bounce_from_lo30_pct = (last - lo30) / max(last, 1e-9) * 100.0
     return {
         "last": last,
         "hi30": hi30,
@@ -108,8 +113,14 @@ def market_context() -> dict[str, float]:
         "ret_mean_60_pct": sum(returns[-60:]) / len(returns[-60:]) if returns[-60:] else 0.0,
         "ret_p10_60_pct": quantile(returns[-60:], 0.1) or 0.0,
         "ret_p90_60_pct": quantile(returns[-60:], 0.9) or 0.0,
+        "change_5m_pct": change_5m,
+        "change_15m_pct": change_15m,
+        "change_30m_pct": change_30m,
+        "pullback_from_hi30_pct": pullback_from_hi30_pct,
+        "bounce_from_lo30_pct": bounce_from_lo30_pct,
         "volume_last": bars1[-1]["quote_volume"],
         "volume_mean_30": volume_mean_30,
+        "volume_ratio_30": bars1[-1]["quote_volume"] / volume_mean_30 if volume_mean_30 > 0 else 0.0,
         "bars5_last_close": bars5[-1]["close"] if bars5 else last,
     }
 
@@ -165,6 +176,51 @@ def round_qty(quantity: float) -> int:
     return max(1, int(math.floor(quantity)))
 
 
+def capped_reduce_quantity(
+    side: str,
+    position_by_side: dict[str, Position],
+    desired_qty: int,
+    *,
+    max_imbalance_after_reduce: float,
+) -> tuple[int, dict[str, float]]:
+    long_amount = position_by_side.get("LONG").amount if position_by_side.get("LONG") else 0.0
+    short_amount = position_by_side.get("SHORT").amount if position_by_side.get("SHORT") else 0.0
+    if side == "LONG":
+        long_amount = max(long_amount - desired_qty, 0.0)
+    else:
+        short_amount = max(short_amount - desired_qty, 0.0)
+    max_amount = max(long_amount, short_amount, 1.0)
+    imbalance = abs(long_amount - short_amount) / max_amount
+    if imbalance <= max_imbalance_after_reduce:
+        return desired_qty, {"post_long": long_amount, "post_short": short_amount, "post_imbalance": imbalance}
+
+    # Reduce the profitable leg only as much as the hedge-balance cap allows.
+    original_long = position_by_side.get("LONG").amount if position_by_side.get("LONG") else 0.0
+    original_short = position_by_side.get("SHORT").amount if position_by_side.get("SHORT") else 0.0
+    capped = 0
+    for qty in range(desired_qty, 0, -1):
+        post_long = max(original_long - qty, 0.0) if side == "LONG" else original_long
+        post_short = max(original_short - qty, 0.0) if side == "SHORT" else original_short
+        post_max = max(post_long, post_short, 1.0)
+        post_imbalance = abs(post_long - post_short) / post_max
+        if post_imbalance <= max_imbalance_after_reduce:
+            capped = qty
+            return capped, {
+                "post_long": post_long,
+                "post_short": post_short,
+                "post_imbalance": post_imbalance,
+                "desired_qty": float(desired_qty),
+                "capped_by_imbalance": 1.0,
+            }
+    return 0, {
+        "post_long": original_long,
+        "post_short": original_short,
+        "post_imbalance": abs(original_long - original_short) / max(max(original_long, original_short), 1.0),
+        "desired_qty": float(desired_qty),
+        "capped_by_imbalance": 1.0,
+    }
+
+
 def reduce_order_params(position: Position) -> dict[str, str]:
     if position.side == "SHORT":
         return {"order_side": "BUY", "position_side": "SHORT"}
@@ -177,6 +233,59 @@ def add_order_params(side: str) -> dict[str, str]:
     return {"order_side": "BUY", "position_side": "LONG"}
 
 
+def trend_guard(side: str, context: dict[str, float]) -> dict[str, object]:
+    range_mean = max(float(context.get("range_mean_60_pct") or 0.0), 0.1)
+    volume_ratio = float(context.get("volume_ratio_30") or 0.0)
+    change_5m = float(context.get("change_5m_pct") or 0.0)
+    change_15m = float(context.get("change_15m_pct") or 0.0)
+    change_30m = float(context.get("change_30m_pct") or 0.0)
+    pos30 = float(context.get("pos30") or 50.0)
+    pos120 = float(context.get("pos120") or 50.0)
+    pullback = float(context.get("pullback_from_hi30_pct") or 0.0)
+    bounce = float(context.get("bounce_from_lo30_pct") or 0.0)
+
+    strong_up = (
+        change_5m > range_mean * 0.35
+        and change_15m > range_mean * 0.75
+        and change_30m > range_mean * 0.9
+        and pos30 >= 70.0
+        and volume_ratio >= 0.65
+    )
+    strong_down = (
+        change_5m < -range_mean * 0.35
+        and change_15m < -range_mean * 0.75
+        and change_30m < -range_mean * 0.9
+        and pos30 <= 30.0
+        and volume_ratio >= 0.65
+    )
+    if side == "LONG":
+        at_take_zone = pos30 >= 82.0 or pos120 >= 72.0
+        reversal_hint = pullback >= range_mean * 0.18 or change_5m <= 0.0 or volume_ratio <= 0.55
+        blocked = strong_up and not reversal_hint
+        return {
+            "at_take_zone": at_take_zone,
+            "reversal_hint": reversal_hint,
+            "strong_continuation": strong_up,
+            "blocked": blocked or not at_take_zone or not reversal_hint,
+            "reason": "long_profit_take_requires_upper_extreme_and_fade",
+        }
+    at_take_zone = pos30 <= 18.0 or pos120 <= 28.0
+    reversal_hint = bounce >= range_mean * 0.18 or change_5m >= 0.0 or volume_ratio <= 0.55
+    blocked = strong_down and not reversal_hint
+    return {
+        "at_take_zone": at_take_zone,
+        "reversal_hint": reversal_hint,
+        "strong_continuation": strong_down,
+        "blocked": blocked or not at_take_zone or not reversal_hint,
+        "reason": "short_profit_take_requires_lower_extreme_and_bounce",
+    }
+
+
+def reduced_side_readd_urgent(side: str, context: dict[str, float]) -> bool:
+    guard = trend_guard(side, context)
+    return bool(guard.get("strong_continuation")) and not bool(guard.get("reversal_hint"))
+
+
 def decide(
     position_by_side: dict[str, Position],
     context: dict[str, float],
@@ -185,6 +294,7 @@ def decide(
     profit_trigger: float,
     drawdown_readd_usdt: float,
     cooldown_seconds: float,
+    max_imbalance_after_reduce: float,
 ) -> list[dict[str, object]]:
     actions: list[dict[str, object]] = []
     now_epoch = time.time()
@@ -194,9 +304,16 @@ def decide(
     reduced = reduced_state if isinstance(reduced_state, dict) else {}
     for side, position in sorted(position_by_side.items()):
         side_reduced = reduced.get(side)
-        qty = round_qty(position.amount / 3.0)
+        desired_qty = round_qty(position.amount / 3.0)
         if not side_reduced:
-            if position.upnl >= profit_trigger and cooldown_ok and qty > 0:
+            guard = trend_guard(side, context)
+            qty, balance = capped_reduce_quantity(
+                side,
+                position_by_side,
+                desired_qty,
+                max_imbalance_after_reduce=max_imbalance_after_reduce,
+            )
+            if position.upnl >= profit_trigger and cooldown_ok and qty > 0 and not bool(guard["blocked"]):
                 params = reduce_order_params(position)
                 actions.append(
                     {
@@ -204,6 +321,8 @@ def decide(
                         "side": side,
                         "quantity": qty,
                         "reason": f"{side} upnl {position.upnl:.4f} >= {profit_trigger:.4f}",
+                        "trend_guard": guard,
+                        "hedge_balance": balance,
                         **params,
                     }
                 )
@@ -218,7 +337,9 @@ def decide(
         side_extreme_ok = (side == "SHORT" and context["pos30"] >= 45.0) or (
             side == "LONG" and context["pos30"] <= 55.0
         )
-        if position.upnl <= trigger_upnl and cooldown_ok and original_qty > 0 and side_extreme_ok:
+        urgent_readd = reduced_side_readd_urgent(side, context)
+        should_readd = (position.upnl <= trigger_upnl and side_extreme_ok) or urgent_readd
+        if should_readd and cooldown_ok and original_qty > 0:
             params = add_order_params(side)
             actions.append(
                 {
@@ -227,8 +348,9 @@ def decide(
                     "quantity": original_qty,
                     "reason": (
                         f"{side} upnl {position.upnl:.4f} <= readd trigger {trigger_upnl:.4f} "
-                        f"and pos30 {context['pos30']:.1f}"
+                        f"and pos30 {context['pos30']:.1f}; urgent_readd={urgent_readd}"
                     ),
+                    "urgent_readd": urgent_readd,
                     **params,
                 }
             )
@@ -260,6 +382,7 @@ def one_cycle(args: argparse.Namespace) -> None:
         profit_trigger=args.profit_trigger,
         drawdown_readd_usdt=args.drawdown_readd,
         cooldown_seconds=args.cooldown_seconds,
+        max_imbalance_after_reduce=args.max_imbalance_after_reduce,
     )
     event: dict[str, object] = {
         "ts": utc_now(),
@@ -309,6 +432,7 @@ def main() -> None:
     parser.add_argument("--profit-trigger", type=float, default=10.0)
     parser.add_argument("--drawdown-readd", type=float, default=8.0)
     parser.add_argument("--cooldown-seconds", type=float, default=45.0)
+    parser.add_argument("--max-imbalance-after-reduce", type=float, default=0.30)
     args = parser.parse_args()
     if args.once:
         one_cycle(args)

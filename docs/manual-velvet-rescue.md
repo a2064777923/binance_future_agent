@@ -18,9 +18,19 @@ The monitor only manages `VELVETUSDT` and only after reading the current hedge
 position from Binance:
 
 - If one side's unrealized PnL reaches `+10U`, close one third of that side.
+- Profit-side reduction is not mechanical. It also requires the price to be at
+  the matching short-term extreme and show fade/bounce evidence:
+  - profitable `LONG`: near the 30-minute upper zone, with pullback/fade risk;
+  - profitable `SHORT`: near the 30-minute lower zone, with bounce/fade risk.
+- If the profitable side is simply riding a strong one-way continuation, the
+  monitor does not reduce it just because PnL is above `+10U`.
+- Before reducing, the monitor caps the quantity so post-reduction hedge
+  imbalance stays within `--max-imbalance-after-reduce` (`0.30` by default).
 - Record the reduced side, quantity, and PnL in the state file.
 - If that same side later gives back `8U` of the locked profit and price is no
   longer at a pure chase extreme, re-add the same one-third quantity.
+- If a side was reduced and the market resumes strong continuation in that
+  side's favor, the monitor can re-add urgently to restore hedge balance.
 - Only one action is allowed per cycle.
 - The cycle interval is 20 seconds and the action cooldown is 45 seconds.
 
