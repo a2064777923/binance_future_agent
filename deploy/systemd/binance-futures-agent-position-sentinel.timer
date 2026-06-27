@@ -3,7 +3,7 @@ Description=Run Binance Futures Agent active-position sentinel every 5 seconds
 
 [Timer]
 OnBootSec=30s
-OnUnitActiveSec=5s
+OnUnitActiveSec=15s
 AccuracySec=1s
 Persistent=false
 Unit=binance-futures-agent-position-sentinel.service
