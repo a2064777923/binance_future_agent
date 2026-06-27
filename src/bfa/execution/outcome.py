@@ -11,6 +11,20 @@ from typing import Any, Mapping, Protocol
 from bfa.event_store.store import EventStore
 
 
+RECONCILABLE_INTENT_STATUSES = frozenset(
+    {
+        "submitted",
+        "entry_order_partial_filled_protected",
+        "entry_order_reconciled_from_position",
+        "entry_order_filled_no_active_position",
+        "protective_order_degraded_stop_only",
+        "protective_order_failed_open",
+        "protective_order_failed_closed",
+        "protective_order_failed_no_position",
+    }
+)
+
+
 class TradeHistoryClient(Protocol):
     def user_trades(
         self,
@@ -99,12 +113,13 @@ class TradeOutcomeSweepReport:
     include_reconciled: bool
     items: list[TradeOutcomeSweepItem] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, include_items: bool = True) -> dict[str, Any]:
         return {
             "persist_closed": self.persist_closed,
             "include_reconciled": self.include_reconciled,
             "summary": {
                 "submitted_intents": len(self.items),
+                "reconcilable_intents": len(self.items),
                 "checked": sum(1 for item in self.items if item.fetched),
                 "already_reconciled": sum(
                     1 for item in self.items if item.status == "already_reconciled"
@@ -127,7 +142,7 @@ class TradeOutcomeSweepReport:
                     if item.outcome is not None
                 ),
             },
-            "items": [item.to_dict() for item in self.items],
+            "items": [item.to_dict() for item in self.items] if include_items else [],
         }
 
 
@@ -173,8 +188,9 @@ def reconcile_submitted_trade_outcomes(
     persist_closed: bool = False,
     include_reconciled: bool = False,
     limit: int = 500,
+    since: str | None = None,
 ) -> TradeOutcomeSweepReport:
-    intents = load_submitted_intents(store.connection, symbol=symbol)
+    intents = load_submitted_intents(store.connection, symbol=symbol, since=since)
     items: list[TradeOutcomeSweepItem] = []
     for index, intent in enumerate(intents):
         if _has_closed_outcome_for_event(store.connection, intent.event_id) and not include_reconciled:
@@ -232,7 +248,7 @@ def load_latest_submitted_intent(
     ).fetchall()
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
-        if payload.get("status") != "submitted":
+        if str(payload.get("status") or "") not in RECONCILABLE_INTENT_STATUSES:
             continue
         intent = payload.get("intent")
         if not isinstance(intent, Mapping):
@@ -253,12 +269,17 @@ def load_submitted_intents(
     connection: sqlite3.Connection,
     *,
     symbol: str | None = None,
+    since: str | None = None,
 ) -> list[LocalSubmittedIntent]:
     params: list[str] = []
-    where = ""
+    filters: list[str] = []
     if symbol:
-        where = "WHERE symbol = ?"
+        filters.append("symbol = ?")
         params.append(symbol.upper())
+    if since:
+        filters.append("occurred_at >= ?")
+        params.append(since)
+    where = f"WHERE {' AND '.join(filters)}" if filters else ""
     rows = connection.execute(
         f"""
         SELECT event_id, occurred_at, symbol, payload_json
@@ -271,7 +292,7 @@ def load_submitted_intents(
     intents: list[LocalSubmittedIntent] = []
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
-        if payload.get("status") != "submitted":
+        if str(payload.get("status") or "") not in RECONCILABLE_INTENT_STATUSES:
             continue
         intent = payload.get("intent")
         if not isinstance(intent, Mapping):

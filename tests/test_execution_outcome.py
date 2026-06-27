@@ -6,6 +6,7 @@ from bfa.execution.models import OrderIntent, RiskDecision
 from bfa.execution.outcome import (
     LocalSubmittedIntent,
     build_latest_trade_outcome,
+    load_submitted_intents,
     persist_trade_outcome,
     reconcile_submitted_trade_outcomes,
     summarize_trade_outcome,
@@ -333,6 +334,115 @@ class TradeOutcomeTests(unittest.TestCase):
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM fills").fetchone()[0], 2)
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0], 1)
         self.assertEqual([call[0] for call in client.calls], ["ZECUSDT", "BNBUSDT"])
+
+    def test_reconcile_scans_reconcilable_non_submitted_statuses_and_since_filter(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-06-20T02:49:17Z",
+            source="execution.live",
+            symbol="OLDUSDT",
+            ref_id="order_intent:OLDUSDT:2026-06-20T02:49:17Z",
+            payload={
+                "status": "entry_order_partial_filled_protected",
+                "intent": {
+                    "symbol": "OLDUSDT",
+                    "side": "BUY",
+                    "quantity": 1.0,
+                    "entry_price": 1.0,
+                    "leverage": 3,
+                },
+            },
+            event_type="order_intent",
+        )
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-06-20T03:49:17Z",
+            source="execution.live",
+            symbol="ZECUSDT",
+            ref_id="order_intent:ZECUSDT:2026-06-20T03:49:17Z",
+            payload={
+                "status": "entry_order_partial_filled_protected",
+                "intent": {
+                    "symbol": "ZECUSDT",
+                    "side": "BUY",
+                    "quantity": 0.032,
+                    "entry_price": 467.68,
+                    "leverage": 3,
+                },
+            },
+            event_type="order_intent",
+        )
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-06-20T03:50:17Z",
+            source="execution.live",
+            symbol="SKIPUSDT",
+            ref_id="order_intent:SKIPUSDT:2026-06-20T03:50:17Z",
+            payload={
+                "status": "entry_order_pending",
+                "intent": {
+                    "symbol": "SKIPUSDT",
+                    "side": "BUY",
+                    "quantity": 1.0,
+                    "entry_price": 1.0,
+                    "leverage": 3,
+                },
+            },
+            event_type="order_intent",
+        )
+        client = FakeTradeMapClient(
+            {
+                "ZECUSDT": [
+                    {
+                        "id": 10,
+                        "orderId": 100,
+                        "symbol": "ZECUSDT",
+                        "side": "BUY",
+                        "qty": "0.032",
+                        "price": "467.68",
+                        "quoteQty": "14.96576",
+                        "realizedPnl": "0",
+                        "commission": "0.00748288",
+                        "commissionAsset": "USDT",
+                        "time": 1781923762837,
+                    },
+                    {
+                        "id": 11,
+                        "orderId": 101,
+                        "symbol": "ZECUSDT",
+                        "side": "SELL",
+                        "qty": "0.032",
+                        "price": "471.49",
+                        "quoteQty": "15.08768",
+                        "realizedPnl": "0.12192",
+                        "commission": "0.00754384",
+                        "commissionAsset": "USDT",
+                        "time": 1781924000000,
+                    },
+                ]
+            }
+        )
+
+        intents = load_submitted_intents(connection, since="2026-06-20T03:00:00Z")
+        report = reconcile_submitted_trade_outcomes(
+            store,
+            client,
+            persist_closed=True,
+            since="2026-06-20T03:00:00Z",
+        )
+        payload = report.to_dict()
+
+        self.assertEqual([intent.symbol for intent in intents], ["ZECUSDT"])
+        self.assertEqual(payload["summary"]["submitted_intents"], 1)
+        self.assertEqual(payload["summary"]["reconcilable_intents"], 1)
+        self.assertEqual(payload["summary"]["closed"], 1)
+        self.assertEqual(payload["summary"]["persisted_outcomes_inserted"], 1)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM fills").fetchone()[0], 2)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0], 1)
+        self.assertEqual([call[0] for call in client.calls], ["ZECUSDT"])
 
     def test_reconcile_submitted_trade_outcomes_skips_already_closed_by_default(self):
         connection = sqlite3.connect(":memory:")

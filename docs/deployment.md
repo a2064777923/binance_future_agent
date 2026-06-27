@@ -15,6 +15,8 @@ This project deploys into an isolated server prefix:
 - Position sentinel timer: `/etc/systemd/system/binance-futures-agent-position-sentinel.timer`
 - Pending-limit watchdog unit: `/etc/systemd/system/binance-futures-agent-pending-limit-watchdog.service`
 - Pending-limit watchdog timer: `/etc/systemd/system/binance-futures-agent-pending-limit-watchdog.timer`
+- Outcome reconcile unit: `/etc/systemd/system/binance-futures-agent-outcome-reconcile.service`
+- Outcome reconcile timer: `/etc/systemd/system/binance-futures-agent-outcome-reconcile.timer`
 - Forward-paper unit: `/etc/systemd/system/binance-futures-agent-paper.service`
 - Forward-paper timer: `/etc/systemd/system/binance-futures-agent-paper.timer`
 
@@ -465,6 +467,60 @@ The watchdog does not manage manual or unmatched exchange positions. If
 `matching_intent=null`, the watchdog has no pending intent to reconcile. First
 classify the position with the operator, then protect or close it through the
 explicit confirmation flow if it is agent-managed.
+
+### Outcome Reconciliation
+
+The live runner records decision and execution artifacts immediately, including
+`order_intents`, `exchange_responses`, candidates, setups, and snapshots.
+Closed-trade learning records are generated separately by reconciling Binance
+signed `userTrades` into `fills` and `outcomes`.
+
+This split is intentional: realized PnL and commissions should come from the
+exchange fill ledger, not from local guesses. It also means `outcomes` can lag
+if reconciliation is not running. A stale `outcomes` table will make post-trade
+review, live outcome guards, and learning packets under-sample recent closed
+trades even though the live runner is still trading.
+
+Run a one-off reconciliation:
+
+```bash
+/opt/binance-futures-agent/.venv/bin/python -m bfa.cli ops reconcile-outcomes \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite \
+  --persist-closed \
+  --lookback-hours 72 \
+  --limit 500 \
+  --summary-only
+```
+
+The command only reads signed Binance fills and writes idempotent local
+`fills`/`outcomes` artifacts for closed agent intents. It does not place,
+cancel, trail, or resize orders. Omit `--summary-only` during manual forensic
+work when you need the full per-intent trade details in stdout.
+
+Enable the timer so closed trades are backfilled continuously:
+
+```bash
+systemctl enable --now binance-futures-agent-outcome-reconcile.timer
+systemctl list-timers 'binance-futures-agent-outcome-reconcile*' --no-pager
+journalctl -u binance-futures-agent-outcome-reconcile.service -n 80 --no-pager
+```
+
+The timer scans the last 72 hours every minute. It includes submitted entries
+and filled/protected/degraded statuses that can already have Binance fills:
+`submitted`, `entry_order_partial_filled_protected`,
+`entry_order_reconciled_from_position`, `entry_order_filled_no_active_position`,
+`protective_order_degraded_stop_only`, `protective_order_failed_open`,
+`protective_order_failed_closed`, and `protective_order_failed_no_position`.
+Repeated runs are safe because fill and outcome records use stable `ref_id`
+values.
+
+Quick lag check:
+
+```bash
+sqlite3 /opt/binance-futures-agent/data/agent.sqlite \
+  "select max(occurred_at) from outcomes;"
+```
 
 ## Forward-Paper Recorder
 

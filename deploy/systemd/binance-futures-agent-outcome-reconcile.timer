@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Binance Futures Agent outcome reconciliation every minute
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=false
+Unit=binance-futures-agent-outcome-reconcile.service
+
+[Install]
+WantedBy=timers.target

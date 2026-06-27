@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TextIO
 
@@ -788,7 +789,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     reconcile_outcomes = ops_subparsers.add_parser(
         "reconcile-outcomes",
-        help="sweep submitted trade intents and reconcile closed outcomes from read-only Binance fills",
+        help="sweep reconcilable trade intents and reconcile closed outcomes from read-only Binance fills",
     )
     reconcile_outcomes.add_argument("--env-file", help="optional env file to load before environment overrides")
     reconcile_outcomes.add_argument("--db", help="SQLite DB path; defaults to BFA_DB_PATH")
@@ -804,6 +805,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="also fetch submitted intents that already have a closed outcome",
     )
     reconcile_outcomes.add_argument("--limit", type=int, default=500, help="maximum userTrades rows per intent")
+    reconcile_outcomes.add_argument("--since", help="only scan local intents at or after this ISO time")
+    reconcile_outcomes.add_argument(
+        "--lookback-hours",
+        type=float,
+        help="scan local intents opened within this many hours; ignored when --since is set",
+    )
+    reconcile_outcomes.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="omit per-intent fill details from stdout; useful for timers and logs",
+    )
 
     position_hold_check = ops_subparsers.add_parser(
         "position-hold-check",
@@ -1967,6 +1979,7 @@ def _run_ops(
         connection = connect(args.db or config.get("BFA_DB_PATH"))
         try:
             store = EventStore(connection)
+            since = args.since or _iso_hours_ago(args.lookback_hours)
             report = reconcile_submitted_trade_outcomes(
                 store,
                 signed_client,
@@ -1974,10 +1987,11 @@ def _run_ops(
                 persist_closed=args.persist_closed,
                 include_reconciled=args.include_reconciled,
                 limit=args.limit,
+                since=since,
             )
         finally:
             connection.close()
-        payload = {"found": bool(report.items), "report": report.to_dict()}
+        payload = {"found": bool(report.items), "report": report.to_dict(include_items=not args.summary_only)}
         print(json.dumps(payload, indent=2, sort_keys=True), file=stdout)
         return 0
     if args.ops_command == "position-hold-check":
@@ -2395,6 +2409,12 @@ def _truthy(value: str) -> bool:
 def _symbols_arg(value: str, *, uppercase: bool = True) -> list[str]:
     values = [item.strip() for item in value.split(",") if item.strip()]
     return [item.upper() for item in values] if uppercase else values
+
+
+def _iso_hours_ago(hours: float | None) -> str | None:
+    if hours is None or hours <= 0:
+        return None
+    return (datetime.now(tz=UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _add_resume_systemd_state_args(parser: argparse.ArgumentParser) -> None:

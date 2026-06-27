@@ -7,7 +7,9 @@ because timers, env caps, positions, and order intents change continuously.
 
 Snapshot checked from the server at `2026-06-27T08:56:47Z`
 (`2026-06-27 16:56:47` Asia/Hong_Kong) after the trend loss-control /
-structure-break deploy.
+structure-break deploy. Outcome persistence was audited later on
+`2026-06-27`: a manual reconcile backfilled missing closed trades, and the
+repo now includes a dedicated one-minute outcome reconcile timer.
 
 ## Source Of Truth Order
 
@@ -59,6 +61,7 @@ At the snapshot, these services/timers were active:
 - `binance-futures-agent-live.timer`
 - `binance-futures-agent-position-sentinel.timer`
 - `binance-futures-agent-pending-limit-watchdog.timer`
+- `binance-futures-agent-outcome-reconcile.timer`
 - `binance-futures-agent-raw-feed.service`
 - `binance-futures-agent-db-maintenance.timer`
 
@@ -524,6 +527,23 @@ Market snapshots are intentionally not persisted at full volume because the DB
 was growing too fast. For later analysis, rely on decision snapshots, raw-feed
 files, order intents, exchange responses, outcomes, fills, and signed
 `userTrades` reconciliation.
+
+Important persistence detail: the live runner does not treat `outcomes` as an
+instant write-on-close table. It writes the local decision/execution artifacts
+first, then `ops reconcile-outcomes --persist-closed` reconstructs closed
+trades from Binance signed `userTrades` and writes idempotent `fills` and
+`outcomes`. Before the 2026-06-27 audit there was no systemd outcome reconcile
+timer, so recent closed trades could be missing from `outcomes` until a manual
+reconcile was run. The manual reconcile inserted missing closed outcomes and
+fills; the deploy assets now include:
+
+- `binance-futures-agent-outcome-reconcile.service`
+- `binance-futures-agent-outcome-reconcile.timer`
+
+The timer scans the last 72 hours every minute. If a future forensic query
+appears to show "no closed trades", first check the timer and compare latest
+`order_intents`, `exchange_responses`, `fills`, and `outcomes` before making a
+performance claim.
 
 ## Recent Live Evidence At Snapshot
 
