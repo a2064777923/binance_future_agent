@@ -970,7 +970,11 @@ def _trail_prices(
     signed_move = mark - entry if side == "LONG" else entry - mark
     current_r = signed_move / risk_distance
     target_progress = _float_or_default(item.target_progress, 0.0)
-    target_progress_activation = "sentinel_profit_protection" in item.reasons and target_progress > 0
+    target_progress_activation = (
+        "sentinel_profit_protection" in item.reasons
+        and target_progress > 0
+        and _sentinel_profit_gate_met(item, current_r=current_r, target_progress=target_progress)
+    )
     loss_control_activation = "sentinel_loss_control" in item.reasons
     sentinel_activation = target_progress_activation or loss_control_activation
     if sentinel_activation and not _sentinel_profit_gate_met(item, current_r=current_r, target_progress=target_progress):

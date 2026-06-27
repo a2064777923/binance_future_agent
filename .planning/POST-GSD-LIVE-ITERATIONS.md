@@ -376,6 +376,48 @@ Additional open item after server calibration: the LDC training proxy must be
 rebuilt from actual recorded trend setups or a closer replay of
 `build_trade_setup`, not just the sign of `kline_momentum_percent`.
 
+### 14. Trend Fresh Confirmation And Layered Sentinel Protection
+
+On 2026-06-27 live review showed two broad issues: trend entries could still
+enter against a fresh short-window adverse move, and profitable positions were
+not protected with the right timing symmetry. The fix is general and not tuned
+to one symbol.
+
+Trend setup changes:
+
+- `quant_setup_live_action_flow` now enables
+  `require_fresh_trend_confirmation`.
+- A trend setup is rejected when micro momentum and taker flow both flip
+  against the proposed side, or when micro momentum and taker-flow acceleration
+  both flip against it.
+- The rejection reason is `fresh_trend_confirmation_failed:*`; diagnostics are
+  persisted under `price_basis.fresh_trend_confirmation`.
+
+Sentinel changes:
+
+- Trend protection is layered. It observes below `0.60R` and below `0.30`
+  target progress, regardless of noisy reversal score.
+- Defensive trend protection starts at `0.60R` or `0.30` target progress, uses
+  default `0.12R` lock and `0.75R` giveback, and still requires reversal/fade/
+  giveback evidence.
+- Strong trend protection starts at `1.00R` or `0.55` target progress, uses
+  default `0.35R` lock and `0.65R` giveback.
+- The existing 180-second same-symbol/same-side trend cooldown remains.
+- Micro-grid can protect a first profitable wave after 20 seconds only when
+  current/recent MFE is at least `0.65R` or `0.55` target progress. Tiny
+  profitable noise still observes.
+
+Key files:
+
+- `src/bfa/strategy/setup.py`
+- `src/bfa/backtest/models.py`
+- `src/bfa/ops/position_sentinel.py`
+- `src/bfa/ops/position_adjustment.py`
+- `tests/test_strategy_setup.py`
+- `tests/test_ops_position_sentinel.py`
+- `docs/current-live-strategy.md`
+- `docs/position-profit-protection.md`
+
 ## Live Server Notes
 
 Known deployment shape:

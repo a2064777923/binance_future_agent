@@ -172,6 +172,21 @@ liquidity or synthetic `min_executable_notional` values in the live path. If a
 symbol lacks market context, the candidate should carry explicit `missing_*`
 diagnostics or be rejected.
 
+Trend entries now have an additional fresh-confirmation gate in
+`quant_setup_live_action_flow`: when short-window micro momentum and taker flow
+both flip against the proposed trend side, setup rejects with
+`fresh_trend_confirmation_failed:*` and records
+`price_basis.fresh_trend_confirmation`. This is a narrow adverse-flow guard,
+not a replacement for regime routing or entry geometry.
+
+Position sentinel protection is layered. Trend positions observe until the
+defensive layer (`0.60R` or `0.30` target progress), then can trail only with
+reversal/fade/giveback evidence and the three-minute trend cooldown. The strong
+layer starts at `1.00R` or `0.55` target progress and locks more profit.
+Micro-grid keeps a faster path and can protect the first wave after 20 seconds
+only if current/recent MFE reaches `0.65R` or `0.55` target progress. Tiny
+profit noise should still observe.
+
 Live outcome guard is a downsize-first feedback signal, not a one-trade kill
 switch. The default symbol sample floor is `5` closed outcomes; lower values can
 be set explicitly for experiments, but should not be treated as production

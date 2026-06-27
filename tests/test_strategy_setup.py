@@ -722,6 +722,41 @@ class StrategySetupTests(unittest.TestCase):
         self.assertTrue(guard["breakout"]["passed"])
         self.assertLess(setup.price_basis["entry_basis"]["offset_percent"], 0.1)
 
+    def test_live_action_flow_rejects_fresh_trend_when_micro_and_flow_flip_adverse(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+
+        setup = build_trade_setup(
+            self.candidate(
+                price_change_percent=6.5,
+                quote_volume=80_000_000,
+                open_interest_value=30_000_000,
+                taker_buy_sell_ratio=0.93,
+                taker_buy_sell_ratio_change=-0.08,
+                kline_momentum_percent=1.35,
+                kline_micro_momentum_percent=-0.18,
+                kline_close_position_percent=58.0,
+                kline_quote_volume_change_percent=18.0,
+                support_price=98.0,
+                resistance_price=104.0,
+                vwap=100.2,
+                atr_percent=0.65,
+                realized_volatility_percent=0.5,
+                ema_fast=101.2,
+                ema_slow=100.6,
+                ema_spread_percent=0.59,
+                rsi=61.0,
+                reference_price=101.0,
+                indicator_sample_size=30,
+            ),
+            risk_limits=self.risk_limits(),
+            profile=profile,
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("fresh_trend_confirmation_failed:micro_and_flow_adverse", setup.reasons)
+        self.assertIn("fresh_trend_confirmation", setup.price_basis)
+        self.assertFalse(setup.price_basis["fresh_trend_confirmation"]["passed"])
+
     def test_limit_entry_quality_gate_rejects_chasing_without_structure(self):
         setup = build_trade_setup(
             self.candidate(

@@ -63,6 +63,17 @@ Micro-grid/range positions use fast protection, but loss-control trailing is onl
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_GIVEBACK_R=0.35`
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_HARD_ADVERSE_R=0.55`
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_TARGET_EXTENSION_R=0.08`
+- `BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_SECONDS=45`
+- `BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_PROGRESS=0.35`
+- `BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_R=0.45`
+- `BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_SECONDS=20`
+- `BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_PROGRESS=0.55`
+- `BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_R=0.65`
+
+The first-wave gate lets micro-grid protect a meaningful fast scalp before the
+old 45-second wait, but only after at least 20 seconds and only when current or
+recent MFE is already close enough to the planned target. Tiny positive noise
+still observes.
 
 Note: `lock_r` is floored to cover at least one round-trip transaction cost
 (~0.08% of entry / risk_distance) so a "break-even" lock never becomes a
@@ -80,6 +91,14 @@ Trend positions use wider protection to avoid closing too often:
 - `BFA_POSITION_SENTINEL_TREND_TARGET_EXTENSION_R=0.75`
 - `BFA_POSITION_SENTINEL_TREND_GIVEBACK_RATIO=0.55`
 - `BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS=180`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_MIN_PROFIT_R=0.60`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_MIN_TARGET_PROGRESS=0.30`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_LOCK_R=0.12`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_GIVEBACK_R=0.75`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_MIN_PROFIT_R=1.00`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS=0.55`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R=0.35`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R=0.65`
 
 The trend profile deliberately does not behave like the micro-grid scalping
 profile. After a trend position emits a `trail_or_backfill` protection decision,
@@ -89,6 +108,13 @@ cooldown. During that window the sentinel records
 profit-protection decision for that position. Missing-protection backfill is
 still allowed immediately; the cooldown only applies to normal trend trailing
 judgement/stop movement.
+
+Trend protection is now layered. Below the defensive thresholds it records
+`trend_profit_layer:observe` and refuses to trail even if the reversal score is
+high. The defensive layer can protect meaningful profit with a light lock and
+wide giveback. The strong layer locks more profit after a larger favorable move.
+The chosen layer is written into sentinel metrics and order-plan reason codes
+(`sentinel_trend_profit_layer:*`, `sentinel_lock_r:*`, `sentinel_giveback_r:*`).
 
 ## Verification
 

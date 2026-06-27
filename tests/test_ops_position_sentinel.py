@@ -336,6 +336,59 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertEqual(report.status, "sentinel_no_allowed_action")
         self.assertEqual(fake_signed.algo_orders, [])
 
+    def test_trend_profit_protection_waits_until_defensive_layer(self):
+        fake_signed = FakeSignedClient(mark_price="101.6")
+        market = FakeMarketClient(
+            closes=[100.4, 101.2, 101.9, 101.8, 101.65, 101.6, 101.55, 101.6],
+            volumes=[30, 30, 30, 30, 16, 15, 14, 13],
+            high_offset=0.2,
+            low_offset=0.1,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+                BFA_POSITION_SENTINEL_TREND_REVERSAL_THRESHOLD="0.0",
+            ),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "observe")
+        self.assertIn("trend_profit_layer:observe", report.reversal_signals[0].reasons)
+        self.assertIn("trend_profit_layer_waiting", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_no_allowed_action")
+        self.assertEqual(fake_signed.algo_orders, [])
+
+    def test_trend_defensive_layer_trails_after_meaningful_profit_and_fade(self):
+        fake_signed = FakeSignedClient(mark_price="103.0")
+        market = FakeMarketClient(
+            closes=[100.8, 102.2, 103.6, 103.4, 103.2, 103.1, 103.0, 103.0],
+            volumes=[40, 42, 44, 44, 24, 18, 14, 12],
+            high_offset=0.2,
+            low_offset=0.1,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
+        self.assertIn("trend_profit_layer:defensive", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_executed")
+        order_plan = report.execution.executions[0].order_plan
+        self.assertIn("sentinel_trend_profit_layer:defensive", order_plan.reason_codes)
+        self.assertIn("sentinel_min_profit_r:0.6", order_plan.reason_codes)
+        self.assertIn("sentinel_lock_r:0.12", order_plan.reason_codes)
+
     def test_micro_grid_profit_giveback_trails_from_recent_mfe(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()
@@ -371,6 +424,39 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertIn("trailing_lock_r:0.18", order_plan.reason_codes)
         self.assertIn("sentinel_min_profit_r:0.45", order_plan.reason_codes)
         self.assertGreater(order_plan.stop_price, 100)
+
+    def test_micro_grid_first_wave_profit_capture_can_trail_before_old_min_seconds(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(
+            occurred_at="2026-06-20T03:59:35Z",
+            metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
+        )
+        fake_signed = FakeSignedClient(mark_price="103.1")
+        market = FakeMarketClient(
+            closes=[100.5, 101.0, 102.8, 103.6, 103.4, 103.2, 103.1, 103.1],
+            volumes=[40, 42, 44, 46, 28, 20, 16, 13],
+            high_offset=0.7,
+            low_offset=0.1,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
+        self.assertIn("micro_first_wave_profit_capture_ready", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_executed")
+        order_plan = report.execution.executions[0].order_plan
+        self.assertIn("sentinel_profit_protection", order_plan.reason_codes)
+        self.assertIn("sentinel_min_profit_r:0.45", order_plan.reason_codes)
 
     def test_micro_grid_is_not_blocked_by_trend_cooldown(self):
         self.tmp.cleanup()

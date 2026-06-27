@@ -5,8 +5,8 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
-Snapshot checked from the server at `2026-06-26T06:21:00Z`
-(`2026-06-26 14:21:00` Asia/Hong_Kong).
+Snapshot checked from the server at `2026-06-27T05:03:45Z`
+(`2026-06-27 13:03:45` Asia/Hong_Kong) after the protection-layer deploy.
 
 ## Source Of Truth Order
 
@@ -28,8 +28,9 @@ checking the newer sources above.
 - Local branch checked during this snapshot:
   `codex/protection-degrade-hotfix`.
 - This snapshot includes the 2026-06-26 spike-depth/stale-signal micro-grid
-  hotfix and the 2026-06-26 trend near-structure entry guard. Use the latest
-  Git commit on this branch as the code reference.
+  hotfix, the 2026-06-26 trend near-structure entry guard, and the
+  2026-06-27 trend fresh-confirmation / layered protection update. Use the
+  latest Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
 - Hashes of the live deployed strategy files matched the local files at the
@@ -41,6 +42,10 @@ checking the newer sources above.
 
 If a future agent changes local code, deploy the changed files or run the
 deployment script before claiming the server is on the same version.
+
+Post-deploy verification for this snapshot observed `trend_profit_layer:observe`
+and `trend_profit_layer_waiting` in the live position sentinel logs, confirming
+that the deployed sentinel is running the layered protection code.
 
 ## Live Services
 
@@ -158,6 +163,9 @@ review for trend; server env uses:
 - `BFA_OPENAI_ENABLED=true`
 - `BFA_AI_FALLBACK_TO_QUANT_ENABLED=true`
 
+The selected deterministic trend variant is
+`BFA_LIVE_QUANT_SETUP_VARIANT=quant_setup_live_action_flow`.
+
 Known current risk from live analysis: trend losses must be classified by
 actual post-entry path. Some losses have been wrong direction or poor entry,
 not merely tight stops. Future tuning should inspect each losing trade with
@@ -183,6 +191,20 @@ failure pattern where the trend leg shorted near support after a large move:
 The ENAUSDT forensic replay that originally produced a `0.07881` short now
 replays locally and on the server as a passive rebound short near `0.079588`,
 with stop and target recalculated from the new entry.
+
+Trend entries also include a fresh continuation check. A high longer-window
+edge is not enough if the short-window micro momentum and taker flow have both
+flipped against the proposed side. The live `quant_setup_live_action_flow`
+profile enables:
+
+- `require_fresh_trend_confirmation=true`
+- `fresh_trend_micro_momentum_percent=0.08`
+- `fresh_trend_taker_flow_edge=0.04`
+- `fresh_trend_taker_acceleration_edge=0.04`
+
+Diagnostics are persisted in `price_basis.fresh_trend_confirmation`. This gate
+is intentionally narrow: it rejects fresh adverse micro/flow flips, but it does
+not replace the broader regime router, entry-quality, or near-structure logic.
 
 A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
 implemented on 2026-06-26 but is **dormant and NOT part of the live strategy**:
@@ -336,6 +358,22 @@ trend profile enforces a same-symbol/same-side cooldown of at least 180 seconds
 between trend protection judgements that could move protective orders. During
 that cooldown the sentinel records `trend_protection_cooldown_active` and only
 observes the position. Emergency missing-protection backfill is not delayed.
+
+Trend sentinel protection is layered:
+
+- below `0.60R` and below `0.30` target progress, trend positions are observed
+  unless they are missing protective orders;
+- from the defensive layer (`0.60R` or `0.30` target progress), sentinel can
+  move protection only when reversal-score, flow-fade, giveback, or adverse
+  micro evidence supports it; default lock/giveback are `0.12R` / `0.75R`;
+- from the strong layer (`1.00R` or `0.55` target progress), default
+  lock/giveback are `0.35R` / `0.65R`.
+
+Micro-grid remains faster. It keeps the normal profit gate
+(`0.45R` or `0.35` target progress), and can bypass the old 45-second wait
+after at least 20 seconds only when first-wave evidence is strong enough
+(`0.65R` or `0.55` recent/current target progress). Tiny-profit noise still
+observes.
 
 2026-06-26 review: after reconciling exchange fills from
 `2026-06-25T16:00:00Z`, 93 closed outcomes were available. Trend-leg outcomes

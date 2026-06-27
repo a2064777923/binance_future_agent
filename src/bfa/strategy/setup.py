@@ -189,6 +189,10 @@ class TradeSetupProfile:
     min_entry_quality_score: int = 0
     require_limit_entry_quality: bool = False
     min_limit_entry_quality_score: int = 0
+    require_fresh_trend_confirmation: bool = False
+    fresh_trend_micro_momentum_percent: float = 0.08
+    fresh_trend_taker_flow_edge: float = 0.04
+    fresh_trend_taker_acceleration_edge: float = 0.04
     allow_counter_signal: bool = False
     min_counter_signal_score: int = 0
     enable_orderly_range: bool = False
@@ -381,6 +385,11 @@ def build_trade_setup(
     if limit_entry_rejections:
         decision = "pass"
         reasons = _dedupe([*reasons, *limit_entry_rejections])
+    fresh_trend = _fresh_trend_confirmation_diagnostics(features, side, signal_diagnostics, setup_profile)
+    price_basis["fresh_trend_confirmation"] = fresh_trend
+    if fresh_trend["rejections"]:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *fresh_trend["rejections"]])
     crowding_risk, crowding_warnings = _high_crowding(features, side)
     warnings.extend(crowding_warnings)
     reasons = _dedupe([*reasons, *crowding_warnings])
@@ -1629,6 +1638,54 @@ def _limit_entry_quality_rejections(
     if score < required:
         return [f"limit_entry_quality_below_profile_min:{score}/{required}"]
     return []
+
+
+def _fresh_trend_confirmation_diagnostics(
+    features: Mapping[str, Any],
+    side: str,
+    signal_diagnostics: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> dict[str, Any]:
+    mode = str(signal_diagnostics.get("mode") or "trend_follow")
+    if not profile.require_fresh_trend_confirmation or mode != "trend_follow" or side not in {"long", "short"}:
+        return {"enabled": False, "passed": True, "rejections": [], "checks": []}
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    taker_change = _float(features.get("taker_buy_sell_ratio_change"))
+    micro_limit = abs(_float(profile.fresh_trend_micro_momentum_percent) or 0.0)
+    flow_edge = abs(_float(profile.fresh_trend_taker_flow_edge) or 0.0)
+    acceleration_edge = abs(_float(profile.fresh_trend_taker_acceleration_edge) or 0.0)
+    if side == "long":
+        micro_adverse = micro is not None and micro <= -micro_limit
+        flow_adverse = taker_ratio is not None and taker_ratio <= 1.0 - flow_edge
+        acceleration_adverse = taker_change is not None and taker_change <= -acceleration_edge
+    else:
+        micro_adverse = micro is not None and micro >= micro_limit
+        flow_adverse = taker_ratio is not None and taker_ratio >= 1.0 + flow_edge
+        acceleration_adverse = taker_change is not None and taker_change >= acceleration_edge
+    rejections: list[str] = []
+    if micro_adverse and flow_adverse:
+        rejections.append("fresh_trend_confirmation_failed:micro_and_flow_adverse")
+    elif micro_adverse and acceleration_adverse:
+        rejections.append("fresh_trend_confirmation_failed:micro_and_flow_acceleration_adverse")
+    return {
+        "enabled": True,
+        "side": side,
+        "passed": not rejections,
+        "rejections": rejections,
+        "thresholds": {
+            "micro_momentum_percent": micro_limit,
+            "taker_flow_edge": flow_edge,
+            "taker_acceleration_edge": acceleration_edge,
+        },
+        "checks": _normalised_checks(
+            [
+                {"name": "micro_not_adverse", "passed": not micro_adverse, "value": micro},
+                {"name": "taker_flow_not_adverse", "passed": not flow_adverse, "value": taker_ratio},
+                {"name": "taker_acceleration_not_adverse", "passed": not acceleration_adverse, "value": taker_change},
+            ]
+        ),
+    }
 
 
 def _limit_entry_quality_diagnostics(

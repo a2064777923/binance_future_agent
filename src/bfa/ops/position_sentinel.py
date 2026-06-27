@@ -241,6 +241,15 @@ def _reversal_signal(
             reasons.append("loss_control_ready")
         else:
             reasons.append("loss_control_waiting_for_confirmation")
+    protection_layer = _profit_protection_layer(item, metrics, profile=profile)
+    reasons.extend(protection_layer["reasons"])
+    metrics.update(
+        {
+            "profit_protection_layer": protection_layer["layer"],
+            "profit_protection_lock_r": protection_layer["lock_r"],
+            "profit_protection_giveback_r": protection_layer["giveback_r"],
+        }
+    )
     if score >= threshold:
         reasons.append("reversal_risk_threshold_met")
     decision = (
@@ -538,9 +547,7 @@ def _signal_allows_trailing(
         if not loss_control_ready and not _micro_profit_protection_ready(item, metrics, profile=profile):
             return False
     else:
-        profitable = (item.stop_r_multiple is not None and item.stop_r_multiple >= min_profit_r) or (
-            item.target_progress is not None and item.target_progress >= min_progress
-        )
+        profitable = _trend_profit_protection_ready(item, metrics, profile=profile)
     if not profitable:
         return False
     if (_micro_stagnation_detected(item, metrics, profile=profile) or _micro_setup_invalidated(item, metrics, profile=profile)) and _micro_loss_control_ready(
@@ -589,6 +596,9 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
             "profit_protection_min_seconds": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_SECONDS"), 45.0),
             "profit_protection_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_PROGRESS"), 0.35),
             "profit_protection_min_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_R"), 0.45),
+            "first_wave_min_seconds": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_SECONDS"), 20.0),
+            "first_wave_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_PROGRESS"), 0.55),
+            "first_wave_min_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_R"), 0.65),
         }
     return {
         "name": "trend",
@@ -601,6 +611,14 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
         "giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_GIVEBACK_R"), _float_or_default(config.get("BFA_TRAILING_PROTECTION_GIVEBACK_R"), 0.65)),
         "target_extension_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_TARGET_EXTENSION_R"), _float_or_default(config.get("BFA_TRAILING_PROTECTION_TARGET_EXTENSION_R"), 0.75)),
         "giveback_ratio": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_GIVEBACK_RATIO"), 0.55),
+        "defensive_min_profit_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_DEFENSIVE_MIN_PROFIT_R"), 0.60),
+        "defensive_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_DEFENSIVE_MIN_TARGET_PROGRESS"), 0.30),
+        "defensive_lock_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_DEFENSIVE_LOCK_R"), 0.12),
+        "defensive_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_DEFENSIVE_GIVEBACK_R"), 0.75),
+        "strong_min_profit_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_MIN_PROFIT_R"), 1.0),
+        "strong_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS"), 0.55),
+        "strong_lock_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R"), 0.35),
+        "strong_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R"), 0.65),
     }
 
 
@@ -637,7 +655,25 @@ def _micro_profit_protection_ready(item, metrics: Mapping[str, Any], *, profile:
         return False
     elapsed = _float_or_none(metrics.get("elapsed_seconds"))
     min_seconds = _float_or_default(profile.get("profit_protection_min_seconds"), 45.0)
-    return elapsed is None or elapsed >= min_seconds
+    if elapsed is None or elapsed >= min_seconds:
+        return True
+    if not _micro_first_wave_profit_capture_ready(item, metrics, profile=profile):
+        return False
+    first_wave_min_seconds = _float_or_default(profile.get("first_wave_min_seconds"), 20.0)
+    return elapsed >= first_wave_min_seconds
+
+
+def _micro_first_wave_profit_capture_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
+    if str(profile.get("name") or "") != "micro_grid":
+        return False
+    current_r = _float_or_none(item.stop_r_multiple) or 0.0
+    current_progress = _float_or_none(item.target_progress) or 0.0
+    recent_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
+    recent_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
+    return max(current_r, recent_r) >= _float_or_default(profile.get("first_wave_min_r"), 0.65) or max(
+        current_progress,
+        recent_progress,
+    ) >= _float_or_default(profile.get("first_wave_min_progress"), 0.55)
 
 
 def _micro_profit_gate_met(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
@@ -652,6 +688,63 @@ def _micro_profit_gate_met(item, metrics: Mapping[str, Any], *, profile: Mapping
         _float_or_default(profile.get("profit_protection_min_progress"), 0.35),
     )
     return current_r >= min_r or current_progress >= min_progress
+
+
+def _trend_profit_protection_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
+    return str(_profit_protection_layer(item, metrics, profile=profile).get("layer") or "observe") in {
+        "defensive",
+        "strong",
+    }
+
+
+def _profit_protection_layer(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> dict[str, Any]:
+    name = str(profile.get("name") or "")
+    if name == "micro_grid":
+        reasons: list[str] = []
+        if _micro_first_wave_profit_capture_ready(item, metrics, profile=profile):
+            reasons.append("micro_first_wave_profit_capture_ready")
+        return {
+            "layer": "first_wave" if reasons else "standard",
+            "reasons": reasons,
+            "lock_r": profile.get("lock_r"),
+            "giveback_r": profile.get("giveback_r"),
+        }
+    if name != "trend":
+        return {"layer": "standard", "reasons": [], "lock_r": profile.get("lock_r"), "giveback_r": profile.get("giveback_r")}
+    current_r = _float_or_none(item.stop_r_multiple) or 0.0
+    current_progress = _float_or_none(item.target_progress) or 0.0
+    recent_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
+    recent_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
+    best_r = max(current_r, recent_r)
+    best_progress = max(current_progress, recent_progress)
+    strong_ready = best_r >= _float_or_default(profile.get("strong_min_profit_r"), 1.0) or best_progress >= _float_or_default(
+        profile.get("strong_min_progress"),
+        0.55,
+    )
+    if strong_ready:
+        return {
+            "layer": "strong",
+            "reasons": ["trend_profit_layer:strong"],
+            "lock_r": _float_or_default(profile.get("strong_lock_r"), profile.get("lock_r")),
+            "giveback_r": _float_or_default(profile.get("strong_giveback_r"), profile.get("giveback_r")),
+        }
+    defensive_ready = best_r >= _float_or_default(profile.get("defensive_min_profit_r"), 0.6) or best_progress >= _float_or_default(
+        profile.get("defensive_min_progress"),
+        0.3,
+    )
+    if defensive_ready:
+        return {
+            "layer": "defensive",
+            "reasons": ["trend_profit_layer:defensive"],
+            "lock_r": _float_or_default(profile.get("defensive_lock_r"), profile.get("lock_r")),
+            "giveback_r": _float_or_default(profile.get("defensive_giveback_r"), profile.get("giveback_r")),
+        }
+    return {
+        "layer": "observe",
+        "reasons": ["trend_profit_layer:observe", "trend_profit_layer_waiting"],
+        "lock_r": profile.get("lock_r"),
+        "giveback_r": profile.get("giveback_r"),
+    }
 
 
 def _profit_giveback_detected(metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
@@ -813,18 +906,30 @@ def _sentinel_item_reason_codes(config: AppConfig, item, signal: ReversalRiskSig
         reason in {"stagnation_exit_pressure", "setup_invalidated_exit_pressure"}
         for reason in signal.reasons
     )
-    lock_r = profile["loss_control_lock_r"] if loss_control else profile["lock_r"]
-    giveback_r = profile["loss_control_giveback_r"] if loss_control else profile["giveback_r"]
+    layer = str(signal.metrics.get("profit_protection_layer") or "standard")
+    layer_lock = _float_or_none(signal.metrics.get("profit_protection_lock_r"))
+    layer_giveback = _float_or_none(signal.metrics.get("profit_protection_giveback_r"))
+    lock_r = profile["loss_control_lock_r"] if loss_control else layer_lock if layer_lock is not None else profile["lock_r"]
+    giveback_r = profile["loss_control_giveback_r"] if loss_control else layer_giveback if layer_giveback is not None else profile["giveback_r"]
     min_giveback_r = profile.get("loss_control_min_giveback_r") if loss_control else None
     target_extension_r = (
         profile["loss_control_target_extension_r"] if loss_control else profile["target_extension_r"]
     )
-    min_profit_r = max(profile["min_profit_r"], profile.get("profit_protection_min_r", profile["min_profit_r"]))
-    min_progress = max(profile["min_progress"], profile.get("profit_protection_min_progress", profile["min_progress"]))
+    if str(profile.get("name") or "") == "trend" and layer == "strong":
+        min_profit_r = _float_or_default(profile.get("strong_min_profit_r"), profile["min_profit_r"])
+        min_progress = _float_or_default(profile.get("strong_min_progress"), profile["min_progress"])
+    elif str(profile.get("name") or "") == "trend" and layer == "defensive":
+        min_profit_r = _float_or_default(profile.get("defensive_min_profit_r"), profile["min_profit_r"])
+        min_progress = _float_or_default(profile.get("defensive_min_progress"), profile["min_progress"])
+    else:
+        min_profit_r = max(profile["min_profit_r"], profile.get("profit_protection_min_r", profile["min_profit_r"]))
+        min_progress = max(profile["min_progress"], profile.get("profit_protection_min_progress", profile["min_progress"]))
+    layer_reasons = [f"sentinel_trend_profit_layer:{layer}"] if str(profile.get("name") or "") == "trend" else []
     return _dedupe(
         [
             "sentinel_loss_control" if loss_control else "sentinel_profit_protection",
             *signal.reasons,
+            *layer_reasons,
             f"sentinel_reversal_score:{signal.score}",
             f"sentinel_min_profit_r:{min_profit_r}",
             f"sentinel_min_target_progress:{min_progress}",
