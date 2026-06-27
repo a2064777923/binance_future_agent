@@ -5,8 +5,9 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
-Snapshot checked from the server at `2026-06-27T05:03:45Z`
-(`2026-06-27 13:03:45` Asia/Hong_Kong) after the protection-layer deploy.
+Snapshot checked from the server at `2026-06-27T08:56:47Z`
+(`2026-06-27 16:56:47` Asia/Hong_Kong) after the trend loss-control /
+structure-break deploy.
 
 ## Source Of Truth Order
 
@@ -28,24 +29,28 @@ checking the newer sources above.
 - Local branch checked during this snapshot:
   `codex/protection-degrade-hotfix`.
 - This snapshot includes the 2026-06-26 spike-depth/stale-signal micro-grid
-  hotfix, the 2026-06-26 trend near-structure entry guard, and the
-  2026-06-27 trend fresh-confirmation / layered protection update. Use the
-  latest Git commit on this branch as the code reference.
+  hotfix, the 2026-06-26 trend near-structure entry guard, the 2026-06-27 trend
+  fresh-confirmation / layered protection update, and the 2026-06-27
+  WIF/GUSDT protection degradation hotfix. Use the latest Git commit on this
+  branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
-- Hashes of the live deployed strategy files matched the local files at the
-  snapshot:
-  - `src/bfa/strategy/micro_grid_live.py`
-  - `scripts/run_micro_grid_research.py`
-  - `src/bfa/agent.py`
-  - `src/bfa/execution/risk.py`
+- The latest changed files were copied to the deployed app path and verified by
+  server-side `config-check`, a read-only `ops position-sentinel` run, and a
+  subsequent systemd live cycle that exited `0/SUCCESS`:
+  - `src/bfa/config.py`
+  - `src/bfa/ops/position_adjustment.py`
+  - `src/bfa/ops/position_sentinel.py`
+  - `src/bfa/strategy/setup.py`
 
 If a future agent changes local code, deploy the changed files or run the
 deployment script before claiming the server is on the same version.
 
-Post-deploy verification for this snapshot observed `trend_profit_layer:observe`
-and `trend_profit_layer_waiting` in the live position sentinel logs, confirming
-that the deployed sentinel is running the layered protection code.
+Post-deploy verification for this snapshot observed the live runner emitting
+`limit_entry_anchor:resistance_nearby_pullback_long`, proving the widened
+near-structure trend entry guard was active on the server. The sentinel
+read-only check also loaded the new trend loss-control fields without config
+errors.
 
 ## Live Services
 
@@ -61,6 +66,10 @@ At the snapshot, these services/timers were active:
 `inactive` after a healthy completed cycle or `activating` while a cycle is
 running. Do not call live "stopped" just because the service is not continuously
 active; check the timer and recent `order_intents` / `exchange_responses`.
+
+At this snapshot the live timer was restored after debugging. A systemd-triggered
+live cycle finished with `status=0/SUCCESS` at `2026-06-27 16:56:47` server
+time.
 
 ## Current Risk Profile
 
@@ -190,6 +199,24 @@ toward the middle of the band:
   `limit_entry_anchor:resistance_nearby_pullback_long`, also targeting the
   `70%` pullback geometry;
 - diagnostics are persisted in `price_basis.entry_basis.trend_near_structure_guard`.
+
+The 2026-06-27 WIF/GUSDT hotfix tightened the breakout exemption. Strong
+momentum/volume/taker flow alone is no longer enough to keep a tiny
+`volatility_retrace` trend entry near support/resistance:
+
+- a short near support must also have actually broken support by at least
+  `trend_near_structure_breakout_min_structure_break_percent=0.03`;
+- a long near resistance must also have actually broken resistance by at least
+  the same threshold;
+- the diagnostic is stored under
+  `trend_near_structure_guard.breakout.structure_break`;
+- without that real break, the setup must wait for the rebound/pullback entry
+  instead of chasing the move at the edge.
+
+This specifically addresses the GUSDT-style failure where trend saw strong
+short-side flow close to support and opened short before support had truly
+broken. That case should now be routed to `support_nearby_rebound_short` unless
+the structure break itself is confirmed.
 
 The ENAUSDT forensic replay that originally produced a `0.07881` short now
 replays locally and on the server as a passive rebound short near `0.079588`,
@@ -371,6 +398,27 @@ Trend sentinel protection is layered:
   micro evidence supports it; default lock/giveback are `0.12R` / `0.75R`;
 - from the strong layer (`1.00R` or `0.55` target progress), default
   lock/giveback are `0.35R` / `0.65R`.
+
+Trend loss-control is separate from trend profit protection. It exists for
+WIFUSDT-style cases where the original direction may still later work, but the
+position has already deteriorated enough that waiting for the original stop can
+create an outsized loss:
+
+- it only applies to `strategy_leg=trend`;
+- it requires complete exchange-side protection first (`STOP` and
+  `TAKE_PROFIT`);
+- default minimum elapsed time is
+  `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS=1800`;
+- it requires at least `0.55R` adverse movement, or `0.78R` hard adverse
+  movement, plus reversal-risk evidence unless the hard threshold is reached;
+- when active it emits `trend_degrade_loss_control_ready` and uses
+  `sentinel_loss_control`, allowing a negative lock such as
+  `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R=-0.30`;
+- ordinary profit protection still cannot move stops on a negative-R position.
+
+This is not a scalping-style immediate stop shuffle. The trend cooldown remains
+`180` seconds, and the loss-control gate is deliberately slower than micro-grid
+protection.
 
 Micro-grid remains faster. It keeps the normal profit gate
 (`0.45R` or `0.35` target progress), and can bypass the old 45-second wait

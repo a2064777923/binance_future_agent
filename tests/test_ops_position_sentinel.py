@@ -313,6 +313,40 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertIn("protective_backfill_required", report.reversal_signals[0].reasons)
         self.assertNotIn("trend_protection_cooldown_active", report.reversal_signals[0].reasons)
 
+    def test_trend_degrade_loss_control_trails_negative_r_after_confirmation(self):
+        fake_signed = FakeSignedClient(mark_price="97.2")
+        market = FakeMarketClient(
+            closes=[100.2, 99.8, 99.2, 98.6, 98.1, 97.8, 97.4, 97.2],
+            volumes=[12, 12, 13, 14, 18, 22, 28, 34],
+            high_offset=0.12,
+            low_offset=0.35,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+                BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS="900",
+                BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R="0.50",
+                BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE="0.20",
+            ),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:20:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        signal = report.reversal_signals[0]
+        self.assertEqual(signal.decision, "trail_or_backfill")
+        self.assertIn("trend_degrade_loss_control_ready", signal.reasons)
+        self.assertEqual(report.status, "sentinel_executed")
+        order_plan = report.execution.executions[0].order_plan
+        self.assertEqual(order_plan.action, "trail_protective_orders")
+        self.assertIn("sentinel_loss_control", order_plan.reason_codes)
+        self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
+        self.assertGreater(order_plan.stop_price, 96)
+        self.assertLess(order_plan.stop_price, 97.2)
+
     def test_sentinel_does_not_trail_tiny_profit_before_minimum_progress(self):
         fake_signed = FakeSignedClient(mark_price="100.4")
         market = FakeMarketClient(

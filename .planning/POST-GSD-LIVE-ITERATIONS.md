@@ -1,7 +1,7 @@
 # Post-GSD Live Iterations
 
 **Created:** 2026-06-24
-**Latest live snapshot:** 2026-06-26, see `docs/current-live-strategy.md`.
+**Latest live snapshot:** 2026-06-27, see `docs/current-live-strategy.md`.
 **Purpose:** Record live strategy and operations work that happened after the
 formal GSD v1.27 phase artifacts were closed.
 
@@ -435,6 +435,48 @@ must wait for a lower structural pullback unless all breakout checks pass.
 Diagnostics remain under `price_basis.entry_basis.trend_near_structure_guard`.
 The regression tests cover both previous edge cases and the new middle-band
 anti-chase behavior.
+
+### 16. Trend Structure-Break And Loss-Control Hotfix
+
+On 2026-06-27 live review of WIFUSDT and GUSDT split the problem into two
+separate failure classes:
+
+- WIFUSDT: trend direction may have been correct, but the protected stop was
+  hit before the later recovery. The system had no trend-specific way to reduce
+  risk while a position was negative and deteriorating; normal profit
+  protection correctly refused to trail negative-R positions.
+- GUSDT: trend opened short near support because momentum/volume/taker flow
+  looked strong, even though support had not actually broken. That is an entry
+  logic failure, not a protection problem.
+
+General fixes:
+
+- The near-structure breakout exemption now requires a real structure break:
+  shorts near support need `reference <= support * (1 - 0.03%)`, and longs near
+  resistance need `reference >= resistance * (1 + 0.03%)`.
+- The breakout diagnostic now records
+  `trend_near_structure_guard.breakout.structure_break`.
+- Trend stops are no longer narrowed just because a long is near the high or a
+  short is near the low; that edge case now widens base stop distance by `1.08`
+  before the existing profile/cap logic.
+- Trend sentinel loss-control was added. It is slower than micro-grid
+  protection, requires complete protective orders, defaults to a 30-minute
+  minimum, and only moves a negative-R stop when adverse-R/reversal evidence is
+  strong enough.
+- `sentinel_lock_r` parsing now accepts signed values, so
+  `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R=-0.30` is executable instead
+  of being silently discarded.
+
+Verification:
+
+- `PYTHONPATH=src python -m unittest tests.test_strategy_setup tests.test_ops_position_sentinel tests.test_ops_position_adjustment tests.test_config`
+  passed: `Ran 104 tests ... OK`.
+- `PYTHONPATH=src python -m unittest discover -s tests` passed:
+  `Ran 750 tests ... OK (skipped=3)`.
+- Server `config-check` passed in live mode.
+- Server `ops position-sentinel` read-only check loaded the new config and code.
+- `binance-futures-agent-live.timer` was restored; the next systemd live cycle
+  exited `0/SUCCESS` at `2026-06-27 16:56:47` server time.
 
 ## Live Server Notes
 

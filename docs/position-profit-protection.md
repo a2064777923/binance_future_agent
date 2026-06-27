@@ -99,6 +99,13 @@ Trend positions use wider protection to avoid closing too often:
 - `BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS=0.55`
 - `BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R=0.35`
 - `BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R=0.65`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS=1800`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R=0.55`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_HARD_ADVERSE_R=0.78`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE=0.52`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R=-0.30`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_GIVEBACK_R=0.20`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_TARGET_EXTENSION_R=0.20`
 
 The trend profile deliberately does not behave like the micro-grid scalping
 profile. After a trend position emits a `trail_or_backfill` protection decision,
@@ -116,15 +123,29 @@ wide giveback. The strong layer locks more profit after a larger favorable move.
 The chosen layer is written into sentinel metrics and order-plan reason codes
 (`sentinel_trend_profit_layer:*`, `sentinel_lock_r:*`, `sentinel_giveback_r:*`).
 
+Trend loss-control is the only path that may move protective stops while the
+position is negative. It is designed for cases like WIFUSDT on 2026-06-27:
+direction later recovered, but the original protected stop absorbed the full
+loss before the system reduced risk. The new path requires complete protective
+orders, minimum elapsed time, adverse-R evidence, and reversal-risk confirmation
+before emitting `trend_degrade_loss_control_ready`. When it does fire,
+`position_adjustment` accepts a signed `sentinel_lock_r` such as `-0.30` and can
+replace the stop closer than the original stop while still below/above mark.
+Normal `sentinel_profit_protection` remains blocked on negative-R positions.
+
 ## Verification
 
 Targeted local and server verification:
 
 ```bash
-python -m unittest tests.test_ops_position_sentinel tests.test_ops_position_adjustment tests.test_ops_position_hold_check tests.test_ops_position_review tests.test_execution_executor tests.test_config tests.test_agent_runner
+PYTHONPATH=src python -m unittest tests.test_strategy_setup tests.test_ops_position_sentinel tests.test_ops_position_adjustment tests.test_config
+PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-Expected result at deployment time: `Ran 110 tests ... OK`.
+Expected result at the 2026-06-27 deployment time:
+
+- targeted protection/setup/config suite: `Ran 104 tests ... OK`;
+- full suite: `Ran 750 tests ... OK (skipped=3)`.
 
 ## Live Scalping Tuning
 

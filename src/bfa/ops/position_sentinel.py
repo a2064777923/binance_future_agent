@@ -236,6 +236,8 @@ def _reversal_signal(
         reasons.append("stagnation_exit_pressure")
     if _micro_setup_invalidated(item, metrics, profile=profile):
         reasons.append("setup_invalidated_exit_pressure")
+    if _trend_degrade_loss_control_ready(item, metrics, profile=profile):
+        reasons.append("trend_degrade_loss_control_ready")
     if any(reason in {"stagnation_exit_pressure", "setup_invalidated_exit_pressure"} for reason in reasons):
         if _micro_loss_control_ready(item, metrics, profile=profile):
             reasons.append("loss_control_ready")
@@ -548,6 +550,9 @@ def _signal_allows_trailing(
             return False
     else:
         profitable = _trend_profit_protection_ready(item, metrics, profile=profile)
+        loss_control_ready = _trend_degrade_loss_control_ready(item, metrics, profile=profile)
+        if loss_control_ready:
+            return True
     if not profitable:
         return False
     if (_micro_stagnation_detected(item, metrics, profile=profile) or _micro_setup_invalidated(item, metrics, profile=profile)) and _micro_loss_control_ready(
@@ -619,6 +624,13 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
         "strong_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS"), 0.55),
         "strong_lock_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R"), 0.35),
         "strong_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R"), 0.65),
+        "loss_control_min_seconds": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS"), 1800.0),
+        "loss_control_adverse_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R"), 0.55),
+        "loss_control_hard_adverse_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_HARD_ADVERSE_R"), 0.78),
+        "loss_control_min_reversal_score": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE"), 0.52),
+        "loss_control_lock_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R"), -0.30),
+        "loss_control_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_GIVEBACK_R"), 0.20),
+        "loss_control_target_extension_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_TARGET_EXTENSION_R"), 0.20),
     }
 
 
@@ -688,6 +700,29 @@ def _micro_profit_gate_met(item, metrics: Mapping[str, Any], *, profile: Mapping
         _float_or_default(profile.get("profit_protection_min_progress"), 0.35),
     )
     return current_r >= min_r or current_progress >= min_progress
+
+
+def _trend_degrade_loss_control_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
+    if str(profile.get("name") or "") != "trend":
+        return False
+    if item.algo_protection_count < 2:
+        return False
+    elapsed = _float_or_none(metrics.get("elapsed_seconds"))
+    min_seconds = _float_or_default(profile.get("loss_control_min_seconds"), 1800.0)
+    if elapsed is None or elapsed < min_seconds:
+        return False
+    current_r = _float_or_none(metrics.get("current_stop_r_multiple")) or 0.0
+    adverse_r = max(_float_or_none(metrics.get("recent_max_adverse_r_multiple")) or 0.0, -current_r)
+    hard_adverse = _float_or_default(profile.get("loss_control_hard_adverse_r"), 0.78)
+    base_adverse = _float_or_default(profile.get("loss_control_adverse_r"), 0.55)
+    if adverse_r >= hard_adverse:
+        return True
+    if adverse_r < base_adverse:
+        return False
+    reversal_score = _score_reversal_risk(item, metrics, side="LONG" if item.position_amt > 0 else "SHORT", profile=profile)
+    if reversal_score >= _float_or_default(profile.get("loss_control_min_reversal_score"), 0.52):
+        return True
+    return _adverse_micro_reversal(metrics, profile=profile) and _flow_is_fading(metrics, profile=profile)
 
 
 def _trend_profit_protection_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
@@ -903,7 +938,7 @@ def _sentinel_item_reason_codes(config: AppConfig, item, signal: ReversalRiskSig
         return []
     profile = _protection_profile(config, item)
     loss_control = any(
-        reason in {"stagnation_exit_pressure", "setup_invalidated_exit_pressure"}
+        reason in {"stagnation_exit_pressure", "setup_invalidated_exit_pressure", "trend_degrade_loss_control_ready"}
         for reason in signal.reasons
     )
     layer = str(signal.metrics.get("profit_protection_layer") or "standard")

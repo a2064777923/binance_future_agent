@@ -118,6 +118,13 @@ DEFAULTS = {
     "BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS": "0.55",
     "BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R": "0.35",
     "BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R": "0.65",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS": "1800",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R": "0.55",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_HARD_ADVERSE_R": "0.78",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE": "0.52",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R": "-0.30",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_GIVEBACK_R": "0.20",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_TARGET_EXTENSION_R": "0.20",
     "BFA_POSITION_SENTINEL_LOOKBACK_LIMIT": "24",
     "BFA_POSITION_SENTINEL_INTERVAL": "1m",
     "BFA_PENDING_LIMIT_WATCHDOG_ENABLED": "true",
@@ -340,6 +347,13 @@ NUMERIC_FIELDS = (
     "BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS",
     "BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R",
     "BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_HARD_ADVERSE_R",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_GIVEBACK_R",
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_TARGET_EXTENSION_R",
     "OPENAI_TIMEOUT_SECONDS",
     "OPENAI_RETRY_AFTER_SECONDS",
 )
@@ -386,6 +400,10 @@ ZERO_ALLOWED_NUMERIC_FIELDS = {
     "BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT",
 }
 
+SIGNED_NUMERIC_FIELDS = {
+    "BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R",
+}
+
 
 @dataclass(frozen=True)
 class AppConfig:
@@ -427,7 +445,9 @@ def validate_config(config: AppConfig) -> ValidationResult:
     mode = _parse_mode(config.get("BFA_MODE"), errors)
 
     for field in NUMERIC_FIELDS:
-        if field in ZERO_ALLOWED_NUMERIC_FIELDS:
+        if field in SIGNED_NUMERIC_FIELDS:
+            _number(config.get(field), field, errors)
+        elif field in ZERO_ALLOWED_NUMERIC_FIELDS:
             _non_negative_number(config.get(field), field, errors)
         else:
             _positive_number(config.get(field), field, errors)
@@ -542,6 +562,13 @@ def _positive_number(value: str, key: str, errors: list[str]) -> None:
         return
     if parsed <= 0:
         errors.append(f"{key} must be a positive number")
+
+
+def _number(value: str, key: str, errors: list[str]) -> None:
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        errors.append(f"{key} must be a number")
 
 
 def _non_negative_number(value: str, key: str, errors: list[str]) -> None:

@@ -167,6 +167,7 @@ class TradeSetupProfile:
     trend_near_structure_breakout_min_volume_change_percent: float = 80.0
     trend_near_structure_breakout_min_momentum_percent: float = 1.2
     trend_near_structure_breakout_min_taker_edge: float = 0.12
+    trend_near_structure_breakout_min_structure_break_percent: float = 0.03
     min_post_cost_edge_ratio: float = 0.0
     fee_bps: float = 4.0
     slippage_bps: float = 5.0
@@ -886,6 +887,26 @@ def _trend_near_structure_entry(
         return None
 
     breakout = _trend_structure_breakout_diagnostics(features, side, profile)
+    min_break_percent = max(_float(profile.trend_near_structure_breakout_min_structure_break_percent) or 0.0, 0.0)
+    if side == "short":
+        break_price = support * (1.0 - min_break_percent / 100.0)
+        structure_break_passed = reference <= break_price
+        break_direction = "below_support"
+    else:
+        break_price = resistance * (1.0 + min_break_percent / 100.0)
+        structure_break_passed = reference >= break_price
+        break_direction = "above_resistance"
+    breakout = {
+        **breakout,
+        "structure_break": {
+            "passed": structure_break_passed,
+            "direction": break_direction,
+            "reference_price": reference,
+            "threshold_price": round(break_price, 8),
+            "min_break_percent": min_break_percent,
+        },
+        "passed": bool(breakout["passed"] and structure_break_passed),
+    }
     if breakout["passed"]:
         return {
             "anchor": "near_structure_breakout_exempt_short" if side == "short" else "near_structure_breakout_exempt_long",
@@ -994,9 +1015,9 @@ def _stop_distance_percent(
         base = max(base_volatility * 1.15, 0.65)
     close_position = _float(features.get("kline_close_position_percent"))
     if side == "long" and close_position is not None and close_position >= 80:
-        base *= 0.9
+        base *= 1.08
     if side == "short" and close_position is not None and close_position <= 20:
-        base *= 0.9
+        base *= 1.08
     structure_price = _positive_float(features.get("support_price" if side == "long" else "resistance_price"))
     structure_distance: float | None = None
     if structure_price is not None:

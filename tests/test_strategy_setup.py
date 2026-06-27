@@ -776,7 +776,7 @@ class StrategySetupTests(unittest.TestCase):
                 ema_slow=0.07916,
                 ema_spread_percent=-0.30,
                 rsi=26.0,
-                reference_price=0.07875,
+                reference_price=0.07850,
                 indicator_sample_size=30,
                 min_executable_notional=5.04,
             ),
@@ -790,6 +790,7 @@ class StrategySetupTests(unittest.TestCase):
         guard = setup.price_basis["entry_basis"]["trend_near_structure_guard"]
         self.assertFalse(guard["applied"])
         self.assertTrue(guard["breakout"]["passed"])
+        self.assertTrue(guard["breakout"]["structure_break"]["passed"])
         self.assertLess(setup.price_basis["entry_basis"]["offset_percent"], 0.1)
 
     def test_live_action_flow_rejects_fresh_trend_when_micro_and_flow_flip_adverse(self):

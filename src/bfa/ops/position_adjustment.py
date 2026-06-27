@@ -977,18 +977,18 @@ def _trail_prices(
     )
     loss_control_activation = "sentinel_loss_control" in item.reasons
     sentinel_activation = target_progress_activation or loss_control_activation
-    if sentinel_activation and not _sentinel_profit_gate_met(item, current_r=current_r, target_progress=target_progress):
+    if sentinel_activation and not loss_control_activation and not _sentinel_profit_gate_met(item, current_r=current_r, target_progress=target_progress):
         rejections.append("sentinel_profit_gate_not_met")
     if current_r < max(activate_r, 0.0) and not target_progress_activation:
         if not loss_control_activation:
             rejections.append("trailing_activation_r_not_reached")
-    if current_r <= 0:
+    if current_r <= 0 and not loss_control_activation:
         rejections.append("position_not_in_profit")
     if rejections:
         return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
 
     overrides = _sentinel_trailing_overrides(item.reasons)
-    lock_r = max(overrides.get("lock_r", lock_r), 0.0)
+    lock_r = max(overrides.get("lock_r", lock_r), -0.95 if loss_control_activation else 0.0)
     giveback_r = max(overrides.get("giveback_r", giveback_r), 0.0)
     if loss_control_activation:
         giveback_r = max(giveback_r, overrides.get("min_giveback_r", 0.0))
@@ -1082,7 +1082,7 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
         if target is None:
             continue
         parsed = _float_or_none(value)
-        if parsed is not None and parsed >= 0:
+        if parsed is not None and (parsed >= 0 or target == "lock_r"):
             values[target] = parsed
     return values
 

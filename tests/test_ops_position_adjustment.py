@@ -286,7 +286,7 @@ class PositionAdjustmentTests(unittest.TestCase):
         self.assertFalse(adjustment.adjustment_allowed)
         self.assertIn("trailing_activation_r_not_reached", adjustment.plans[0].reasons)
 
-    def test_sentinel_loss_control_cannot_trail_negative_r_position(self):
+    def test_sentinel_profit_protection_cannot_trail_negative_r_position(self):
         item = PositionReviewItem(
             symbol="BTCUSDT",
             position_side="LONG",
@@ -295,7 +295,7 @@ class PositionAdjustmentTests(unittest.TestCase):
             urgency="normal",
             reasons=[
                 "sentinel_reversal_risk_trailing",
-                "sentinel_loss_control",
+                "sentinel_profit_protection",
                 "sentinel_min_profit_r:0.45",
                 "sentinel_min_target_progress:0.35",
             ],
@@ -324,8 +324,54 @@ class PositionAdjustmentTests(unittest.TestCase):
 
         self.assertEqual(adjustment.status, "adjustment_plan_blocked")
         self.assertFalse(adjustment.adjustment_allowed)
-        self.assertIn("sentinel_profit_gate_not_met", adjustment.plans[0].reasons)
+        self.assertIn("trailing_activation_r_not_reached", adjustment.plans[0].reasons)
         self.assertIn("position_not_in_profit", adjustment.plans[0].reasons)
+
+    def test_sentinel_loss_control_can_degrade_negative_r_position(self):
+        item = PositionReviewItem(
+            symbol="BTCUSDT",
+            position_side="LONG",
+            position_amt=0.2,
+            recommendation="trail_or_reduce",
+            urgency="normal",
+            reasons=[
+                "sentinel_reversal_risk_trailing",
+                "sentinel_loss_control",
+                "sentinel_lock_r:-0.30",
+                "sentinel_giveback_r:0.20",
+                "sentinel_target_extension_r:0.20",
+            ],
+            entry_price=100,
+            mark_price=99.0,
+            stop_price=96,
+            target_price=108,
+            stop_r_multiple=-0.25,
+            target_progress=-0.125,
+            algo_protection_count=2,
+            algo_orders=protective_algo_orders(),
+            matching_intent_event_id=123,
+        )
+        adjustment = position_adjustment_plan_from_review(
+            PositionReviewReport(
+                status="review_required",
+                action_required=True,
+                checked_at="2026-06-20T04:00:00Z",
+                positions=[item],
+            ),
+            position_mode="hedge",
+            trailing_protection_enabled=True,
+            trailing_activate_r=0.0,
+            filters_by_symbol={"BTCUSDT": SymbolExecutionFilters(symbol="BTCUSDT", tick_size=Decimal("0.1"))},
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_ready")
+        self.assertTrue(adjustment.adjustment_allowed)
+        order_plan = adjustment.plans[0].order_plan
+        self.assertEqual(order_plan.action, "trail_protective_orders")
+        self.assertGreater(order_plan.stop_price, 96)
+        self.assertLess(order_plan.stop_price, 99)
+        self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
+        self.assertIn("trailing_lock_r:-0.3", order_plan.reason_codes)
 
     def test_partial_take_profit_quantity_respects_step_size(self):
         adjustment = position_adjustment_plan_from_review(
