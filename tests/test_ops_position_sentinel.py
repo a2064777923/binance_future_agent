@@ -151,7 +151,25 @@ class PositionSentinelTests(unittest.TestCase):
         position_side="LONG",
         profile="trend",
         decision="trail_or_backfill",
+        status="sentinel_executed",
+        adjustment_executed=True,
     ):
+        execution = (
+            {
+                "adjustment_executed": True,
+                "executions": [
+                    {
+                        "order_plan": {
+                            "action": "trail_protective_orders",
+                            "symbol": symbol,
+                            "position_side": position_side,
+                        }
+                    }
+                ],
+            }
+            if adjustment_executed
+            else None
+        )
         connection = sqlite3.connect(self.db_path)
         store = EventStore(connection)
         store.insert_artifact(
@@ -162,8 +180,9 @@ class PositionSentinelTests(unittest.TestCase):
             ref_id=f"position_sentinel:{occurred_at}",
             payload={
                 "schema": "bfa_position_sentinel_v1",
-                "status": "sentinel_executed",
+                "status": status,
                 "checked_at": occurred_at,
+                "execution": execution,
                 "reversal_signals": [
                     {
                         "symbol": symbol,
@@ -293,6 +312,31 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertEqual(report.status, "sentinel_no_allowed_action")
         self.assertEqual(fake_signed.algo_orders, [])
 
+    def test_trend_cooldown_ignores_observe_only_sentinel_reports(self):
+        self._insert_sentinel_signal(
+            occurred_at="2026-06-20T03:59:00Z",
+            status="sentinel_action_ready",
+            adjustment_executed=False,
+        )
+        fake_signed = FakeSignedClient(mark_price="107")
+
+        report = build_position_sentinel_report(
+            self.config(
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+                BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS="180",
+            ),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=FakeMarketClient(),
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
+        self.assertNotIn("trend_protection_cooldown_active", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_executed")
+        self.assertTrue(report.execution.adjustment_executed)
+
     def test_trend_cooldown_does_not_block_missing_protection_backfill(self):
         self._insert_sentinel_signal(occurred_at="2026-06-20T03:59:00Z")
         fake_signed = FakeSignedClient(mark_price="107", protected=False)
@@ -346,6 +390,73 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
         self.assertGreater(order_plan.stop_price, 96)
         self.assertLess(order_plan.stop_price, 97.2)
+
+    def test_trend_loss_control_catches_adverse_volume_without_waiting_for_score(self):
+        fake_signed = FakeSignedClient(mark_price="97.9")
+        market = FakeMarketClient(
+            closes=[100.6, 100.4, 100.2, 100.0, 99.5, 99.1, 98.5, 97.9],
+            volumes=[10, 10, 10, 10, 18, 20, 22, 24],
+            high_offset=0.12,
+            low_offset=0.45,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+                BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS="900",
+                BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE="0.90",
+            ),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:20:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        signal = report.reversal_signals[0]
+        self.assertEqual(signal.decision, "trail_or_backfill")
+        self.assertIn("adverse_micro_reversal_detected", signal.reasons)
+        self.assertIn("trend_degrade_loss_control_ready", signal.reasons)
+        self.assertEqual(report.status, "sentinel_executed")
+        order_plan = report.execution.executions[0].order_plan
+        self.assertEqual(order_plan.action, "trail_protective_orders")
+        self.assertIn("sentinel_loss_control", order_plan.reason_codes)
+        self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
+        self.assertGreater(order_plan.stop_price, 96)
+        self.assertLess(order_plan.stop_price, 97.9)
+
+    def test_sentinel_loss_control_overrides_close_review_with_protective_trail(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(metadata={"hold_time_minutes": 30})
+        fake_signed = FakeSignedClient(mark_price="97.9")
+        market = FakeMarketClient(
+            closes=[100.6, 100.4, 100.2, 100.0, 99.5, 99.1, 98.5, 97.9],
+            volumes=[10, 10, 10, 10, 18, 20, 22, 24],
+            high_offset=0.12,
+            low_offset=0.45,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(
+                BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true",
+                BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE="0.90",
+            ),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:20:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
+        self.assertIn("trend_degrade_loss_control_ready", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_executed")
+        order_plan = report.execution.executions[0].order_plan
+        self.assertEqual(order_plan.action, "trail_protective_orders")
+        self.assertIn("hold_time_expired", order_plan.reason_codes)
+        self.assertIn("sentinel_loss_control", order_plan.reason_codes)
 
     def test_sentinel_does_not_trail_tiny_profit_before_minimum_progress(self):
         fake_signed = FakeSignedClient(mark_price="100.4")

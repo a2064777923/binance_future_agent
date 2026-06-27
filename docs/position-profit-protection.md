@@ -100,21 +100,25 @@ Trend positions use wider protection to avoid closing too often:
 - `BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R=0.35`
 - `BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R=0.65`
 - `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS=1800`
-- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R=0.55`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R=0.50`
 - `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_HARD_ADVERSE_R=0.78`
 - `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE=0.52`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_VOLUME_RATIO=1.50`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MAX_ALIGNMENT=0.35`
+- `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_NO_MFE_R=0.12`
 - `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R=-0.30`
 - `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_GIVEBACK_R=0.20`
 - `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_TARGET_EXTENSION_R=0.20`
 
 The trend profile deliberately does not behave like the micro-grid scalping
 profile. After a trend position emits a `trail_or_backfill` protection decision,
-the same symbol/position side is put on a three-minute trend-protection
-cooldown. During that window the sentinel records
-`trend_protection_cooldown_active` and does not rerun the full trend
-profit-protection decision for that position. Missing-protection backfill is
-still allowed immediately; the cooldown only applies to normal trend trailing
-judgement/stop movement.
+and the exchange-side protective replacement actually executes, the same
+symbol/position side is put on a three-minute trend-protection cooldown.
+Read-only or observe-only sentinel reports do not start cooldown. During that
+window the sentinel records `trend_protection_cooldown_active` and does not
+rerun the full trend profit-protection decision for that position.
+Missing-protection backfill is still allowed immediately; the cooldown only
+applies to normal trend trailing judgement/stop movement.
 
 Trend protection is now layered. Below the defensive thresholds it records
 `trend_profit_layer:observe` and refuses to trail even if the reversal score is
@@ -124,14 +128,18 @@ The chosen layer is written into sentinel metrics and order-plan reason codes
 (`sentinel_trend_profit_layer:*`, `sentinel_lock_r:*`, `sentinel_giveback_r:*`).
 
 Trend loss-control is the only path that may move protective stops while the
-position is negative. It is designed for cases like WIFUSDT on 2026-06-27:
-direction later recovered, but the original protected stop absorbed the full
-loss before the system reduced risk. The new path requires complete protective
-orders, minimum elapsed time, adverse-R evidence, and reversal-risk confirmation
-before emitting `trend_degrade_loss_control_ready`. When it does fire,
-`position_adjustment` accepts a signed `sentinel_lock_r` such as `-0.30` and can
-replace the stop closer than the original stop while still below/above mark.
-Normal `sentinel_profit_protection` remains blocked on negative-R positions.
+position is negative. It is designed for cases like WIFUSDT/AAVEUSDT on
+2026-06-27: direction may still recover later, but the original protected stop
+can absorb a full loss before the system reduces risk. The path requires
+complete protective orders, minimum elapsed time, adverse-R evidence, and
+confirmation before emitting `trend_degrade_loss_control_ready`. Confirmation
+can be a high reversal score, fading flow, adverse micro return with low
+direction alignment and adverse volume, or a no-recovery path where recent MFE
+stayed below `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_NO_MFE_R`. When it does
+fire, `position_adjustment` accepts a signed `sentinel_lock_r` such as `-0.30`
+and can replace the stop closer than the original stop while still below/above
+mark. Normal `sentinel_profit_protection` remains blocked on negative-R
+positions.
 
 ## Verification
 
@@ -142,10 +150,11 @@ PYTHONPATH=src python -m unittest tests.test_strategy_setup tests.test_ops_posit
 PYTHONPATH=src python -m unittest discover -s tests
 ```
 
-Expected result at the 2026-06-27 deployment time:
+Expected result at the 2026-06-27 deployment time after the trend loss-control
+adverse-volume patch:
 
-- targeted protection/setup/config suite: `Ran 104 tests ... OK`;
-- full suite: `Ran 750 tests ... OK (skipped=3)`.
+- targeted sentinel/config suite: `Ran 50 tests ... OK`;
+- full suite: `Ran 753 tests ... OK (skipped=3)`.
 
 ## Live Scalping Tuning
 

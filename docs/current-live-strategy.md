@@ -385,9 +385,10 @@ will not actually move the exchange-side stop.
 
 Trend protection is intentionally slower than micro-grid protection. The live
 trend profile enforces a same-symbol/same-side cooldown of at least 180 seconds
-between trend protection judgements that could move protective orders. During
-that cooldown the sentinel records `trend_protection_cooldown_active` and only
-observes the position. Emergency missing-protection backfill is not delayed.
+after a protection replacement is actually executed. Read-only or observe-only
+sentinel reports do not start cooldown. During that cooldown the sentinel
+records `trend_protection_cooldown_active` and only observes the position.
+Emergency missing-protection backfill is not delayed.
 
 Trend sentinel protection is layered:
 
@@ -409,8 +410,14 @@ create an outsized loss:
   `TAKE_PROFIT`);
 - default minimum elapsed time is
   `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_SECONDS=1800`;
-- it requires at least `0.55R` adverse movement, or `0.78R` hard adverse
+- it requires at least `0.50R` adverse movement, or `0.78R` hard adverse
   movement, plus reversal-risk evidence unless the hard threshold is reached;
+- adverse confirmation can come from the reversal score, fading flow, adverse
+  micro return with low direction alignment and adverse volume ratio
+  (`BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_VOLUME_RATIO=1.50`,
+  `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MAX_ALIGNMENT=0.35`), or a
+  no-recovery path where recent MFE stayed below
+  `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_NO_MFE_R=0.12`;
 - when active it emits `trend_degrade_loss_control_ready` and uses
   `sentinel_loss_control`, allowing a negative lock such as
   `BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R=-0.30`;
@@ -448,6 +455,26 @@ Protection failure statuses such as `protective_order_failed_open` are
 processed live-cycle statuses so the timer can continue scanning. They are not
 safe-to-ignore statuses. Check exchange algo orders and position ownership
 immediately.
+
+2026-06-27 AAVEUSDT review: the long opened at `2026-06-27T07:59:09Z` was an
+old-logic trend fill before the structure-break hotfix. It used the old
+near-resistance breakout exemption and entered `96.01` with support `93.07`,
+resistance `96.22`, and close-position `91.43%`. A later post-hotfix AAVE setup
+at `2026-06-27T08:05:11Z` instead calculated the intended pullback entry around
+`94.33` and was rejected only because the earlier same-direction exposure was
+already open. The AAVE review exposed a second issue: by `09:10:09Z` the old
+position had deteriorated to roughly `0.52R` adverse with adverse micro return,
+low direction alignment, and a `4x+` volume ratio, but trend loss-control still
+observed because the previous gate required either `0.55R`, a high reversal
+score, or flow fade. The loss-control gate now catches that adverse-volume /
+low-alignment path without making trend protection scalping-fast.
+The same review found that `close_review` / `hold_time_expired` positions could
+mask a sentinel `trail_or_backfill` decision by producing a `full_close` plan,
+which the sentinel execution whitelist intentionally rejects. Sentinel trailing
+now overrides `close_review` into a protective-order replacement instead of a
+market close. Cooldown now only reads prior `sentinel_executed` events whose
+execution actually submitted `trail_protective_orders`; diagnostic read-only
+reports no longer suppress the next real protection action.
 
 The kill-switch path still exists and risk rejects new orders when it is
 active, but current tests assert that protective-order failure paths should not

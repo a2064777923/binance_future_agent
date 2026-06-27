@@ -318,6 +318,10 @@ def _trend_cooldowns_from_store(
             payload = json.loads(str(row["payload_json"]))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
+        if str(payload.get("status") or "").lower() != "sentinel_executed":
+            continue
+        if not _sentinel_payload_executed_trailing(payload):
+            continue
         occurred_at = str(row["occurred_at"])
         occurred = _parse_iso(occurred_at)
         if occurred is None:
@@ -344,6 +348,21 @@ def _trend_cooldowns_from_store(
                 "remaining_seconds": max(cooldown_seconds - elapsed, 0.0),
             }
     return result
+
+
+def _sentinel_payload_executed_trailing(payload: Mapping[str, Any]) -> bool:
+    execution = payload.get("execution")
+    if not isinstance(execution, Mapping):
+        return False
+    if not bool(execution.get("adjustment_executed")):
+        return False
+    for item in execution.get("executions") or []:
+        if not isinstance(item, Mapping):
+            continue
+        order_plan = item.get("order_plan")
+        if isinstance(order_plan, Mapping) and str(order_plan.get("action") or "").lower() == "trail_protective_orders":
+            return True
+    return False
 
 
 def _cooldown_for_item(
@@ -628,6 +647,9 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
         "loss_control_adverse_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_R"), 0.55),
         "loss_control_hard_adverse_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_HARD_ADVERSE_R"), 0.78),
         "loss_control_min_reversal_score": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MIN_REVERSAL_SCORE"), 0.52),
+        "loss_control_adverse_volume_ratio": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_ADVERSE_VOLUME_RATIO"), 1.50),
+        "loss_control_max_alignment": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_MAX_ALIGNMENT"), 0.35),
+        "loss_control_no_mfe_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_NO_MFE_R"), 0.12),
         "loss_control_lock_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_LOCK_R"), -0.30),
         "loss_control_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_GIVEBACK_R"), 0.20),
         "loss_control_target_extension_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_LOSS_CONTROL_TARGET_EXTENSION_R"), 0.20),
@@ -722,7 +744,19 @@ def _trend_degrade_loss_control_ready(item, metrics: Mapping[str, Any], *, profi
     reversal_score = _score_reversal_risk(item, metrics, side="LONG" if item.position_amt > 0 else "SHORT", profile=profile)
     if reversal_score >= _float_or_default(profile.get("loss_control_min_reversal_score"), 0.52):
         return True
-    return _adverse_micro_reversal(metrics, profile=profile) and _flow_is_fading(metrics, profile=profile)
+    if not _adverse_micro_reversal(metrics, profile=profile):
+        return False
+    if _flow_is_fading(metrics, profile=profile):
+        return True
+    volume_ratio = _float_or_none(metrics.get("volume_ratio")) or 1.0
+    alignment = _float_or_none(metrics.get("direction_alignment")) or 0.0
+    adverse_volume_ratio = _float_or_default(profile.get("loss_control_adverse_volume_ratio"), 1.50)
+    max_alignment = _float_or_default(profile.get("loss_control_max_alignment"), 0.35)
+    if volume_ratio >= adverse_volume_ratio and alignment <= max_alignment:
+        return True
+    recent_mfe_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
+    no_mfe_r = _float_or_default(profile.get("loss_control_no_mfe_r"), 0.12)
+    return recent_mfe_r <= no_mfe_r and alignment <= max_alignment
 
 
 def _trend_profit_protection_ready(item, metrics: Mapping[str, Any], *, profile: Mapping[str, Any]) -> bool:
@@ -881,7 +915,7 @@ def _plan_with_sentinel_trailing_requests(
         key = (item.symbol.upper(), str(item.position_side or "").upper() or None)
         if (
             key in forced_keys
-            and item.recommendation in {"hold", "watch"}
+            and item.recommendation in {"hold", "watch", "close_review"}
             and item.algo_protection_count >= 2
             and item.matching_intent_event_id is not None
         ):
