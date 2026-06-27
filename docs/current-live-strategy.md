@@ -32,9 +32,9 @@ checking the newer sources above.
   `codex/protection-degrade-hotfix`.
 - This snapshot includes the 2026-06-26 spike-depth/stale-signal micro-grid
   hotfix, the 2026-06-26 trend near-structure entry guard, the 2026-06-27 trend
-  fresh-confirmation / layered protection update, and the 2026-06-27
-  WIF/GUSDT protection degradation hotfix. Use the latest Git commit on this
-  branch as the code reference.
+  fresh-confirmation / layered protection update, the 2026-06-27 WIF/GUSDT
+  protection degradation hotfix, and the 2026-06-27 micro-grid wick-sensitivity
+  update. Use the latest Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
 - The latest changed files were copied to the deployed app path and verified by
@@ -43,6 +43,7 @@ checking the newer sources above.
   - `src/bfa/config.py`
   - `src/bfa/ops/position_adjustment.py`
   - `src/bfa/ops/position_sentinel.py`
+  - `src/bfa/strategy/micro_grid_live.py`
   - `src/bfa/strategy/setup.py`
 
 If a future agent changes local code, deploy the changed files or run the
@@ -303,6 +304,23 @@ Micro-grid submits GTX/post-only limits and may expire or be canceled without a
 fill. A recent intent with `entry_order_expired_canceled` or
 `entry_order_unknown_canceled` can still prove that the leg scanned, routed,
 risk-checked, and reached exchange handling.
+
+The 2026-06-27 wick-sensitivity update makes the fast lane easier to trigger
+on mature needle / range-reversion structures while keeping the passive order
+life short:
+
+- `order_wait_seconds` remains `20`; do not stretch wick-catching orders to
+  `30` seconds unless explicitly re-tuned, because stale needle limits can
+  become chase entries;
+- mature-range gates were relaxed to catch more valid spike opportunities:
+  `min_turn_count=3`, `min_edge_alternations=2`,
+  `min_reversal_response_rate=0.38`, `max_drift_to_width=1.15`,
+  `min_width_percent=0.18`, `min_width_cost_ratio=1.55`,
+  `min_wick_opportunity_percent=0.55`, and
+  `min_wick_to_stable_width_ratio=1.35`;
+- server verification after deploy observed live micro-grid candidates with
+  `order_wait_seconds=20` and allowed two-alternation signals that the previous
+  stricter gates would often reject.
 
 Micro-grid side selection has been corrected to prefer mean-reversion geometry:
 

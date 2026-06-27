@@ -7,6 +7,7 @@ from bfa.strategy.candidates import CandidateSignal
 from bfa.strategy.micro_grid_live import (
     MicroGridLiveConfig,
     _candidate_from_order,
+    _live_profile,
     _market_context_rejections,
     _order_score,
     micro_grid_setup_from_candidate,
@@ -106,6 +107,26 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
 
         self.assertEqual(live_config.order_wait_seconds, 20)
         self.assertEqual(live_config.max_signal_age_seconds, 12.0)
+
+    def test_live_profile_is_sensitive_to_wick_scalp_signals(self):
+        live_config = MicroGridLiveConfig.from_app(
+            load_config(
+                env={
+                    "BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS": "20",
+                    "BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS": "180",
+                }
+            )
+        )
+
+        profile = _live_profile(research, live_config)
+
+        self.assertEqual(profile.order_wait_seconds, 20)
+        self.assertEqual(profile.min_turn_count, 3)
+        self.assertEqual(profile.min_edge_alternations, 2)
+        self.assertAlmostEqual(profile.min_reversal_response_rate, 0.38)
+        self.assertAlmostEqual(profile.max_drift_to_width, 1.15)
+        self.assertAlmostEqual(profile.min_width_cost_ratio, 1.55)
+        self.assertAlmostEqual(profile.min_wick_opportunity_percent, 0.55)
 
     def test_config_reads_micro_grid_max_signal_age(self):
         live_config = MicroGridLiveConfig.from_app(
