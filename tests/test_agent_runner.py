@@ -12,6 +12,7 @@ from bfa.agent import (
     _live_execution_queue,
     _live_micro_grid_extra_capacity_preflight_reasons,
     _micro_grid_execution_stale_reason,
+    _trend_execution_stale_reason,
     _tradfi_window_symbol_filter,
     run_agent_once,
 )
@@ -77,6 +78,26 @@ class LatencyTelemetryTests(unittest.TestCase):
         config = load_config(env={"BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS": "12"})
 
         reason = _micro_grid_execution_stale_reason(config, evaluation)
+
+        self.assertIsNone(reason)
+
+    def test_trend_execution_stale_reason_blocks_old_signal(self):
+        evaluation = {"latency": {"signal_time_ms": 1_700_000_000_000}}
+        config = load_config(env={"BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS": "45"})
+
+        reason = _trend_execution_stale_reason(config, evaluation)
+
+        self.assertIsNotNone(reason)
+        self.assertTrue(str(reason).startswith("trend_signal_too_stale:"))
+        self.assertIn("signal_to_execution_gate_ms", evaluation["latency"])
+        self.assertEqual(evaluation["latency"]["trend_max_signal_age_ms"], 45_000)
+
+    def test_trend_execution_stale_reason_allows_fresh_signal(self):
+        future_signal_time_ms = int(datetime.now(UTC).timestamp() * 1000) + 1_000
+        evaluation = {"latency": {"signal_time_ms": future_signal_time_ms}}
+        config = load_config(env={"BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS": "45"})
+
+        reason = _trend_execution_stale_reason(config, evaluation)
 
         self.assertIsNone(reason)
 

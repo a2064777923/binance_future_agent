@@ -1674,6 +1674,20 @@ def _evaluate_candidate_queue(
                     end_reason="micro_grid_stale_before_setup",
                 )
                 continue
+        else:
+            stale_reason = _trend_execution_stale_reason(config, candidate_evaluation)
+            if stale_reason:
+                last_status = "quant_pass"
+                last_validation_errors = [stale_reason]
+                skipped_risk_reasons.append(f"{candidate.symbol}:{stale_reason}")
+                _finish_candidate_evaluation(
+                    candidate_evaluation,
+                    execution_status="quant_pass",
+                    risk_reasons=[stale_reason],
+                    continued=True,
+                    end_reason="trend_stale_before_setup",
+                )
+                continue
         setup_started_at_ms = _epoch_ms()
         setup = (
             micro_grid_setup_from_candidate(
@@ -2347,6 +2361,25 @@ def _micro_grid_execution_stale_reason(config: AppConfig, candidate_evaluation: 
     latency["micro_grid_max_signal_age_ms"] = int(max_age_seconds * 1000)
     if age_ms > max_age_seconds * 1000:
         return f"micro_grid_signal_too_stale:{round(age_ms / 1000.0, 3)}s>{round(max_age_seconds, 3)}s"
+    return None
+
+
+def _trend_execution_stale_reason(config: AppConfig, candidate_evaluation: dict[str, Any]) -> str | None:
+    latency = candidate_evaluation.get("latency")
+    if not isinstance(latency, dict):
+        return None
+    signal_time_ms = _int_or_none(latency.get("signal_time_ms"))
+    if signal_time_ms is None:
+        return None
+    configured_age_seconds = _float_or_none(config.get("BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS")) or 0.0
+    if configured_age_seconds <= 0:
+        return None
+    max_age_seconds = max(configured_age_seconds, 5.0)
+    age_ms = max(_epoch_ms() - signal_time_ms, 0)
+    latency["signal_to_execution_gate_ms"] = age_ms
+    latency["trend_max_signal_age_ms"] = int(max_age_seconds * 1000)
+    if age_ms > max_age_seconds * 1000:
+        return f"trend_signal_too_stale:{round(age_ms / 1000.0, 3)}s>{round(max_age_seconds, 3)}s"
     return None
 
 

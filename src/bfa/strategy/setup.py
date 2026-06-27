@@ -164,6 +164,8 @@ class TradeSetupProfile:
     trend_near_structure_rebound_zone_percent: float = 42.0
     trend_near_structure_min_gap_percent: float = 0.18
     trend_near_structure_max_offset_percent: float = 1.65
+    trend_near_structure_offset_volatility_multiplier: float = 1.35
+    trend_near_structure_offset_buffer_percent: float = 0.06
     trend_near_structure_breakout_min_volume_change_percent: float = 80.0
     trend_near_structure_breakout_min_momentum_percent: float = 1.2
     trend_near_structure_breakout_min_taker_edge: float = 0.12
@@ -804,7 +806,7 @@ def _limit_entry_price(
     )
     structure_entry: dict[str, float | str] | None = None
     if structure_guard is not None:
-        guard_offset = _float(structure_guard.get("required_offset_percent"))
+        guard_offset = _float(structure_guard.get("capped_offset_percent"))
         if guard_offset is not None:
             max_offset = max(max_offset, min(guard_offset, profile.trend_near_structure_max_offset_percent))
         if bool(structure_guard.get("applied")):
@@ -931,7 +933,12 @@ def _trend_near_structure_entry(
         price = min(raw_price, max_price)
         anchor = "resistance_nearby_pullback_long"
     required_offset = abs(price - reference) / reference * 100.0
-    capped_offset = min(required_offset, max(profile.trend_near_structure_max_offset_percent, min_gap_percent))
+    practical_cap = _trend_near_structure_practical_offset_cap(
+        features,
+        profile=profile,
+        min_gap_percent=min_gap_percent,
+    )
+    capped_offset = min(required_offset, practical_cap)
     if side == "short":
         price = reference * (1.0 + capped_offset / 100.0)
     else:
@@ -945,11 +952,37 @@ def _trend_near_structure_entry(
         "rebound_zone_percent": rebound_zone,
         "required_offset_percent": required_offset,
         "capped_offset_percent": capped_offset,
+        "practical_offset_cap_percent": practical_cap,
         "min_gap_percent": min_gap_percent,
         "support_price": support,
         "resistance_price": resistance,
         "breakout": breakout,
     }
+
+
+def _trend_near_structure_practical_offset_cap(
+    features: Mapping[str, Any],
+    *,
+    profile: TradeSetupProfile,
+    min_gap_percent: float,
+) -> float:
+    profile_limit = max(_float(profile.limit_entry_max_offset_percent) or 0.0, min_gap_percent)
+    hard_limit = max(_float(profile.trend_near_structure_max_offset_percent) or profile_limit, profile_limit)
+    volatility_values = [
+        value
+        for value in (
+            _float(features.get("atr_percent")),
+            _float(features.get("realized_volatility_percent")),
+        )
+        if value is not None and value > 0
+    ]
+    if not volatility_values:
+        return min(hard_limit, profile_limit)
+    volatility_cap = max(volatility_values) * max(
+        _float(profile.trend_near_structure_offset_volatility_multiplier) or 1.0,
+        0.1,
+    ) + max(_float(profile.trend_near_structure_offset_buffer_percent) or 0.0, 0.0)
+    return min(hard_limit, max(profile_limit, volatility_cap, min_gap_percent))
 
 
 def _trend_structure_breakout_diagnostics(

@@ -187,7 +187,8 @@ thresholds.
 
 Trend limit entries include a near-structure anti-chase guard to avoid both the
 ENAUSDT failure pattern and later live cases where trend entries drifted back
-toward the middle of the band:
+toward the middle of the band, without reverting to unfillable deep structural
+orders:
 
 - if a trend short signal is in the lower half of the support/resistance band
   (`trend_near_structure_zone_percent=49`), the system only keeps the tiny
@@ -195,14 +196,32 @@ toward the middle of the band:
   directional momentum, micro-momentum, volume impulse, and taker-flow must all
   confirm continuation;
 - otherwise it posts a higher rebound short using
-  `limit_entry_anchor:support_nearby_rebound_short`, with the entry moved toward
-  the configured `70%` rebound zone and the stop/target recomputed from that new
-  entry;
+  `limit_entry_anchor:support_nearby_rebound_short`, but the requested structural
+  rebound is capped by a practical offset derived from ATR/realized volatility
+  plus a small buffer;
 - the long side is symmetric: if a trend long is in the upper half of the band
   without strong continuation evidence, it posts a lower pullback long using
-  `limit_entry_anchor:resistance_nearby_pullback_long`, also targeting the
-  `70%` pullback geometry;
-- diagnostics are persisted in `price_basis.entry_basis.trend_near_structure_guard`.
+  `limit_entry_anchor:resistance_nearby_pullback_long`, with the same practical
+  volatility cap;
+- diagnostics are persisted in `price_basis.entry_basis.trend_near_structure_guard`,
+  including `required_offset_percent`, `capped_offset_percent`, and
+  `practical_offset_cap_percent`.
+
+The 2026-06-27 trend entry hotfix fixed a live fill-rate regression where the
+near-structure guard was forcing 0.8% to 1.4% pullbacks/rebounds on symbols whose
+recent ATR/realized volatility only supported roughly 0.3% to 0.6% practical
+retraces. Live now keeps the anti-chase anchor but caps the actual entry offset
+with:
+
+- `trend_near_structure_offset_volatility_multiplier=1.35`
+- `trend_near_structure_offset_buffer_percent=0.06`
+- the existing `limit_entry_max_offset_percent` floor
+- the existing `trend_near_structure_max_offset_percent` hard ceiling
+
+Live also sets `BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS=45` so a delayed trend
+candidate is skipped before setup instead of submitting a 75-second limit order
+from stale market structure. The default config keeps this gate disabled for
+offline tests and historical replay unless explicitly enabled.
 
 The 2026-06-27 WIF/GUSDT hotfix tightened the breakout exemption. Strong
 momentum/volume/taker flow alone is no longer enough to keep a tiny

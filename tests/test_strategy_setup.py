@@ -639,12 +639,14 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.decision, "trade")
         self.assertEqual(setup.side, "short")
         self.assertEqual(setup.price_basis["entry_basis"]["anchor"], "support_nearby_rebound_short")
-        self.assertGreater(setup.entry_price, 0.0795)
+        self.assertGreater(setup.entry_price, setup.price_basis["reference_price"])
         self.assertGreater(setup.stop_price, setup.entry_price)
-        self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.9)
+        self.assertLess(setup.price_basis["entry_basis"]["offset_percent"], 0.75)
         guard = setup.price_basis["entry_basis"]["trend_near_structure_guard"]
         self.assertTrue(guard["applied"])
         self.assertFalse(guard["breakout"]["passed"])
+        self.assertLess(guard["capped_offset_percent"], guard["required_offset_percent"])
+        self.assertEqual(guard["capped_offset_percent"], guard["practical_offset_cap_percent"])
 
     def test_live_action_flow_long_near_resistance_waits_for_lower_pullback_entry(self):
         profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
@@ -678,9 +680,11 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.decision, "trade")
         self.assertEqual(setup.side, "long")
         self.assertEqual(setup.price_basis["entry_basis"]["anchor"], "resistance_nearby_pullback_long")
-        self.assertLess(setup.entry_price, 100.3)
+        self.assertLess(setup.entry_price, setup.price_basis["reference_price"])
         self.assertLess(setup.stop_price, setup.entry_price)
         self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.5)
+        guard = setup.price_basis["entry_basis"]["trend_near_structure_guard"]
+        self.assertLessEqual(guard["capped_offset_percent"], guard["practical_offset_cap_percent"])
 
     def test_live_action_flow_mid_upper_long_still_waits_for_structural_pullback(self):
         profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
@@ -714,8 +718,8 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.decision, "trade")
         self.assertEqual(setup.side, "long")
         self.assertEqual(setup.price_basis["entry_basis"]["anchor"], "resistance_nearby_pullback_long")
-        self.assertLess(setup.entry_price, 99.8)
-        self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.7)
+        self.assertLess(setup.entry_price, setup.price_basis["reference_price"])
+        self.assertLess(setup.price_basis["entry_basis"]["offset_percent"], 0.7)
 
     def test_live_action_flow_mid_lower_short_waits_for_structural_rebound(self):
         profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
@@ -749,8 +753,46 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.decision, "trade")
         self.assertEqual(setup.side, "short")
         self.assertEqual(setup.price_basis["entry_basis"]["anchor"], "support_nearby_rebound_short")
-        self.assertGreater(setup.entry_price, 100.2)
-        self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.7)
+        self.assertGreater(setup.entry_price, setup.price_basis["reference_price"])
+        self.assertLess(setup.price_basis["entry_basis"]["offset_percent"], 0.7)
+
+    def test_live_action_flow_caps_far_structure_pullback_to_recent_volatility(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+
+        setup = build_trade_setup(
+            self.candidate(
+                price_change_percent=7.0,
+                taker_buy_sell_ratio=1.13,
+                taker_buy_sell_ratio_change=0.08,
+                funding_rate=-0.0001,
+                kline_momentum_percent=1.54,
+                kline_micro_momentum_percent=0.10,
+                kline_close_position_percent=92.9,
+                kline_quote_volume_change_percent=35.0,
+                support_price=6.444,
+                resistance_price=6.585,
+                vwap=6.52666423,
+                atr_percent=0.28767109,
+                realized_volatility_percent=0.28767109,
+                ema_fast=6.56,
+                ema_slow=6.50,
+                ema_spread_percent=0.92,
+                rsi=64.0,
+                reference_price=6.575,
+                indicator_sample_size=30,
+            ),
+            risk_limits=self.risk_limits(),
+            profile=profile,
+        )
+
+        entry_basis = setup.price_basis["entry_basis"]
+        guard = entry_basis["trend_near_structure_guard"]
+        self.assertEqual(setup.decision, "trade")
+        self.assertEqual(setup.side, "long")
+        self.assertEqual(entry_basis["anchor"], "resistance_nearby_pullback_long")
+        self.assertLess(entry_basis["offset_percent"], 0.5)
+        self.assertGreater(guard["required_offset_percent"], 1.2)
+        self.assertEqual(guard["capped_offset_percent"], guard["practical_offset_cap_percent"])
 
     def test_live_action_flow_strong_breakout_keeps_normal_limit_entry_near_structure(self):
         profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
