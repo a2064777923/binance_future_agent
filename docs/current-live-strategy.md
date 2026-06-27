@@ -294,6 +294,8 @@ Micro-grid is live and independent from AI:
 - `BFA_LIVE_MICRO_GRID_TOP_N=12`
 - `BFA_LIVE_MICRO_GRID_ORDER_TYPE=LIMIT`
 - `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS=20`
+- `BFA_LIVE_MICRO_GRID_ASYNC_PENDING_ENABLED=true`
+- `BFA_LIVE_MICRO_GRID_ASYNC_MAX_PER_CYCLE=3`
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS=0`
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS=180`
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
@@ -304,6 +306,20 @@ Micro-grid submits GTX/post-only limits and may expire or be canceled without a
 fill. A recent intent with `entry_order_expired_canceled` or
 `entry_order_unknown_canceled` can still prove that the leg scanned, routed,
 risk-checked, and reached exchange handling.
+
+The 2026-06-27 async pending update fixes an execution bottleneck that made
+the fast lane look like it could only hang one needle order per live cycle.
+Before this update the live executor submitted a GTX limit and then blocked for
+the full `20s` wait window to query/cancel it. Because micro-grid signals are
+only valid for about `12s`, later fast-lane candidates in the same queue often
+became stale before they could reach the exchange. With
+`BFA_LIVE_MICRO_GRID_ASYNC_PENDING_ENABLED=true`, micro-grid GTX entries are
+persisted as `entry_order_pending` immediately after exchange acceptance, and
+the live cycle can continue to the next candidate up to
+`BFA_LIVE_MICRO_GRID_ASYNC_MAX_PER_CYCLE`. The pending-limit watchdog remains
+mandatory: it queries pending orders, backfills stop/take-profit if filled, and
+cancels unfilled pending entries once their `limit_wait_seconds` has expired.
+Trend limits keep the old synchronous behavior.
 
 The 2026-06-27 wick-sensitivity update makes the fast lane easier to trigger
 on mature needle / range-reversion structures while keeping the passive order

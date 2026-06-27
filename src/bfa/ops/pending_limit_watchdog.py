@@ -26,6 +26,15 @@ class PendingLimitWatchdogClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def cancel_order(
+        self,
+        *,
+        symbol: str,
+        order_id: int | str | None = None,
+        orig_client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
     def position_risk(self, symbol: str | None = None) -> list[dict[str, Any]]:
         ...
 
@@ -295,6 +304,38 @@ def _check_pending_intent(
                     query_status=query_status,
                 )
             return _persist_terminal_no_fill(connection, pending, response, checked_at=checked_at, query_status=query_status)
+        if query is not None and _pending_limit_wait_expired(pending, checked_at=checked_at):
+            if not execute_protective_orders:
+                return PendingLimitWatchdogItem(
+                    intent_event_id=pending.event_id,
+                    symbol=pending.intent.symbol,
+                    status="pending_limit_wait_expired",
+                    action="cancel_pending_order",
+                    reasons=["pending_limit_wait_expired", "execution_disabled_observe_only"],
+                    client_order_id=pending.client_order_id,
+                    query_status=query_status,
+                )
+            cancel_response = _cancel_expired_pending_limit(client, pending)
+            response["entry_order_cancel"] = cancel_response
+            response["entry_order_final"] = cancel_response
+            cancel_status = _order_status(cancel_response)
+            if cancel_status in _CLOSED_ORDER_STATUSES and _executed_quantity(cancel_response) <= 0:
+                return _persist_terminal_no_fill(
+                    connection,
+                    pending,
+                    response,
+                    checked_at=checked_at,
+                    query_status=cancel_status,
+                )
+            return PendingLimitWatchdogItem(
+                intent_event_id=pending.event_id,
+                symbol=pending.intent.symbol,
+                status="pending_limit_cancel_failed",
+                action="watch",
+                reasons=["pending_limit_wait_expired", "pending_limit_cancel_failed"],
+                client_order_id=pending.client_order_id,
+                query_status=query_status,
+            )
         return PendingLimitWatchdogItem(
             intent_event_id=pending.event_id,
             symbol=pending.intent.symbol,
@@ -748,6 +789,58 @@ def _intent_client_order_id(intent: OrderIntent) -> str:
     return f"bfa-{intent.symbol.lower()}-{cleaned_time}"[:36]
 
 
+def _pending_limit_wait_expired(pending: PendingLimitOrderIntent, *, checked_at: str) -> bool:
+    decided = _epoch_seconds(pending.intent.decided_at or pending.occurred_at)
+    checked = _epoch_seconds(checked_at)
+    if decided is None or checked is None:
+        return False
+    wait = _limit_wait_seconds(pending.intent)
+    return checked - decided >= wait
+
+
+def _limit_wait_seconds(intent: OrderIntent) -> float:
+    try:
+        parsed = float(intent.limit_wait_seconds or 45)
+    except (TypeError, ValueError):
+        parsed = 45.0
+    return max(1.0, min(parsed, 90.0))
+
+
+def _epoch_seconds(value: str | None) -> float | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+def _cancel_expired_pending_limit(
+    client: PendingLimitWatchdogClient,
+    pending: PendingLimitOrderIntent,
+) -> dict[str, Any]:
+    try:
+        return dict(
+            client.cancel_order(
+                symbol=pending.intent.symbol,
+                orig_client_order_id=pending.client_order_id,
+            )
+        )
+    except BinanceSignedError as exc:
+        return {
+            "status": "CANCEL_FAILED",
+            "symbol": pending.intent.symbol,
+            "client_order_id": pending.client_order_id,
+            "error": _signed_error_payload(exc),
+        }
+
+
 def _client_order_id(intent: OrderIntent, *, checked_at: str, suffix: str) -> str:
     seed_time = "".join(ch for ch in (checked_at or intent.decided_at) if ch.isdigit())
     base = f"bfa-{intent.symbol.lower()}-{seed_time}"
@@ -833,12 +926,14 @@ def _report_status(
     statuses = {item.status for item in items}
     if "protection_failed" in statuses:
         return "pending_limit_watchdog_protection_failed"
-    if "filled_unprotected" in statuses:
+    if any(status in statuses for status in {"filled_unprotected", "pending_limit_wait_expired"}):
         return "pending_limit_watchdog_action_ready"
     if "filled_position_check_failed" in statuses:
         return "pending_limit_watchdog_check_failed"
     if any(status in statuses for status in {"filled_protected", "position_reconciled_protected"}):
         return "pending_limit_watchdog_protected"
+    if "terminal_no_fill" in statuses:
+        return "pending_limit_watchdog_resolved"
     if not execution_enabled and any(status in statuses for status in {"filled_already_protected"}):
         return "pending_limit_watchdog_observing"
     return "pending_limit_watchdog_checked"

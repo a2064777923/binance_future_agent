@@ -1631,6 +1631,7 @@ def _evaluate_candidate_queue(
     candidate_evaluations: list[dict[str, Any]] = []
     ai_decisions_persisted = 0
     trade_setups_persisted = 0
+    async_micro_pending_submitted = 0
     skipped_risk_reasons: list[str] = []
     last_status = "no_candidate"
     last_validation_errors: list[str] = []
@@ -1967,6 +1968,51 @@ def _evaluate_candidate_queue(
             finished_at_ms=_epoch_ms(),
             extra={"status": execution.status, "submitted": execution.submitted},
         )
+        if micro_grid and execution.status == "entry_order_pending":
+            async_micro_pending_submitted += 1
+            if execution.intent is not None:
+                risk_state = _risk_state_with_pending_intent(risk_state, execution.intent)
+            last_status = execution.status
+            last_risk_reasons = list(execution.risk.reason_codes)
+            skipped_risk_reasons.append(f"{candidate.symbol}:entry_order_pending")
+            _finish_candidate_evaluation(
+                candidate_evaluation,
+                execution_status=execution.status,
+                risk_reasons=list(execution.risk.reason_codes),
+                continued=True,
+                end_reason="micro_grid_async_pending",
+            )
+            if async_micro_pending_submitted >= _micro_grid_async_max_per_cycle(config):
+                return AgentRunResult(
+                    status=execution.status,
+                    mode=mode.value,
+                    started_at=started_at,
+                    market_snapshot_count=market_snapshot_count,
+                    narrative_record_count=narrative_record_count,
+                    candidate_count=candidate_count,
+                    rejected_count=rejected_count,
+                    scan_symbols=scan_symbols,
+                    selected_symbol=candidate.symbol,
+                    evaluated_symbols=evaluated_symbols,
+                    ai_accepted=True,
+                    execution_status=execution.status,
+                    submitted=True,
+                    risk_reasons=_dedupe(skipped_risk_reasons),
+                    position_review=_position_review_summary(position_adjustment_plan),
+                    position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                    paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+                    source_health=source_health,
+                    candidate_evaluations=candidate_evaluations,
+                    persisted={
+                        **_position_lifecycle_persisted(position_lifecycle_event_id),
+                        **_decision_snapshot_persisted(decision_snapshot_event_id),
+                        "candidates": persisted_candidate_count,
+                        "trade_setups": trade_setups_persisted,
+                        "ai_decisions": ai_decisions_persisted,
+                        **execution.persisted,
+                    },
+                )
+            continue
         if execution.status == "rejected" and _should_try_next_candidate(execution.risk.reason_codes):
             last_status = execution.status
             last_risk_reasons = list(execution.risk.reason_codes)
@@ -2040,9 +2086,9 @@ def _evaluate_candidate_queue(
         scan_symbols=scan_symbols,
         selected_symbol=evaluated_symbols[-1] if evaluated_symbols else None,
         evaluated_symbols=evaluated_symbols,
-        ai_accepted=False,
+        ai_accepted=async_micro_pending_submitted > 0,
         execution_status=last_status if last_status == "rejected" else None,
-        submitted=False,
+        submitted=async_micro_pending_submitted > 0,
         validation_errors=last_validation_errors,
         risk_reasons=_dedupe([*skipped_risk_reasons, *last_risk_reasons]),
         position_review=_position_review_summary(position_adjustment_plan),
@@ -2302,6 +2348,31 @@ def _micro_grid_execution_stale_reason(config: AppConfig, candidate_evaluation: 
     if age_ms > max_age_seconds * 1000:
         return f"micro_grid_signal_too_stale:{round(age_ms / 1000.0, 3)}s>{round(max_age_seconds, 3)}s"
     return None
+
+
+def _micro_grid_async_max_per_cycle(config: AppConfig) -> int:
+    try:
+        parsed = int(float(config.get("BFA_LIVE_MICRO_GRID_ASYNC_MAX_PER_CYCLE", "3")))
+    except (TypeError, ValueError):
+        parsed = 3
+    return max(1, min(parsed, 12))
+
+
+def _risk_state_with_pending_intent(risk_state: RiskState, intent) -> RiskState:
+    direction = "LONG" if str(intent.side).upper() == "BUY" else "SHORT"
+    exposure = {
+        "symbol": str(intent.symbol).upper(),
+        "direction": direction,
+        "notional_usdt": float(intent.notional_usdt),
+        "initial_margin_usdt": float(intent.estimated_initial_margin_usdt),
+        "leverage": float(intent.leverage),
+        "source": "pending_limit_entry",
+    }
+    return replace(
+        risk_state,
+        active_positions=int(risk_state.active_positions) + 1,
+        active_exposures=[*list(risk_state.active_exposures), exposure],
+    )
 
 
 def _record_latency_stage(

@@ -56,6 +56,10 @@ class FakePendingLimitClient:
         self.algo_orders.append(kwargs)
         return {"algoId": 100 + len(self.algo_orders), **kwargs}
 
+    def cancel_order(self, **kwargs):
+        self.calls.append(("cancel_order", kwargs))
+        return {"symbol": kwargs.get("symbol"), "status": "CANCELED", "executedQty": "0", **kwargs}
+
 
 class PendingLimitWatchdogTests(unittest.TestCase):
     def setUp(self):
@@ -79,6 +83,7 @@ class PendingLimitWatchdogTests(unittest.TestCase):
                     decided_at="2026-06-20T09:00:00Z",
                     order_type="LIMIT",
                     time_in_force="GTX",
+                    limit_wait_seconds=20,
                     metadata={"client_order_id": "bfa-btc-pending-1"},
                 ),
                 status="entry_order_pending",
@@ -160,6 +165,39 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertEqual(report.status, "pending_limit_watchdog_action_ready")
         self.assertIn("execution_not_enabled_by_config", report.reasons)
         self.assertEqual(client.algo_orders, [])
+
+    def test_execute_mode_cancels_unfilled_order_after_limit_wait_seconds(self):
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:21Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.status, "pending_limit_watchdog_resolved")
+        self.assertEqual(report.items[0].status, "terminal_no_fill")
+        self.assertEqual(report.items[0].action, "mark_resolved")
+        self.assertIn(("cancel_order", {"symbol": "BTCUSDT", "orig_client_order_id": "bfa-btc-pending-1"}), client.calls)
+        self.assertGreaterEqual(self.exchange_response_count(), 1)
+
+    def test_observe_mode_reports_expired_pending_order_without_canceling(self):
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:21Z",
+            execute=False,
+        )
+
+        self.assertEqual(report.status, "pending_limit_watchdog_action_ready")
+        self.assertEqual(report.items[0].status, "pending_limit_wait_expired")
+        self.assertEqual(report.items[0].action, "cancel_pending_order")
+        self.assertNotIn("cancel_order", [call[0] for call in client.calls])
 
     def test_filled_order_without_current_position_never_backfills_protection(self):
         client = FakePendingLimitClient(active_position=False)

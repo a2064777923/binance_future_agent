@@ -229,6 +229,26 @@ class ExecutionEngine:
         status = "submitted"
         active_intent = intent
         if _is_limit_order(intent):
+            if _async_pending_limit_entry_enabled(self.config, intent):
+                pending_intent = _intent_with_pending_client_order_id(intent, client_order_id)
+                return self._finish(
+                    status="entry_order_pending",
+                    submitted=True,
+                    intent=pending_intent,
+                    risk=RiskDecision(
+                        True,
+                        [*risk.reason_codes, "entry_order_pending", "async_pending_watchdog_required"],
+                        risk.warnings,
+                    ),
+                    exchange_response={
+                        **response,
+                        "limit_entry_pending": {
+                            "client_order_id": client_order_id,
+                            "limit_wait_seconds": _limit_wait_seconds(intent),
+                            "watchdog_required": True,
+                        },
+                    },
+                )
             try:
                 resolution = self._resolve_limit_entry(intent, client_order_id=client_order_id)
             except BinanceSignedError as exc:
@@ -1036,6 +1056,34 @@ _CLOSED_ORDER_STATUSES = {
 
 def _is_limit_order(intent: OrderIntent) -> bool:
     return intent.order_type.upper() == "LIMIT"
+
+
+def _async_pending_limit_entry_enabled(config: AppConfig, intent: OrderIntent) -> bool:
+    if not _is_micro_grid_intent(intent):
+        return False
+    if not _is_limit_order(intent) or _entry_time_in_force(intent) != "GTX":
+        return False
+    return config.get("BFA_LIVE_MICRO_GRID_ASYNC_PENDING_ENABLED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _intent_with_pending_client_order_id(intent: OrderIntent, client_order_id: str) -> OrderIntent:
+    return replace(
+        intent,
+        reason_codes=[
+            *intent.reason_codes,
+            "micro_grid_async_pending_entry",
+        ],
+        metadata={
+            **intent.metadata,
+            "client_order_id": client_order_id,
+            "pending_limit_watchdog_required": True,
+        },
+    )
 
 
 def _entry_order_price(intent: OrderIntent) -> float | None:

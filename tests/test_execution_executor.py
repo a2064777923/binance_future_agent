@@ -820,6 +820,41 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order", "query_order", "cancel_order", "query_order"])
         self.assertNotIn("new_algo_order", [call[0] for call in fake_client.calls])
 
+    def test_live_micro_grid_async_pending_does_not_wait_for_limit_resolution(self):
+        fake_client = LimitExpiredSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_LIVE_MICRO_GRID_ASYNC_PENDING_ENABLED="true",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:20",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "entry_order_pending")
+        self.assertTrue(result.submitted)
+        self.assertIn("micro_grid_async_pending_entry", result.intent.reason_codes)
+        self.assertEqual(result.intent.metadata["client_order_id"], "bfa-btcusdt-20260620100000")
+        self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order"])
+        self.assertNotIn("query_order", [call[0] for call in fake_client.calls])
+        self.assertTrue(result.exchange_response["limit_entry_pending"]["watchdog_required"])
+
     def test_live_limit_entry_unknown_state_reconciles_position_and_places_protection(self):
         fake_client = LimitUnknownFilledPositionSignedClient()
         engine = ExecutionEngine(
