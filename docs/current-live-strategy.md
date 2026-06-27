@@ -172,20 +172,23 @@ not merely tight stops. Future tuning should inspect each losing trade with
 price path, setup factors, regime labels, and fill timing before changing
 thresholds.
 
-Trend limit entries now include a near-structure guard to avoid the ENAUSDT
-failure pattern where the trend leg shorted near support after a large move:
+Trend limit entries include a near-structure anti-chase guard to avoid both the
+ENAUSDT failure pattern and later live cases where trend entries drifted back
+toward the middle of the band:
 
-- if a trend short signal is within the lower `18%` of the support/resistance
-  band, the system only keeps the tiny volatility-retrace entry when breakout
-  evidence is strong enough: directional momentum, micro-momentum, volume
-  impulse, and taker-flow must all confirm continuation;
+- if a trend short signal is in the lower half of the support/resistance band
+  (`trend_near_structure_zone_percent=49`), the system only keeps the tiny
+  volatility-retrace entry when breakout evidence is strong enough:
+  directional momentum, micro-momentum, volume impulse, and taker-flow must all
+  confirm continuation;
 - otherwise it posts a higher rebound short using
-  `limit_entry_anchor:support_nearby_rebound_short`, with the entry moved
-  toward the configured rebound zone and the stop/target recomputed from that
-  new entry;
-- the long side is symmetric: if a trend long is too close to resistance
+  `limit_entry_anchor:support_nearby_rebound_short`, with the entry moved toward
+  the configured `70%` rebound zone and the stop/target recomputed from that new
+  entry;
+- the long side is symmetric: if a trend long is in the upper half of the band
   without strong continuation evidence, it posts a lower pullback long using
-  `limit_entry_anchor:resistance_nearby_pullback_long`;
+  `limit_entry_anchor:resistance_nearby_pullback_long`, also targeting the
+  `70%` pullback geometry;
 - diagnostics are persisted in `price_basis.entry_basis.trend_near_structure_guard`.
 
 The ENAUSDT forensic replay that originally produced a `0.07881` short now

@@ -418,6 +418,24 @@ Key files:
 - `docs/current-live-strategy.md`
 - `docs/position-profit-protection.md`
 
+### 15. Trend Structure Entry Anti-Chase Widening
+
+On 2026-06-27 a live review showed that the near-structure guard was present,
+but it only acted inside the outer `18%` of the support/resistance band. Trend
+orders in the middle-to-upper or middle-to-lower band could still use the tiny
+`volatility_retrace` entry and appear to open in the middle. The live
+`quant_setup_live_action_flow` profile now uses:
+
+- `trend_near_structure_zone_percent=49`
+- `trend_near_structure_rebound_zone_percent=70`
+
+This means a trend short in the lower half must wait for a higher structural
+rebound unless all breakout checks pass, and a trend long in the upper half
+must wait for a lower structural pullback unless all breakout checks pass.
+Diagnostics remain under `price_basis.entry_basis.trend_near_structure_guard`.
+The regression tests cover both previous edge cases and the new middle-band
+anti-chase behavior.
+
 ## Live Server Notes
 
 Known deployment shape:

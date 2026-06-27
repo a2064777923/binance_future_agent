@@ -682,6 +682,76 @@ class StrategySetupTests(unittest.TestCase):
         self.assertLess(setup.stop_price, setup.entry_price)
         self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.5)
 
+    def test_live_action_flow_mid_upper_long_still_waits_for_structural_pullback(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+
+        setup = build_trade_setup(
+            self.candidate(
+                price_change_percent=3.2,
+                taker_buy_sell_ratio=1.28,
+                taker_buy_sell_ratio_change=0.1,
+                funding_rate=-0.0001,
+                kline_momentum_percent=1.05,
+                kline_micro_momentum_percent=0.16,
+                kline_close_position_percent=66.0,
+                kline_quote_volume_change_percent=-25.0,
+                support_price=99.0,
+                resistance_price=101.0,
+                vwap=100.15,
+                atr_percent=0.42,
+                realized_volatility_percent=0.35,
+                ema_fast=100.5,
+                ema_slow=100.2,
+                ema_spread_percent=0.3,
+                rsi=61.0,
+                reference_price=100.6,
+                indicator_sample_size=30,
+            ),
+            risk_limits=self.risk_limits(),
+            profile=profile,
+        )
+
+        self.assertEqual(setup.decision, "trade")
+        self.assertEqual(setup.side, "long")
+        self.assertEqual(setup.price_basis["entry_basis"]["anchor"], "resistance_nearby_pullback_long")
+        self.assertLess(setup.entry_price, 99.8)
+        self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.7)
+
+    def test_live_action_flow_mid_lower_short_waits_for_structural_rebound(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+
+        setup = build_trade_setup(
+            self.candidate(
+                price_change_percent=-3.2,
+                taker_buy_sell_ratio=0.74,
+                taker_buy_sell_ratio_change=-0.1,
+                funding_rate=0.0001,
+                kline_momentum_percent=-1.05,
+                kline_micro_momentum_percent=-0.16,
+                kline_close_position_percent=34.0,
+                kline_quote_volume_change_percent=-25.0,
+                support_price=99.0,
+                resistance_price=101.0,
+                vwap=99.85,
+                atr_percent=0.42,
+                realized_volatility_percent=0.35,
+                ema_fast=99.5,
+                ema_slow=99.8,
+                ema_spread_percent=-0.3,
+                rsi=39.0,
+                reference_price=99.4,
+                indicator_sample_size=30,
+            ),
+            risk_limits=self.risk_limits(),
+            profile=profile,
+        )
+
+        self.assertEqual(setup.decision, "trade")
+        self.assertEqual(setup.side, "short")
+        self.assertEqual(setup.price_basis["entry_basis"]["anchor"], "support_nearby_rebound_short")
+        self.assertGreater(setup.entry_price, 100.2)
+        self.assertGreater(setup.price_basis["entry_basis"]["offset_percent"], 0.7)
+
     def test_live_action_flow_strong_breakout_keeps_normal_limit_entry_near_structure(self):
         profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
 
