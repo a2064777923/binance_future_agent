@@ -17,7 +17,15 @@ separate from the normal live strategy.
 The monitor only manages `VELVETUSDT` and only after reading the current hedge
 position from Binance:
 
-- If one side's unrealized PnL reaches `+10U`, close one third of that side.
+- The script maintains a rolling post-action baseline snapshot for both legs and
+  total hedge PnL. New take-profit decisions are evaluated relative to that
+  baseline, not only from the raw current unrealized PnL number.
+- If one side produces at least `+10U` of effective profit versus the most
+  recent baseline, close one third of that side. Effective profit can come
+  from:
+  - that leg's own U-PnL improving by `10U`, even if it is still below zero;
+  - the net hedge book improving because the remaining long/short quantities
+    are no longer perfectly balanced after the previous `T` action.
 - Profit-side reduction is not mechanical. It also requires the price to be at
   the matching short-term extreme and show fade/bounce evidence:
   - profitable `LONG`: near the 30-minute upper zone, with pullback/fade risk;
@@ -27,6 +35,9 @@ position from Binance:
 - Before reducing, the monitor caps the quantity so post-reduction hedge
   imbalance stays within `--max-imbalance-after-reduce` (`0.30` by default).
 - Record the reduced side, quantity, and PnL in the state file.
+- After each executed reduce/re-add action, reset the rolling baseline from the
+  refreshed live Binance position snapshot so the next cycle evaluates from the
+  new starting point.
 - If that same side later gives back `8U` of the locked profit and price is no
   longer at a pure chase extreme, re-add the same one-third quantity.
 - If a side was reduced and the market resumes strong continuation in that

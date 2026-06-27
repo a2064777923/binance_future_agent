@@ -151,14 +151,23 @@ def positions(client: BinanceFuturesSignedClient) -> dict[str, Position]:
     return output
 
 
+def default_state() -> dict[str, object]:
+    return {
+        "reduced": {},
+        "last_action_at": None,
+        "last_action_epoch": None,
+        "baseline": None,
+    }
+
+
 def load_state() -> dict[str, object]:
     if not STATE_PATH.exists():
-        return {"reduced": {}, "last_action_at": None, "last_action_epoch": None}
+        return default_state()
     try:
         loaded = json.loads(STATE_PATH.read_text())
     except json.JSONDecodeError:
-        return {"reduced": {}, "last_action_at": None, "last_action_epoch": None}
-    return loaded if isinstance(loaded, dict) else {"reduced": {}, "last_action_at": None, "last_action_epoch": None}
+        return default_state()
+    return loaded if isinstance(loaded, dict) else default_state()
 
 
 def save_state(state: dict[str, object]) -> None:
@@ -174,6 +183,70 @@ def log_event(payload: dict[str, object]) -> None:
 
 def round_qty(quantity: float) -> int:
     return max(1, int(math.floor(quantity)))
+
+
+def total_upnl(position_by_side: dict[str, Position]) -> float:
+    return sum(position.upnl for position in position_by_side.values())
+
+
+def baseline_snapshot(
+    position_by_side: dict[str, Position],
+    *,
+    source: str,
+) -> dict[str, object]:
+    snapshot: dict[str, object] = {
+        "captured_at": utc_now(),
+        "source": source,
+        "total_upnl": total_upnl(position_by_side),
+    }
+    for side in ("LONG", "SHORT"):
+        position = position_by_side.get(side)
+        snapshot[side] = {
+            "amount": float(position.amount if position else 0.0),
+            "entry": float(position.entry if position else 0.0),
+            "mark": float(position.mark if position else 0.0),
+            "upnl": float(position.upnl if position else 0.0),
+        }
+    return snapshot
+
+
+def ensure_baseline(
+    state: dict[str, object],
+    position_by_side: dict[str, Position],
+    *,
+    source: str,
+) -> tuple[dict[str, object], bool]:
+    baseline = state.get("baseline")
+    if isinstance(baseline, dict):
+        return baseline, False
+    snapshot = baseline_snapshot(position_by_side, source=source)
+    state["baseline"] = snapshot
+    return snapshot, True
+
+
+def progress_against_baseline(
+    side: str,
+    position_by_side: dict[str, Position],
+    baseline: dict[str, object],
+) -> dict[str, float]:
+    position = position_by_side[side]
+    side_baseline = baseline.get(side)
+    side_upnl_base = 0.0
+    if isinstance(side_baseline, dict):
+        side_upnl_base = float(side_baseline.get("upnl") or 0.0)
+    baseline_total = float(baseline.get("total_upnl") or 0.0)
+    current_total = total_upnl(position_by_side)
+    side_delta = position.upnl - side_upnl_base
+    book_delta = current_total - baseline_total
+    effective_delta = max(side_delta, book_delta)
+    return {
+        "side_upnl_base": side_upnl_base,
+        "baseline_total_upnl": baseline_total,
+        "current_total_upnl": current_total,
+        "side_delta": side_delta,
+        "book_delta": book_delta,
+        "effective_delta": effective_delta,
+    }
 
 
 def capped_reduce_quantity(
@@ -300,11 +373,13 @@ def decide(
     now_epoch = time.time()
     last_action = state.get("last_action_epoch")
     cooldown_ok = last_action is None or now_epoch - float(last_action) >= cooldown_seconds
+    baseline, _ = ensure_baseline(state, position_by_side, source="auto_init")
     reduced_state = state.get("reduced")
     reduced = reduced_state if isinstance(reduced_state, dict) else {}
     for side, position in sorted(position_by_side.items()):
         side_reduced = reduced.get(side)
         desired_qty = round_qty(position.amount / 3.0)
+        progress = progress_against_baseline(side, position_by_side, baseline)
         if not side_reduced:
             guard = trend_guard(side, context)
             qty, balance = capped_reduce_quantity(
@@ -313,16 +388,27 @@ def decide(
                 desired_qty,
                 max_imbalance_after_reduce=max_imbalance_after_reduce,
             )
-            if position.upnl >= profit_trigger and cooldown_ok and qty > 0 and not bool(guard["blocked"]):
+            if (
+                progress["effective_delta"] >= profit_trigger
+                and progress["side_delta"] > 0.0
+                and cooldown_ok
+                and qty > 0
+                and not bool(guard["blocked"])
+            ):
                 params = reduce_order_params(position)
                 actions.append(
                     {
                         "action": "reduce_one_third",
                         "side": side,
                         "quantity": qty,
-                        "reason": f"{side} upnl {position.upnl:.4f} >= {profit_trigger:.4f}",
+                        "reason": (
+                            f"{side} effective_delta {progress['effective_delta']:.4f} >= {profit_trigger:.4f} "
+                            f"(side_delta={progress['side_delta']:.4f}, book_delta={progress['book_delta']:.4f}, "
+                            f"base_upnl={progress['side_upnl_base']:.4f}, current_upnl={position.upnl:.4f})"
+                        ),
                         "trend_guard": guard,
                         "hedge_balance": balance,
+                        "baseline_progress": progress,
                         **params,
                     }
                 )
@@ -375,6 +461,7 @@ def one_cycle(args: argparse.Namespace) -> None:
     position_by_side = positions(client)
     context = market_context()
     state = load_state()
+    _, baseline_created = ensure_baseline(state, position_by_side, source="auto_init")
     actions = decide(
         position_by_side,
         context,
@@ -397,6 +484,7 @@ def one_cycle(args: argparse.Namespace) -> None:
         try:
             action["response"] = execute_action(client, action, execute=bool(args.execute))
             if args.execute:
+                refreshed_positions = positions(client)
                 state["last_action_epoch"] = time.time()
                 state["last_action_at"] = utc_now()
                 state_reduced = state.setdefault("reduced", {})
@@ -407,11 +495,15 @@ def one_cycle(args: argparse.Namespace) -> None:
                     side = str(action["side"])
                     state_reduced[side] = {
                         "quantity": int(float(action["quantity"])),
-                        "reduce_upnl": position_by_side[side].upnl,
+                        "reduce_upnl": refreshed_positions.get(side, position_by_side[side]).upnl,
                         "reduced_at": utc_now(),
                     }
                 elif action["action"] == "readd_reduced_third":
                     state_reduced.pop(str(action["side"]), None)
+                state["baseline"] = baseline_snapshot(
+                    refreshed_positions if refreshed_positions else position_by_side,
+                    source=f"post_{action['action']}",
+                )
                 save_state(state)
         except BinanceSignedError as exc:
             action["error"] = {
@@ -419,6 +511,8 @@ def one_cycle(args: argparse.Namespace) -> None:
                 "code": exc.binance_code,
                 "message": exc.binance_message,
             }
+    if args.execute and baseline_created and not actions:
+        save_state(state)
     event["state_after"] = load_state()
     log_event(event)
     print(json.dumps(event, ensure_ascii=False, indent=2))
