@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Manual VELVETUSDT hedge rescue monitor.
+"""Manual hedge rescue monitor for an operator-specified symbol.
 
 This is intentionally separate from the normal live strategy. It only manages
-the operator-specified VELVETUSDT hedge and records every cycle/action to a
+the operator-specified hedge and records every cycle/action to a
 JSONL audit file.
 """
 
@@ -22,9 +22,11 @@ from bfa.config import load_config
 from bfa.execution.binance_client import BinanceFuturesSignedClient, BinanceSignedError
 
 
-SYMBOL = "VELVETUSDT"
-STATE_PATH = Path("/opt/binance-futures-agent/runtime/manual-rescue/velvet_state.json")
-LOG_PATH = Path("/opt/binance-futures-agent/runtime/manual-rescue/velvet_actions.jsonl")
+DEFAULT_SYMBOL = "VELVETUSDT"
+RUNTIME_DIR = Path("/opt/binance-futures-agent/runtime/manual-rescue")
+SYMBOL = DEFAULT_SYMBOL
+STATE_PATH = RUNTIME_DIR / "velvet_state.json"
+LOG_PATH = RUNTIME_DIR / "velvet_actions.jsonl"
 BASE_PUBLIC = "https://fapi.binance.com"
 
 
@@ -39,6 +41,19 @@ class Position:
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def symbol_slug(symbol: str) -> str:
+    clean = "".join(ch for ch in symbol.lower() if ch.isalnum())
+    return clean[:-4] if clean.endswith("usdt") else clean
+
+
+def configure_runtime(symbol: str, *, state_file: str | None = None, log_file: str | None = None) -> None:
+    global SYMBOL, STATE_PATH, LOG_PATH
+    SYMBOL = symbol.upper()
+    slug = symbol_slug(SYMBOL)
+    STATE_PATH = Path(state_file) if state_file else RUNTIME_DIR / f"{slug}_state.json"
+    LOG_PATH = Path(log_file) if log_file else RUNTIME_DIR / f"{slug}_actions.jsonl"
 
 
 def public_get(path: str, params: dict[str, object]) -> object:
@@ -75,7 +90,7 @@ def market_context() -> dict[str, float]:
     bars1 = klines("1m", 120)
     bars5 = klines("5m", 72)
     if len(bars1) < 30:
-        raise RuntimeError("insufficient 1m bars for VELVET rescue")
+        raise RuntimeError(f"insufficient 1m bars for {SYMBOL} rescue")
     closes = [item["close"] for item in bars1]
     ranges = [
         (item["high"] - item["low"]) / max(item["close"], 1e-9) * 100.0
@@ -513,13 +528,16 @@ def one_cycle(args: argparse.Namespace) -> None:
             }
     if args.execute and baseline_created and not actions:
         save_state(state)
-    event["state_after"] = load_state()
+    event["state_after"] = load_state() if args.execute else state
     log_event(event)
     print(json.dumps(event, ensure_ascii=False, indent=2))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument("--state-file")
+    parser.add_argument("--log-file")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=float, default=20.0)
@@ -528,6 +546,7 @@ def main() -> None:
     parser.add_argument("--cooldown-seconds", type=float, default=45.0)
     parser.add_argument("--max-imbalance-after-reduce", type=float, default=0.30)
     args = parser.parse_args()
+    configure_runtime(args.symbol, state_file=args.state_file, log_file=args.log_file)
     if args.once:
         one_cycle(args)
         return

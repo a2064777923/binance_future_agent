@@ -1,0 +1,15 @@
+[Unit]
+Description=Manual CAPUSDT hedge rescue monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/binance-futures-agent/app
+Environment=PYTHONPATH=/opt/binance-futures-agent/app/src
+ExecStart=/usr/bin/python3 /opt/binance-futures-agent/app/scripts/manual_ops/velvet_rescue.py --symbol CAPUSDT --execute --interval 10 --profit-trigger 6 --drawdown-readd 4.5 --cooldown-seconds 30 --max-imbalance-after-reduce 0.20
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

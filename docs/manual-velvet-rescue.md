@@ -2,7 +2,9 @@
 
 This is an operator-directed, symbol-specific rescue monitor for the manual
 `VELVETUSDT` hedge opened on 2026-06-28 Asia/Hong_Kong time. It is intentionally
-separate from the normal live strategy.
+separate from the normal live strategy. The underlying script is now parameterized
+by `--symbol`; VELVET remains the default symbol and keeps the original service
+name, state file, and log file.
 
 ## Server State
 
@@ -75,6 +77,13 @@ Dry-run one cycle:
 ```bash
 cd /opt/binance-futures-agent/app
 PYTHONPATH=src python3 scripts/manual_ops/velvet_rescue.py --once
+```
+
+Dry-run a different symbol with the same engine:
+
+```bash
+cd /opt/binance-futures-agent/app
+PYTHONPATH=src python3 scripts/manual_ops/velvet_rescue.py --symbol CAPUSDT --once
 ```
 
 Execute one cycle manually:
