@@ -33,16 +33,16 @@ losing `LONG` leg merely because it had improved versus baseline.
 
 The CAP service now uses trend rescue mode:
 
-- scan interval: `20s`
+- scan interval: `10s`
 - improvement trigger: `10U` versus rolling baseline
 - re-add trigger: `8U` giveback
-- action cooldown: `240s`
+- action cooldown: `45s`
 - post-reduce imbalance cap: `0.25`
 - reduce fraction: `0.08`
 - losing-leg trim net-book requirement: `+2.5U` versus the latest baseline
 - error backoff: `600s`
 
-Trend rescue mode is intentionally slower and more selective:
+Trend rescue mode scans quickly, but action still requires a strict setup:
 
 - In a downtrend, keep the profitable `SHORT` hedge running. Do not trim it just
   because it is green.
