@@ -17,27 +17,48 @@ For this reason, CAP must not wait for raw `upnl >= +10U`. It uses the rolling
 post-action baseline and treats a leg as having usable T-profit when that leg,
 or the net hedge book, has improved versus the latest baseline.
 
-## Initial Policy
+## Current Policy
 
 - Service: `binance-futures-agent-cap-rescue.service`
 - Script: `/opt/binance-futures-agent/app/scripts/manual_ops/velvet_rescue.py`
-- Symbol argument: `--symbol CAPUSDT`
+- Symbol/mode arguments: `--symbol CAPUSDT --mode trend-rescue`
 - Audit log: `/opt/binance-futures-agent/runtime/manual-rescue/cap_actions.jsonl`
 - State file: `/opt/binance-futures-agent/runtime/manual-rescue/cap_state.json`
 - Normal live exclusion: `BFA_MANUAL_POSITION_SYMBOLS` should include `CAPUSDT`
 
-CAP starts faster but more balance-constrained than VELVET:
+CAP originally ran with the VELVET range-T policy. That was wrong for this
+symbol's live path: CAP behaved like directional chop with a strong downward
+bias, not a clean range. The old policy realized too much loss by trimming the
+losing `LONG` leg merely because it had improved versus baseline.
 
-- scan interval: `10s`
-- improvement trigger: `6U` versus rolling baseline
-- re-add trigger: `4.5U` giveback
-- action cooldown: `30s`
-- post-reduce imbalance cap: `0.20`
+The CAP service now uses trend rescue mode:
 
-The lower trigger is intentional because CAP's oscillation is smaller and both
-legs started red. The tighter imbalance cap is also intentional: if CAP trends
-one way, over-cutting the improving leg can quickly turn the hedge into a
-directional bet.
+- scan interval: `20s`
+- improvement trigger: `10U` versus rolling baseline
+- re-add trigger: `8U` giveback
+- action cooldown: `240s`
+- post-reduce imbalance cap: `0.25`
+- reduce fraction: `0.08`
+- losing-leg trim net-book requirement: `+2.5U` versus the latest baseline
+- error backoff: `600s`
+
+Trend rescue mode is intentionally slower and more selective:
+
+- In a downtrend, keep the profitable `SHORT` hedge running. Do not trim it just
+  because it is green.
+- In a downtrend, only trim overweight losing `LONG` exposure on a fading
+  countertrend bounce, and only when the whole hedge book has improved by at
+  least `2.5U` versus the latest post-action baseline.
+- In an uptrend, mirror the rule: keep profitable `LONG`, and only trim
+  overweight losing `SHORT` exposure on a fading pullback with the same
+  net-book improvement requirement.
+- In range mode, a leg must be actually profitable before it can be reduced.
+- Re-add is no longer an automatic chase. It requires a pullback/bounce or
+  trend invalidation signal, and exchange errors trigger a backoff instead of
+  repeated immediate retries.
+- Every cycle writes `decision_diagnostics` into `cap_actions.jsonl`. This is
+  intentionally verbose: it records why each side did not reduce, including
+  cooldown, backoff, trigger, imbalance, regime, and net-book checks.
 
 ## Commands
 
