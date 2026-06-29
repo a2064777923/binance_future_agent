@@ -1,0 +1,15 @@
+[Unit]
+Description=Manual VELVETUSDT hedge rescue monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/binance-futures-agent/app
+Environment=PYTHONPATH=/opt/binance-futures-agent/app/src
+ExecStart=/usr/bin/python3 /opt/binance-futures-agent/app/scripts/manual_ops/velvet_rescue.py --symbol VELVETUSDT --mode downtrend-long-t --execute --interval 10 --profit-trigger 10 --drawdown-readd 8 --cooldown-seconds 30 --max-imbalance-after-reduce 0.30 --long-probe-fraction 0.08 --max-long-to-short-ratio 1.02 --error-backoff-seconds 600
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

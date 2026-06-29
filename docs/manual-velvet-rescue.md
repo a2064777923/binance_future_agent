@@ -16,6 +16,35 @@ name, state file, and log file.
 
 ## Current Policy
 
+As of 2026-06-29, VELVET runs `--mode downtrend-long-t` because the live path
+shifted from a clean range into a falling, volatile trend. The intent is to
+restore the recently reduced `SHORT` at a suitable rebound/fade location, then
+keep the short hedge running and use only small `LONG` probe trades to harvest
+down-spike mean reversion.
+
+Downtrend long-T rules:
+
+- First priority: if `SHORT` is recorded in `reduced`, re-add that short only on
+  a failed bounce / rebound zone. Do not chase the low.
+- After the short is restored, do not reduce `SHORT` in this mode.
+- Add a small `LONG` probe only on a down-spike near the 30-minute lower zone,
+  with downtrend bias still active.
+- The added long quantity is capped by `--max-long-to-short-ratio`; live uses
+  `1.02`, so long can only be very slightly larger than short.
+- Sell only the added `LONG` probe after mean reversion or a price target
+  recovery. The original hedge long is not mechanically closed by this mode.
+- Every cycle records mode diagnostics in `velvet_actions.jsonl`.
+
+Current live service parameters:
+
+- mode: `downtrend-long-t`
+- scan interval: `10s`
+- action cooldown: `30s`
+- long-probe controls:
+  `--long-probe-fraction 0.08 --max-long-to-short-ratio 1.02`
+
+## Previous Range Policy
+
 The monitor only manages `VELVETUSDT` and only after reading the current hedge
 position from Binance:
 
