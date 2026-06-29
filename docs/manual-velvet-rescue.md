@@ -33,6 +33,9 @@ Downtrend long-T rules:
   `1.02`, so long can only be very slightly larger than short.
 - Sell only the added `LONG` probe after mean reversion or a price target
   recovery. The original hedge long is not mechanically closed by this mode.
+- The added `LONG` probe must not be sold below its recorded entry price. Live
+  also requires `--long-probe-min-exit-profit-pct 0.18` before any probe sell,
+  even when the mean-reversion zone appears to have triggered.
 - Every cycle records mode diagnostics in `velvet_actions.jsonl`.
 
 Current live service parameters:
@@ -41,7 +44,7 @@ Current live service parameters:
 - scan interval: `10s`
 - action cooldown: `30s`
 - long-probe controls:
-  `--long-probe-fraction 0.08 --max-long-to-short-ratio 1.02`
+  `--long-probe-fraction 0.08 --max-long-to-short-ratio 1.02 --long-probe-min-exit-profit-pct 0.18`
 
 ## Previous Range Policy
 

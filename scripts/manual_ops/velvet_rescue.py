@@ -607,6 +607,8 @@ def downtrend_long_t_add_long_guard(
 def downtrend_long_t_reduce_long_probe_guard(
     context: dict[str, float],
     long_probe: dict[str, object],
+    *,
+    min_exit_profit_pct: float,
 ) -> dict[str, object]:
     range_mean = max(float(context.get("range_mean_60_pct") or 0.0), 0.1)
     last = float(context.get("last") or 0.0)
@@ -614,14 +616,19 @@ def downtrend_long_t_reduce_long_probe_guard(
     bounce = float(context.get("bounce_from_lo30_pct") or 0.0)
     entry_price = float(long_probe.get("entry_price") or 0.0)
     target_move_pct = max(range_mean * 0.55, 0.55)
+    break_even_price = entry_price * (1.0 + min_exit_profit_pct / 100.0) if entry_price > 0.0 else 0.0
+    profitable_exit = entry_price > 0.0 and last >= break_even_price
     price_target_hit = entry_price > 0.0 and last >= entry_price * (1.0 + target_move_pct / 100.0)
     mean_reversion_zone = pos30 >= 42.0 or bounce >= range_mean * 2.1
-    allowed = mean_reversion_zone or price_target_hit
+    allowed = profitable_exit and (mean_reversion_zone or price_target_hit)
     return {
         "allowed": allowed,
         "reason": "sell_added_long_after_mean_reversion",
         "entry_price": entry_price,
         "last": last,
+        "break_even_price": break_even_price,
+        "min_exit_profit_pct": min_exit_profit_pct,
+        "profitable_exit": profitable_exit,
         "target_move_pct": target_move_pct,
         "price_target_hit": price_target_hit,
         "mean_reversion_zone": mean_reversion_zone,
@@ -638,6 +645,7 @@ def decide_downtrend_long_t(
     cooldown_seconds: float,
     long_probe_fraction: float = 0.08,
     max_long_to_short_ratio: float = 1.02,
+    long_probe_min_exit_profit_pct: float = 0.18,
 ) -> list[dict[str, object]]:
     actions: list[dict[str, object]] = []
     now_epoch = time.time()
@@ -670,7 +678,11 @@ def decide_downtrend_long_t(
     long_probe_state = state.get("long_probe")
     long_probe = long_probe_state if isinstance(long_probe_state, dict) else None
     if long_probe and long_position:
-        guard = downtrend_long_t_reduce_long_probe_guard(context, long_probe)
+        guard = downtrend_long_t_reduce_long_probe_guard(
+            context,
+            long_probe,
+            min_exit_profit_pct=long_probe_min_exit_profit_pct,
+        )
         qty = min(int(float(long_probe.get("quantity") or 0)), int(math.floor(long_position.amount)))
         if cooldown_ok and qty > 0 and bool(guard.get("allowed")):
             params = reduce_order_params(long_position)
@@ -723,6 +735,7 @@ def decide(
     trend_min_book_delta: float,
     long_probe_fraction: float = 0.08,
     max_long_to_short_ratio: float = 1.02,
+    long_probe_min_exit_profit_pct: float = 0.18,
 ) -> list[dict[str, object]]:
     if mode == "downtrend-long-t":
         return decide_downtrend_long_t(
@@ -732,6 +745,7 @@ def decide(
             cooldown_seconds=cooldown_seconds,
             long_probe_fraction=long_probe_fraction,
             max_long_to_short_ratio=max_long_to_short_ratio,
+            long_probe_min_exit_profit_pct=long_probe_min_exit_profit_pct,
         )
     actions: list[dict[str, object]] = []
     now_epoch = time.time()
@@ -840,6 +854,7 @@ def decision_diagnostics(
     trend_min_book_delta: float,
     long_probe_fraction: float,
     max_long_to_short_ratio: float,
+    long_probe_min_exit_profit_pct: float,
 ) -> list[dict[str, object]]:
     if mode == "downtrend-long-t":
         reduced_state = state.get("reduced")
@@ -862,7 +877,11 @@ def decision_diagnostics(
             )
             return diagnostics
         if long_probe and position_by_side.get("LONG"):
-            guard = downtrend_long_t_reduce_long_probe_guard(context, long_probe)
+            guard = downtrend_long_t_reduce_long_probe_guard(
+                context,
+                long_probe,
+                min_exit_profit_pct=long_probe_min_exit_profit_pct,
+            )
             diagnostics.append(
                 {
                     "stage": "sell_long_probe",
@@ -987,6 +1006,7 @@ def one_cycle(args: argparse.Namespace) -> None:
         trend_min_book_delta=args.trend_min_book_delta,
         long_probe_fraction=args.long_probe_fraction,
         max_long_to_short_ratio=args.max_long_to_short_ratio,
+        long_probe_min_exit_profit_pct=args.long_probe_min_exit_profit_pct,
     )
     event: dict[str, object] = {
         "ts": utc_now(),
@@ -1008,6 +1028,7 @@ def one_cycle(args: argparse.Namespace) -> None:
             trend_min_book_delta=args.trend_min_book_delta,
             long_probe_fraction=args.long_probe_fraction,
             max_long_to_short_ratio=args.max_long_to_short_ratio,
+            long_probe_min_exit_profit_pct=args.long_probe_min_exit_profit_pct,
         ),
         "actions": actions,
     }
@@ -1079,6 +1100,7 @@ def main() -> None:
     parser.add_argument("--trend-min-book-delta", type=float, default=0.0)
     parser.add_argument("--long-probe-fraction", type=float, default=0.08)
     parser.add_argument("--max-long-to-short-ratio", type=float, default=1.02)
+    parser.add_argument("--long-probe-min-exit-profit-pct", type=float, default=0.18)
     parser.add_argument("--error-backoff-seconds", type=float, default=300.0)
     args = parser.parse_args()
     configure_runtime(args.symbol, state_file=args.state_file, log_file=args.log_file)

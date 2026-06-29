@@ -216,6 +216,52 @@ class ManualRescueDowntrendLongTTests(unittest.TestCase):
         self.assertEqual(actions[0]["side"], "LONG")
         self.assertEqual(actions[0]["quantity"], 21)
 
+    def test_does_not_sell_long_probe_below_entry_even_if_mean_reversion_zone_triggers(self):
+        actions = velvet_rescue.decide(
+            velvet_positions(long_amount=271.0, short_amount=270.0),
+            velvet_downtrend_context(pos30=50.0, bounce_from_lo30_pct=3.5, last=1.66),
+            {
+                "reduced": {},
+                "long_probe": {"quantity": 21, "entry_price": 1.67},
+                "last_action_epoch": None,
+            },
+            mode="downtrend-long-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.30,
+            reduce_fraction=1 / 3,
+            trend_min_book_delta=0.0,
+            long_probe_fraction=0.08,
+            max_long_to_short_ratio=1.02,
+            long_probe_min_exit_profit_pct=0.18,
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_does_not_sell_long_probe_barely_above_entry_before_profit_buffer(self):
+        actions = velvet_rescue.decide(
+            velvet_positions(long_amount=271.0, short_amount=270.0),
+            velvet_downtrend_context(pos30=50.0, bounce_from_lo30_pct=3.5, last=1.671),
+            {
+                "reduced": {},
+                "long_probe": {"quantity": 21, "entry_price": 1.67},
+                "last_action_epoch": None,
+            },
+            mode="downtrend-long-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.30,
+            reduce_fraction=1 / 3,
+            trend_min_book_delta=0.0,
+            long_probe_fraction=0.08,
+            max_long_to_short_ratio=1.02,
+            long_probe_min_exit_profit_pct=0.18,
+        )
+
+        self.assertEqual(actions, [])
+
 
 if __name__ == "__main__":
     unittest.main()
