@@ -637,6 +637,197 @@ def downtrend_long_t_reduce_long_probe_guard(
     }
 
 
+def uptrend_short_t_readd_long_guard(
+    position_by_side: dict[str, Position],
+    context: dict[str, float],
+) -> dict[str, object]:
+    regime = trend_rescue_regime(position_by_side, context)
+    range_mean = max(float(regime["range_mean"]), 0.1)
+    pos30 = float(context.get("pos30") or 50.0)
+    pos120 = float(context.get("pos120") or 50.0)
+    change_5m = float(context.get("change_5m_pct") or 0.0)
+    change_30m = float(context.get("change_30m_pct") or 0.0)
+    bounce = float(context.get("bounce_from_lo30_pct") or 0.0)
+    up_bias = str(regime["label"]) == "UP" or change_30m >= range_mean * 1.6
+    pullback_zone = pos30 <= 55.0 or pos120 <= 68.0
+    stabilizing = change_5m >= -range_mean * 0.2 or bounce >= range_mean * 0.8
+    not_chasing_high = pos30 <= 70.0
+    allowed = up_bias and pullback_zone and stabilizing and not_chasing_high
+    return {
+        **regime,
+        "allowed": allowed,
+        "reason": "uptrend_readd_reduced_long_on_stable_pullback",
+        "up_bias": up_bias,
+        "pullback_zone": pullback_zone,
+        "stabilizing": stabilizing,
+        "not_chasing_high": not_chasing_high,
+    }
+
+
+def uptrend_short_t_add_short_guard(
+    position_by_side: dict[str, Position],
+    context: dict[str, float],
+    *,
+    short_probe_fraction: float,
+    max_short_to_long_ratio: float,
+) -> dict[str, object]:
+    regime = trend_rescue_regime(position_by_side, context)
+    long_position = position_by_side.get("LONG")
+    short_position = position_by_side.get("SHORT")
+    long_amount = long_position.amount if long_position else 0.0
+    short_amount = short_position.amount if short_position else 0.0
+    range_mean = max(float(regime["range_mean"]), 0.1)
+    pos30 = float(context.get("pos30") or 50.0)
+    pos120 = float(context.get("pos120") or 50.0)
+    change_5m = float(context.get("change_5m_pct") or 0.0)
+    change_30m = float(context.get("change_30m_pct") or 0.0)
+    volume_ratio = float(context.get("volume_ratio_30") or 0.0)
+    pullback = float(context.get("pullback_from_hi30_pct") or 0.0)
+    up_bias = str(regime["label"]) == "UP" or change_30m >= range_mean * 1.6
+    spike_zone = pos30 >= 76.0 or pos120 >= 82.0
+    spike_flow = change_5m >= range_mean * 0.25 or volume_ratio >= 0.75
+    still_near_high = pullback <= range_mean * 1.9
+    max_short = max(long_amount * max_short_to_long_ratio, 0.0)
+    capacity = max_short - short_amount
+    desired_qty = round_qty(long_amount * short_probe_fraction) if long_amount > 0 else 0
+    qty = max(0, min(desired_qty, int(math.floor(capacity))))
+    allowed = up_bias and spike_zone and spike_flow and still_near_high and qty > 0
+    return {
+        **regime,
+        "allowed": allowed,
+        "reason": "uptrend_add_limited_short_on_up_spike",
+        "up_bias": up_bias,
+        "spike_zone": spike_zone,
+        "spike_flow": spike_flow,
+        "still_near_high": still_near_high,
+        "long_amount": long_amount,
+        "short_amount": short_amount,
+        "max_short": max_short,
+        "capacity": capacity,
+        "desired_qty": desired_qty,
+        "quantity": qty,
+    }
+
+
+def uptrend_short_t_reduce_short_probe_guard(
+    context: dict[str, float],
+    short_probe: dict[str, object],
+    *,
+    min_exit_profit_pct: float,
+) -> dict[str, object]:
+    range_mean = max(float(context.get("range_mean_60_pct") or 0.0), 0.1)
+    last = float(context.get("last") or 0.0)
+    pos30 = float(context.get("pos30") or 50.0)
+    pullback = float(context.get("pullback_from_hi30_pct") or 0.0)
+    entry_price = float(short_probe.get("entry_price") or 0.0)
+    target_move_pct = max(range_mean * 0.55, 0.55)
+    break_even_price = entry_price * (1.0 - min_exit_profit_pct / 100.0) if entry_price > 0.0 else 0.0
+    profitable_exit = entry_price > 0.0 and last <= break_even_price
+    price_target_hit = entry_price > 0.0 and last <= entry_price * (1.0 - target_move_pct / 100.0)
+    mean_reversion_zone = pos30 <= 58.0 or pullback >= range_mean * 2.1
+    allowed = profitable_exit and (mean_reversion_zone or price_target_hit)
+    return {
+        "allowed": allowed,
+        "reason": "buy_back_added_short_after_mean_reversion",
+        "entry_price": entry_price,
+        "last": last,
+        "break_even_price": break_even_price,
+        "min_exit_profit_pct": min_exit_profit_pct,
+        "profitable_exit": profitable_exit,
+        "target_move_pct": target_move_pct,
+        "price_target_hit": price_target_hit,
+        "mean_reversion_zone": mean_reversion_zone,
+        "pos30": pos30,
+        "pullback_from_hi30_pct": pullback,
+    }
+
+
+def decide_uptrend_short_t(
+    position_by_side: dict[str, Position],
+    context: dict[str, float],
+    state: dict[str, object],
+    *,
+    cooldown_seconds: float,
+    short_probe_fraction: float = 0.08,
+    max_short_to_long_ratio: float = 1.02,
+    short_probe_min_exit_profit_pct: float = 0.18,
+) -> list[dict[str, object]]:
+    actions: list[dict[str, object]] = []
+    now_epoch = time.time()
+    last_action = state.get("last_action_epoch")
+    cooldown_ok = last_action is None or now_epoch - float(last_action) >= cooldown_seconds
+    action_backoff_until = float(state.get("action_backoff_until") or 0.0)
+    if now_epoch < action_backoff_until:
+        return actions
+
+    reduced_state = state.get("reduced")
+    reduced = reduced_state if isinstance(reduced_state, dict) else {}
+    short_position = position_by_side.get("SHORT")
+    short_probe_state = state.get("short_probe")
+    short_probe = short_probe_state if isinstance(short_probe_state, dict) else None
+    if short_probe and short_position:
+        guard = uptrend_short_t_reduce_short_probe_guard(
+            context,
+            short_probe,
+            min_exit_profit_pct=short_probe_min_exit_profit_pct,
+        )
+        qty = min(int(float(short_probe.get("quantity") or 0)), int(math.floor(short_position.amount)))
+        if cooldown_ok and qty > 0 and bool(guard.get("allowed")):
+            params = reduce_order_params(short_position)
+            return [
+                {
+                    "action": "reduce_short_probe",
+                    "side": "SHORT",
+                    "quantity": qty,
+                    "reason": "buy back added SHORT probe after mean reversion",
+                    "short_probe_guard": guard,
+                    **params,
+                }
+            ]
+
+    long_reduced = reduced.get("LONG")
+    if isinstance(long_reduced, dict):
+        original_qty = int(float(long_reduced.get("quantity") or 0))
+        guard = uptrend_short_t_readd_long_guard(position_by_side, context)
+        if cooldown_ok and original_qty > 0 and bool(guard.get("allowed")):
+            params = add_order_params("LONG")
+            return [
+                {
+                    "action": "readd_reduced_third",
+                    "side": "LONG",
+                    "quantity": original_qty,
+                    "reason": "restore reduced LONG on stable pullback before continuing CAP uptrend short-T",
+                    "readd_guard": guard,
+                    **params,
+                }
+            ]
+
+    if short_probe:
+        return actions
+
+    guard = uptrend_short_t_add_short_guard(
+        position_by_side,
+        context,
+        short_probe_fraction=short_probe_fraction,
+        max_short_to_long_ratio=max_short_to_long_ratio,
+    )
+    qty = int(float(guard.get("quantity") or 0))
+    if cooldown_ok and qty > 0 and bool(guard.get("allowed")):
+        params = add_order_params("SHORT")
+        return [
+            {
+                "action": "add_short_probe",
+                "side": "SHORT",
+                "quantity": qty,
+                "reason": "sell limited SHORT probe on up-spike while LONG hedge stays protected",
+                "short_probe_guard": guard,
+                "reference_price": float(context.get("last") or 0.0),
+                **params,
+            }
+        ]
+    return actions
+
+
 def decide_downtrend_long_t(
     position_by_side: dict[str, Position],
     context: dict[str, float],
@@ -736,6 +927,9 @@ def decide(
     long_probe_fraction: float = 0.08,
     max_long_to_short_ratio: float = 1.02,
     long_probe_min_exit_profit_pct: float = 0.18,
+    short_probe_fraction: float = 0.08,
+    max_short_to_long_ratio: float = 1.02,
+    short_probe_min_exit_profit_pct: float = 0.18,
 ) -> list[dict[str, object]]:
     if mode == "downtrend-long-t":
         return decide_downtrend_long_t(
@@ -746,6 +940,16 @@ def decide(
             long_probe_fraction=long_probe_fraction,
             max_long_to_short_ratio=max_long_to_short_ratio,
             long_probe_min_exit_profit_pct=long_probe_min_exit_profit_pct,
+        )
+    if mode == "uptrend-short-t":
+        return decide_uptrend_short_t(
+            position_by_side,
+            context,
+            state,
+            cooldown_seconds=cooldown_seconds,
+            short_probe_fraction=short_probe_fraction,
+            max_short_to_long_ratio=max_short_to_long_ratio,
+            short_probe_min_exit_profit_pct=short_probe_min_exit_profit_pct,
         )
     actions: list[dict[str, object]] = []
     now_epoch = time.time()
@@ -855,6 +1059,9 @@ def decision_diagnostics(
     long_probe_fraction: float,
     max_long_to_short_ratio: float,
     long_probe_min_exit_profit_pct: float,
+    short_probe_fraction: float,
+    max_short_to_long_ratio: float,
+    short_probe_min_exit_profit_pct: float,
 ) -> list[dict[str, object]]:
     if mode == "downtrend-long-t":
         reduced_state = state.get("reduced")
@@ -906,6 +1113,91 @@ def decision_diagnostics(
                 "candidate_qty": int(float(guard.get("quantity") or 0)),
                 "long_probe_guard": guard,
                 "blocked_reasons": [] if guard.get("allowed") else ["long_probe_guard_blocks_add"],
+            }
+        )
+        return diagnostics
+    if mode == "uptrend-short-t":
+        now_epoch = time.time()
+        last_action = state.get("last_action_epoch")
+        cooldown_remaining = 0.0
+        if last_action is not None:
+            cooldown_remaining = max(cooldown_seconds - (now_epoch - float(last_action)), 0.0)
+        backoff_remaining = max(float(state.get("action_backoff_until") or 0.0) - now_epoch, 0.0)
+        reduced_state = state.get("reduced")
+        reduced = reduced_state if isinstance(reduced_state, dict) else {}
+        long_reduced = reduced.get("LONG")
+        short_probe_state = state.get("short_probe")
+        short_probe = short_probe_state if isinstance(short_probe_state, dict) else None
+        diagnostics: list[dict[str, object]] = []
+        if isinstance(long_reduced, dict):
+            guard = uptrend_short_t_readd_long_guard(position_by_side, context)
+            blocked = []
+            if not guard.get("allowed"):
+                blocked.append("long_restore_guard_blocks_readd")
+            if cooldown_remaining > 0:
+                blocked.append("cooldown_active")
+            if backoff_remaining > 0:
+                blocked.append("exchange_error_backoff_active")
+            diagnostics.append(
+                {
+                    "stage": "restore_long_if_stable",
+                    "side": "LONG",
+                    "reduced_state": long_reduced,
+                    "candidate_qty": int(float(long_reduced.get("quantity") or 0)),
+                    "readd_guard": guard,
+                    "blocked_reasons": blocked,
+                    "cooldown_remaining_seconds": round(cooldown_remaining, 3),
+                    "backoff_remaining_seconds": round(backoff_remaining, 3),
+                }
+            )
+        if short_probe and position_by_side.get("SHORT"):
+            guard = uptrend_short_t_reduce_short_probe_guard(
+                context,
+                short_probe,
+                min_exit_profit_pct=short_probe_min_exit_profit_pct,
+            )
+            blocked = []
+            if not guard.get("allowed"):
+                blocked.append("mean_reversion_not_reached")
+            if cooldown_remaining > 0:
+                blocked.append("cooldown_active")
+            if backoff_remaining > 0:
+                blocked.append("exchange_error_backoff_active")
+            diagnostics.append(
+                {
+                    "stage": "buy_back_short_probe",
+                    "side": "SHORT",
+                    "short_probe": short_probe,
+                    "candidate_qty": int(float(short_probe.get("quantity") or 0)),
+                    "short_probe_guard": guard,
+                    "blocked_reasons": blocked,
+                    "cooldown_remaining_seconds": round(cooldown_remaining, 3),
+                    "backoff_remaining_seconds": round(backoff_remaining, 3),
+                }
+            )
+            return diagnostics
+        guard = uptrend_short_t_add_short_guard(
+            position_by_side,
+            context,
+            short_probe_fraction=short_probe_fraction,
+            max_short_to_long_ratio=max_short_to_long_ratio,
+        )
+        blocked = []
+        if not guard.get("allowed"):
+            blocked.append("short_probe_guard_blocks_add")
+        if cooldown_remaining > 0:
+            blocked.append("cooldown_active")
+        if backoff_remaining > 0:
+            blocked.append("exchange_error_backoff_active")
+        diagnostics.append(
+            {
+                "stage": "add_short_probe",
+                "side": "SHORT",
+                "candidate_qty": int(float(guard.get("quantity") or 0)),
+                "short_probe_guard": guard,
+                "blocked_reasons": blocked,
+                "cooldown_remaining_seconds": round(cooldown_remaining, 3),
+                "backoff_remaining_seconds": round(backoff_remaining, 3),
             }
         )
         return diagnostics
@@ -1007,6 +1299,9 @@ def one_cycle(args: argparse.Namespace) -> None:
         long_probe_fraction=args.long_probe_fraction,
         max_long_to_short_ratio=args.max_long_to_short_ratio,
         long_probe_min_exit_profit_pct=args.long_probe_min_exit_profit_pct,
+        short_probe_fraction=args.short_probe_fraction,
+        max_short_to_long_ratio=args.max_short_to_long_ratio,
+        short_probe_min_exit_profit_pct=args.short_probe_min_exit_profit_pct,
     )
     event: dict[str, object] = {
         "ts": utc_now(),
@@ -1029,6 +1324,9 @@ def one_cycle(args: argparse.Namespace) -> None:
             long_probe_fraction=args.long_probe_fraction,
             max_long_to_short_ratio=args.max_long_to_short_ratio,
             long_probe_min_exit_profit_pct=args.long_probe_min_exit_profit_pct,
+            short_probe_fraction=args.short_probe_fraction,
+            max_short_to_long_ratio=args.max_short_to_long_ratio,
+            short_probe_min_exit_profit_pct=args.short_probe_min_exit_profit_pct,
         ),
         "actions": actions,
     }
@@ -1061,6 +1359,15 @@ def one_cycle(args: argparse.Namespace) -> None:
                     }
                 elif action["action"] == "reduce_long_probe":
                     state.pop("long_probe", None)
+                elif action["action"] == "add_short_probe":
+                    short_after = refreshed_positions.get("SHORT", position_by_side.get("SHORT"))
+                    state["short_probe"] = {
+                        "quantity": int(float(action["quantity"])),
+                        "entry_price": float(action.get("reference_price") or (short_after.mark if short_after else 0.0)),
+                        "added_at": utc_now(),
+                    }
+                elif action["action"] == "reduce_short_probe":
+                    state.pop("short_probe", None)
                 state["baseline"] = baseline_snapshot(
                     refreshed_positions if refreshed_positions else position_by_side,
                     source=f"post_{action['action']}",
@@ -1088,7 +1395,7 @@ def main() -> None:
     parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
     parser.add_argument("--state-file")
     parser.add_argument("--log-file")
-    parser.add_argument("--mode", choices=("range", "trend-rescue", "downtrend-long-t"), default="range")
+    parser.add_argument("--mode", choices=("range", "trend-rescue", "downtrend-long-t", "uptrend-short-t"), default="range")
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--interval", type=float, default=20.0)
@@ -1101,6 +1408,9 @@ def main() -> None:
     parser.add_argument("--long-probe-fraction", type=float, default=0.08)
     parser.add_argument("--max-long-to-short-ratio", type=float, default=1.02)
     parser.add_argument("--long-probe-min-exit-profit-pct", type=float, default=0.18)
+    parser.add_argument("--short-probe-fraction", type=float, default=0.08)
+    parser.add_argument("--max-short-to-long-ratio", type=float, default=1.02)
+    parser.add_argument("--short-probe-min-exit-profit-pct", type=float, default=0.18)
     parser.add_argument("--error-backoff-seconds", type=float, default=300.0)
     args = parser.parse_args()
     configure_runtime(args.symbol, state_file=args.state_file, log_file=args.log_file)
