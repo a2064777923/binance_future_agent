@@ -273,11 +273,16 @@ def cap_uptrend_positions(*, long_amount=17531.0, short_amount=16811.0):
 def cap_uptrend_context(**overrides):
     context = {
         "range_mean_60_pct": 0.88,
+        "range_p90_60_pct": 1.35,
         "change_5m_pct": 0.65,
         "change_15m_pct": 1.9,
         "change_30m_pct": 2.2,
         "pos30": 86.0,
         "pos120": 88.0,
+        "hi30": 0.0292,
+        "lo30": 0.0278,
+        "hi120": 0.0294,
+        "lo120": 0.0269,
         "pullback_from_hi30_pct": 0.45,
         "bounce_from_lo30_pct": 3.1,
         "volume_ratio_30": 0.9,
@@ -327,7 +332,9 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
             reduce_fraction=0.08,
             trend_min_book_delta=2.5,
             short_probe_fraction=0.08,
-            max_short_to_long_ratio=1.02,
+            short_probe_max_fraction=0.18,
+            max_short_to_long_ratio=1.08,
+            probe_min_expected_profit_usdt=0.7,
         )
 
         self.assertEqual(len(actions), 1)
@@ -335,13 +342,48 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
         self.assertEqual(actions[0]["side"], "SHORT")
         self.assertGreater(actions[0]["quantity"], 0)
 
+    def test_large_spike_scales_short_probe_quantity_to_meaningful_size(self):
+        actions = velvet_rescue.decide(
+            cap_uptrend_positions(long_amount=21438.0, short_amount=16811.0),
+            cap_uptrend_context(
+                range_mean_60_pct=1.25,
+                range_p90_60_pct=2.0,
+                hi30=0.02878,
+                lo30=0.02684,
+                last=0.02845,
+                pos30=92.0,
+                pos120=89.0,
+                change_5m_pct=1.55,
+                change_30m_pct=2.6,
+                volume_ratio_30=2.0,
+            ),
+            {"reduced": {}, "last_action_epoch": None},
+            mode="uptrend-short-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.25,
+            reduce_fraction=0.08,
+            trend_min_book_delta=2.5,
+            short_probe_fraction=0.08,
+            short_probe_max_fraction=0.18,
+            max_short_to_long_ratio=1.08,
+            probe_min_swing_pct=0.65,
+            probe_min_expected_profit_usdt=1.2,
+        )
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action"], "add_short_probe")
+        self.assertGreater(actions[0]["quantity"], 1715)
+        self.assertGreaterEqual(actions[0]["short_probe_guard"]["expected_profit_usdt"], 1.2)
+
     def test_buys_back_short_probe_after_profitable_mean_reversion(self):
         actions = velvet_rescue.decide(
             cap_uptrend_positions(short_amount=17800.0),
             cap_uptrend_context(pos30=52.0, pullback_from_hi30_pct=2.2, last=0.02855),
             {
                 "reduced": {},
-                "short_probe": {"quantity": 900, "entry_price": 0.0288},
+                "short_probe": {"quantity": 1524, "entry_price": 0.0288},
                 "last_action_epoch": None,
             },
             mode="uptrend-short-t",
@@ -354,6 +396,7 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
             short_probe_fraction=0.08,
             max_short_to_long_ratio=1.02,
             short_probe_min_exit_profit_pct=0.18,
+            short_probe_min_exit_profit_usdt=0.35,
         )
 
         self.assertEqual(len(actions), 1)
@@ -366,6 +409,30 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
             cap_uptrend_context(pos30=52.0, pullback_from_hi30_pct=2.2, last=0.02885),
             {
                 "reduced": {},
+                "short_probe": {"quantity": 1524, "entry_price": 0.0288},
+                "last_action_epoch": None,
+            },
+            mode="uptrend-short-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.25,
+            reduce_fraction=0.08,
+            trend_min_book_delta=2.5,
+            short_probe_fraction=0.08,
+            max_short_to_long_ratio=1.02,
+            short_probe_min_exit_profit_pct=0.18,
+            short_probe_min_exit_profit_usdt=0.35,
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_does_not_buy_back_short_probe_for_tiny_profit(self):
+        actions = velvet_rescue.decide(
+            cap_uptrend_positions(short_amount=17800.0),
+            cap_uptrend_context(pos30=52.0, pullback_from_hi30_pct=2.2, last=0.02865),
+            {
+                "reduced": {},
                 "short_probe": {"quantity": 900, "entry_price": 0.0288},
                 "last_action_epoch": None,
             },
@@ -379,9 +446,116 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
             short_probe_fraction=0.08,
             max_short_to_long_ratio=1.02,
             short_probe_min_exit_profit_pct=0.18,
+            short_probe_min_exit_profit_usdt=0.35,
         )
 
         self.assertEqual(actions, [])
+
+    def test_absorbs_stale_adverse_short_probe_to_unlock_future_t(self):
+        actions = velvet_rescue.decide(
+            cap_uptrend_positions(long_amount=21438.0, short_amount=18526.0),
+            cap_uptrend_context(
+                range_mean_60_pct=0.55,
+                range_p90_60_pct=1.05,
+                pos30=86.0,
+                pos120=88.0,
+                change_5m_pct=1.2,
+                change_30m_pct=3.0,
+                volume_ratio_30=1.1,
+                pullback_from_hi30_pct=0.3,
+                last=0.02772,
+            ),
+            {
+                "reduced": {},
+                "short_probe": {"quantity": 1715, "entry_price": 0.02425, "added_at": "2026-06-30T07:30:12Z"},
+                "last_action_epoch": None,
+            },
+            mode="uptrend-short-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.25,
+            reduce_fraction=0.08,
+            trend_min_book_delta=2.5,
+            short_probe_fraction=0.08,
+            max_short_to_long_ratio=1.02,
+            short_probe_min_exit_profit_pct=0.18,
+            short_probe_max_adverse_pct=1.8,
+            short_probe_max_age_seconds=60.0,
+        )
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action"], "absorb_short_probe")
+        self.assertEqual(actions[0]["side"], "SHORT")
+        self.assertTrue(actions[0]["absorb_guard"]["allowed"])
+
+    def test_blocks_tiny_sideways_short_probe_when_expected_profit_is_too_small(self):
+        actions = velvet_rescue.decide(
+            cap_uptrend_positions(long_amount=21438.0, short_amount=16811.0),
+            cap_uptrend_context(
+                range_mean_60_pct=0.18,
+                range_p90_60_pct=0.25,
+                pos30=88.0,
+                pos120=84.0,
+                change_5m_pct=0.07,
+                change_30m_pct=0.35,
+                volume_ratio_30=0.8,
+                pullback_from_hi30_pct=0.1,
+                hi30=0.02436,
+                lo30=0.02428,
+                hi120=0.02442,
+                lo120=0.02422,
+                last=0.0243,
+            ),
+            {"reduced": {}, "last_action_epoch": None},
+            mode="uptrend-short-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.25,
+            reduce_fraction=0.08,
+            trend_min_book_delta=2.5,
+            short_probe_fraction=0.08,
+            max_short_to_long_ratio=1.02,
+            probe_min_swing_pct=0.65,
+            probe_min_expected_profit_usdt=1.2,
+        )
+
+        self.assertEqual(actions, [])
+
+    def test_absorbs_recent_short_probe_once_adverse_exceeds_limit(self):
+        actions = velvet_rescue.decide(
+            cap_uptrend_positions(long_amount=21438.0, short_amount=20241.0),
+            cap_uptrend_context(
+                range_mean_60_pct=1.22,
+                pos30=96.0,
+                pos120=91.0,
+                change_5m_pct=1.82,
+                change_30m_pct=2.81,
+                volume_ratio_30=1.9,
+                pullback_from_hi30_pct=0.25,
+                last=0.02851,
+            ),
+            {
+                "reduced": {},
+                "short_probe": {"quantity": 1715, "entry_price": 0.02799, "added_at": "2026-06-30T10:47:59Z"},
+                "last_action_epoch": None,
+            },
+            mode="uptrend-short-t",
+            profit_trigger=10.0,
+            drawdown_readd_usdt=8.0,
+            cooldown_seconds=30.0,
+            max_imbalance_after_reduce=0.25,
+            reduce_fraction=0.08,
+            trend_min_book_delta=2.5,
+            short_probe_fraction=0.08,
+            max_short_to_long_ratio=1.08,
+            short_probe_max_adverse_pct=1.8,
+            short_probe_max_age_seconds=1800.0,
+        )
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action"], "absorb_short_probe")
 
     def test_profitable_short_probe_exit_has_priority_over_long_restore(self):
         actions = velvet_rescue.decide(
@@ -389,7 +563,7 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
             cap_uptrend_context(pos30=52.0, pullback_from_hi30_pct=2.2, last=0.02855),
             {
                 "reduced": {"LONG": {"quantity": 1524, "reduce_upnl": -7.6}},
-                "short_probe": {"quantity": 900, "entry_price": 0.0288},
+                "short_probe": {"quantity": 1524, "entry_price": 0.0288},
                 "last_action_epoch": None,
             },
             mode="uptrend-short-t",
@@ -402,6 +576,7 @@ class ManualRescueUptrendShortTTests(unittest.TestCase):
             short_probe_fraction=0.08,
             max_short_to_long_ratio=1.02,
             short_probe_min_exit_profit_pct=0.18,
+            short_probe_min_exit_profit_usdt=0.35,
         )
 
         self.assertEqual(len(actions), 1)

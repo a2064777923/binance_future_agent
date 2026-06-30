@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/binance-futures-agent/app
 Environment=PYTHONPATH=/opt/binance-futures-agent/app/src
-ExecStart=/usr/bin/python3 /opt/binance-futures-agent/app/scripts/manual_ops/velvet_rescue.py --symbol CAPUSDT --mode uptrend-short-t --execute --interval 5 --profit-trigger 10 --drawdown-readd 8 --cooldown-seconds 20 --max-imbalance-after-reduce 0.25 --reduce-fraction 0.08 --trend-min-book-delta 2.5 --short-probe-fraction 0.08 --max-short-to-long-ratio 1.02 --short-probe-min-exit-profit-pct 0.18 --error-backoff-seconds 600
+ExecStart=/usr/bin/python3 /opt/binance-futures-agent/app/scripts/manual_ops/velvet_rescue.py --symbol CAPUSDT --mode uptrend-short-t --execute --interval 5 --profit-trigger 10 --drawdown-readd 8 --cooldown-seconds 20 --max-imbalance-after-reduce 0.25 --reduce-fraction 0.08 --trend-min-book-delta 2.5 --short-probe-fraction 0.08 --short-probe-max-fraction 0.18 --max-short-to-long-ratio 1.08 --short-probe-min-exit-profit-pct 0.18 --short-probe-min-exit-profit-usdt 0.8 --probe-min-swing-pct 0.65 --probe-min-expected-profit-usdt 1.2 --short-probe-max-adverse-pct 1.8 --short-probe-max-age-seconds 1800 --error-backoff-seconds 600
 Restart=always
 RestartSec=5
 

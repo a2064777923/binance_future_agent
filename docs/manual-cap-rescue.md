@@ -47,8 +47,14 @@ The CAP service now uses uptrend short-T mode:
 - reduce fraction: `0.08`
 - losing-leg trim net-book requirement: `+2.5U` versus the latest baseline
 - short probe fraction: `0.08`
-- max short/long ratio after probe: `1.02`
+- max short probe fraction: `0.18`
+- max short/long ratio after probe: `1.08`
 - short probe minimum exit profit buffer: `0.18%`
+- short probe minimum gross T profit: `0.8U`
+- new probe minimum expected swing: `0.65%`
+- new probe minimum expected gross profit: `1.2U`
+- failed probe unlock: absorb the probe into the base hedge when it is adverse
+  by `1.8%` or stale for `1800s` with material adverse movement
 - error backoff: `600s`
 
 Uptrend short-T mode scans quickly, but action still requires a strict setup:
@@ -59,16 +65,24 @@ Uptrend short-T mode scans quickly, but action still requires a strict setup:
   that stale state no longer blocks short-T probes at the upper edge.
 - Short-T probes are small, bounded adds to the `SHORT` side only at upper
   spikes or high 30/120 minute range position with enough momentum/volume.
+  The base probe is `8%` of the long side, but large swings can scale it up
+  toward `18%` when the expected gross opportunity justifies the size.
 - The short probe is bought back only after mean reversion and only when the
-  current price is at least `0.18%` better than the probe entry. This prevents
-  the CAP/V​​ELVET failure mode where a probe was closed below its own entry.
+  current price is at least `0.18%` better than the probe entry and the probe
+  has at least `0.8U` estimated gross profit. This prevents closing below
+  entry and avoids operating during tiny sideways movement for only a few cents.
+- A failed probe no longer freezes the rescue loop. If price moves too far
+  against a temporary `SHORT` probe, the monitor records an `absorb_short_probe`
+  state-only action, keeps the actual hedge untouched, removes only the
+  temporary probe tag, refreshes the baseline, and lets the next scan evaluate
+  fresh T opportunities.
 - If a short probe is already open, exiting that probe has priority over
   restoring an old reduced long. A profitable probe should not be left exposed
   just because another recovery action is also allowed.
 - A second short probe is not layered on while the first short probe is still
   pending exit.
-- The short side is allowed to exceed the long side only very slightly
-  (`max_short_to_long_ratio=1.02`) so the rescue does not destroy the hedge if
+- The short side is allowed to exceed the long side only moderately
+  (`max_short_to_long_ratio=1.08`) so the rescue does not destroy the hedge if
   CAP keeps trending upward.
 - Exchange errors trigger a backoff instead of repeated immediate retries.
 - Every cycle writes `decision_diagnostics` into `cap_actions.jsonl`. This is
@@ -82,7 +96,11 @@ The server service was restarted at about `2026-06-30 07:41 CST` with:
 ```bash
   --symbol CAPUSDT --mode uptrend-short-t --execute --interval 5 \
   --cooldown-seconds 20 --short-probe-fraction 0.08 \
-  --max-short-to-long-ratio 1.02 --short-probe-min-exit-profit-pct 0.18
+  --short-probe-max-fraction 0.18 --max-short-to-long-ratio 1.08 \
+  --short-probe-min-exit-profit-pct 0.18 \
+  --short-probe-min-exit-profit-usdt 0.8 --probe-min-swing-pct 0.65 \
+  --probe-min-expected-profit-usdt 1.2 --short-probe-max-adverse-pct 1.8 \
+  --short-probe-max-age-seconds 1800
 ```
 
 Observed immediately after deployment:
@@ -92,8 +110,22 @@ Observed immediately after deployment:
 - One short-T loop added a bounded `SHORT` probe near `0.02867` and bought it
   back near `0.02857` only after the `0.18%` profit buffer was satisfied.
 - The current log shape should show stages such as `add_short_probe`,
-  `buy_back_short_probe`, and `restore_long_if_stable`; it should no longer
-  show generic `trend-rescue` reduce/readd decisions for CAP.
+  `buy_back_short_probe`, `restore_long_if_stable`, and possibly the state-only
+  `absorb_short_probe`; it should no longer show generic `trend-rescue`
+  reduce/readd decisions for CAP.
+
+### 2026-06-30 Adjustment
+
+CAP later rallied sharply while an old `SHORT` probe from `0.02425` remained in
+state. Because the old logic could only buy that probe back below breakeven, the
+monitor stayed stuck in `buy_back_short_probe` and skipped later high-volatility
+opportunities. The current version fixes that by absorbing invalidated probes
+into the base hedge instead of letting them block the whole rescue loop.
+
+The same change raises the action quality threshold: CAP should not keep
+operating in very small sideways movement just because a `0.18%` buffer is
+available. New probes now require enough estimated swing and USDT opportunity,
+and exits require both a percentage edge and a minimum gross T profit.
 
 ## Commands
 
