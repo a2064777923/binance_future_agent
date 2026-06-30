@@ -39,10 +39,10 @@ actions as the short leg's loss expanded.
 
 The CAP service now uses uptrend short-T mode:
 
-- scan interval: `10s`
+- scan interval: `5s`
 - improvement trigger: `10U` versus rolling baseline
 - re-add trigger: `8U` giveback
-- action cooldown: `30s`
+- action cooldown: `20s`
 - post-reduce imbalance cap: `0.25`
 - reduce fraction: `0.08`
 - losing-leg trim net-book requirement: `+2.5U` versus the latest baseline
@@ -80,8 +80,8 @@ Uptrend short-T mode scans quickly, but action still requires a strict setup:
 The server service was restarted at about `2026-06-30 07:41 CST` with:
 
 ```bash
---symbol CAPUSDT --mode uptrend-short-t --execute --interval 10 \
-  --cooldown-seconds 30 --short-probe-fraction 0.08 \
+  --symbol CAPUSDT --mode uptrend-short-t --execute --interval 5 \
+  --cooldown-seconds 20 --short-probe-fraction 0.08 \
   --max-short-to-long-ratio 1.02 --short-probe-min-exit-profit-pct 0.18
 ```
 
