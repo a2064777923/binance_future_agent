@@ -77,6 +77,14 @@ class MicroGridProfile:
     dynamic_entry_volatility_push_fraction: float = 0.05
     dynamic_entry_wick_push_fraction: float = 0.08
     dynamic_entry_continuation_push_fraction: float = 0.05
+    edge_anchor_projection_enabled: bool = False
+    edge_anchor_max_inside_fraction: float = 0.08
+    edge_anchor_high_pressure_inside_fraction: float = 0.02
+    edge_anchor_min_outside_fraction: float = -0.08
+    edge_anchor_large_width_percent: float = 1.20
+    edge_anchor_pressure_threshold: float = 0.55
+    edge_anchor_stop_widen_fraction: float = 0.14
+    edge_anchor_target_mean_ratio: float = 0.82
     dynamic_exit_geometry_enabled: bool = False
     dynamic_exit_stop_widen_fraction: float = 0.14
     dynamic_exit_max_stop_fraction: float = 0.62
@@ -592,6 +600,14 @@ def main() -> int:
     parser.add_argument("--dynamic-entry-volatility-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_volatility_push_fraction)
     parser.add_argument("--dynamic-entry-wick-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_wick_push_fraction)
     parser.add_argument("--dynamic-entry-continuation-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_continuation_push_fraction)
+    parser.add_argument("--edge-anchor-projection-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.edge_anchor_projection_enabled)
+    parser.add_argument("--edge-anchor-max-inside-fraction", type=float, default=MicroGridProfile.edge_anchor_max_inside_fraction)
+    parser.add_argument("--edge-anchor-high-pressure-inside-fraction", type=float, default=MicroGridProfile.edge_anchor_high_pressure_inside_fraction)
+    parser.add_argument("--edge-anchor-min-outside-fraction", type=float, default=MicroGridProfile.edge_anchor_min_outside_fraction)
+    parser.add_argument("--edge-anchor-large-width-percent", type=float, default=MicroGridProfile.edge_anchor_large_width_percent)
+    parser.add_argument("--edge-anchor-pressure-threshold", type=float, default=MicroGridProfile.edge_anchor_pressure_threshold)
+    parser.add_argument("--edge-anchor-stop-widen-fraction", type=float, default=MicroGridProfile.edge_anchor_stop_widen_fraction)
+    parser.add_argument("--edge-anchor-target-mean-ratio", type=float, default=MicroGridProfile.edge_anchor_target_mean_ratio)
     parser.add_argument("--dynamic-exit-geometry-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_exit_geometry_enabled)
     parser.add_argument("--dynamic-exit-stop-widen-fraction", type=float, default=MicroGridProfile.dynamic_exit_stop_widen_fraction)
     parser.add_argument("--dynamic-exit-max-stop-fraction", type=float, default=MicroGridProfile.dynamic_exit_max_stop_fraction)
@@ -733,6 +749,14 @@ def main() -> int:
         dynamic_entry_volatility_push_fraction=args.dynamic_entry_volatility_push_fraction,
         dynamic_entry_wick_push_fraction=args.dynamic_entry_wick_push_fraction,
         dynamic_entry_continuation_push_fraction=args.dynamic_entry_continuation_push_fraction,
+        edge_anchor_projection_enabled=args.edge_anchor_projection_enabled,
+        edge_anchor_max_inside_fraction=args.edge_anchor_max_inside_fraction,
+        edge_anchor_high_pressure_inside_fraction=args.edge_anchor_high_pressure_inside_fraction,
+        edge_anchor_min_outside_fraction=args.edge_anchor_min_outside_fraction,
+        edge_anchor_large_width_percent=args.edge_anchor_large_width_percent,
+        edge_anchor_pressure_threshold=args.edge_anchor_pressure_threshold,
+        edge_anchor_stop_widen_fraction=args.edge_anchor_stop_widen_fraction,
+        edge_anchor_target_mean_ratio=args.edge_anchor_target_mean_ratio,
         dynamic_exit_geometry_enabled=args.dynamic_exit_geometry_enabled,
         dynamic_exit_stop_widen_fraction=args.dynamic_exit_stop_widen_fraction,
         dynamic_exit_max_stop_fraction=args.dynamic_exit_max_stop_fraction,
@@ -1797,6 +1821,79 @@ def dynamic_entry_pressure_components(side: str, state: MicroGridState, profile:
     }
 
 
+def edge_anchor_projection(
+    side: str,
+    *,
+    edge_fraction: float,
+    stop_fraction: float,
+    target_fraction: float,
+    state: MicroGridState,
+    profile: MicroGridProfile,
+) -> tuple[float, float, float, list[str]]:
+    if not profile.edge_anchor_projection_enabled:
+        return edge_fraction, stop_fraction, target_fraction, []
+    pressures = dynamic_entry_pressure_components(side, state, profile)
+    pressure = clamp(
+        pressures["flow_pressure"] * 0.26
+        + pressures["momentum_pressure"] * 0.30
+        + pressures["volatility_pressure"] * 0.18
+        + pressures["wick_pressure"] * 0.16
+        + pressures["continuation_pressure"] * 0.10,
+        0.0,
+        1.0,
+    )
+    width = max(state.width_percent, 0.0001)
+    large_space = width >= max(profile.edge_anchor_large_width_percent, profile.min_width_percent * 1.75)
+    inside_ceiling = (
+        profile.edge_anchor_high_pressure_inside_fraction
+        if pressure >= profile.edge_anchor_pressure_threshold or large_space
+        else profile.edge_anchor_max_inside_fraction
+    )
+    inside_ceiling = clamp(inside_ceiling, -1.0, max(0.0, profile.wick_max_entry_fraction))
+
+    outside_floor = 0.0
+    if pressure >= profile.edge_anchor_pressure_threshold or large_space:
+        base_outside = abs(min(profile.edge_anchor_min_outside_fraction, 0.0))
+        outside_floor = base_outside * (0.55 + 0.45 * max(pressure, 0.45 if large_space else 0.0))
+
+    spike_depth_span = 0.0
+    projected_depth = 0.0
+    if state.recent_spike_depth_percent >= profile.spike_depth_min_percent:
+        spike_depth_span = clamp(
+            state.recent_spike_depth_percent / width,
+            0.0,
+            max(abs(profile.spike_depth_max_entry_edge_fraction), abs(profile.wick_min_entry_fraction), 0.01),
+        )
+        projected_depth = spike_depth_span * clamp(0.22 + pressure * 0.38, 0.22, 0.60)
+
+    projected_edge = -max(outside_floor, projected_depth)
+    lower = min(minimum_entry_edge_fraction(profile), profile.wick_min_entry_fraction, profile.spike_depth_max_entry_edge_fraction)
+    anchored_edge = clamp(min(edge_fraction, inside_ceiling, projected_edge), lower, profile.max_reservation_edge_fraction)
+    stop_floor = profile.wick_min_stop_fraction + pressure * max(0.0, profile.edge_anchor_stop_widen_fraction)
+    if anchored_edge < 0:
+        stop_floor += abs(anchored_edge) * 0.22
+    stop_cap = max(profile.spike_depth_max_stop_fraction, profile.dynamic_exit_max_stop_fraction, profile.wick_max_stop_fraction)
+    anchored_stop = clamp(max(stop_fraction, stop_floor), profile.wick_min_stop_fraction, stop_cap)
+    mean_distance = max(0.0, 0.50 - anchored_edge)
+    target_floor = max(profile.wick_min_target_fraction, mean_distance * clamp(profile.edge_anchor_target_mean_ratio, 0.45, 1.05))
+    target_cap = max(profile.dynamic_exit_max_target_fraction, profile.wick_max_target_fraction, profile.target_extension_max_fraction)
+    anchored_target = clamp(max(target_fraction, target_floor), profile.wick_min_target_fraction, target_cap)
+    reasons = [
+        f"edge_anchor_projection_enabled:{profile.edge_anchor_projection_enabled}",
+        f"edge_anchor_pressure:{round(pressure, 6)}",
+        f"edge_anchor_large_space:{large_space}",
+        f"edge_anchor_inside_ceiling_fraction:{round(inside_ceiling, 6)}",
+        f"edge_anchor_outside_floor_fraction:{round(outside_floor, 6)}",
+        f"edge_anchor_spike_depth_span:{round(spike_depth_span, 6)}",
+        f"edge_anchor_projected_depth_fraction:{round(projected_depth, 6)}",
+        f"edge_anchor_input_edge_fraction:{round(edge_fraction, 6)}",
+        f"edge_anchor_output_edge_fraction:{round(anchored_edge, 6)}",
+        f"edge_anchor_stop_floor_fraction:{round(stop_floor, 6)}",
+        f"edge_anchor_target_floor_fraction:{round(target_floor, 6)}",
+    ]
+    return anchored_edge, anchored_stop, anchored_target, reasons
+
+
 def dynamic_exit_span_fractions(
     side: str,
     *,
@@ -2034,6 +2131,25 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         short_plan = None
         buy_edge_fraction = pullback_adjusted_edge_fraction("long", buy_edge_fraction, state, profile)
         sell_edge_fraction = pullback_adjusted_edge_fraction("short", sell_edge_fraction, state, profile)
+    buy_edge_fraction, buy_stop_fraction, buy_target_fraction, buy_anchor_reasons = edge_anchor_projection(
+        "long",
+        edge_fraction=buy_edge_fraction,
+        stop_fraction=buy_stop_fraction,
+        target_fraction=buy_target_fraction,
+        state=state,
+        profile=profile,
+    )
+    sell_edge_fraction, sell_stop_fraction, sell_target_fraction, sell_anchor_reasons = edge_anchor_projection(
+        "short",
+        edge_fraction=sell_edge_fraction,
+        stop_fraction=sell_stop_fraction,
+        target_fraction=sell_target_fraction,
+        state=state,
+        profile=profile,
+    )
+    entry_reason_codes["long"].extend(buy_anchor_reasons)
+    entry_reason_codes["short"].extend(sell_anchor_reasons)
+    entry_min_edge_fraction = min(entry_min_edge_fraction, buy_edge_fraction, sell_edge_fraction)
     if profile.dynamic_entry_edge_enabled:
         entry_reason_codes["long"].append(f"dynamic_entry_post_pullback_edge_fraction:{round(buy_edge_fraction, 6)}")
         entry_reason_codes["short"].append(f"dynamic_entry_post_pullback_edge_fraction:{round(sell_edge_fraction, 6)}")

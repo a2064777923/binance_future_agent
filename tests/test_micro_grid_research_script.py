@@ -984,6 +984,101 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertIn("spike_depth_dynamic_min_edge_fraction:-", " ".join(short.reason_codes))
         self.assertTrue(any(code.startswith("spike_depth_short_tail_pressure:") for code in short.reason_codes))
 
+    def test_edge_anchor_projection_keeps_upper_wick_short_outside_band_when_spike_block_is_off(self):
+        state = research.replace(
+            self.state(),
+            current_price=101.35,
+            lower_price=98.0,
+            upper_price=102.0,
+            width_percent=4.0,
+            close_position_percent=88.0,
+            short_entry_edge_fraction=0.34,
+            short_stop_span_fraction=0.14,
+            short_target_span_fraction=0.24,
+            recent_spike_depth_percent=2.4,
+            recent_drift_percent=1.5,
+            instantaneous_vol_percent=0.8,
+            entry_taker_buy_ratio=0.78,
+            short_entry_continuation_fraction=0.18,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=False,
+                dynamic_exit_geometry_enabled=False,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                edge_anchor_projection_enabled=True,
+                edge_anchor_min_outside_fraction=-0.08,
+                wick_min_entry_fraction=-0.42,
+                spike_depth_max_entry_edge_fraction=-0.42,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        short = next(order for order in orders if order.side == "short")
+        values = research.reason_code_map(short.reason_codes)
+        short_edge = research.edge_fraction_for_order("short", short.entry_price, state)
+        stop_fraction = research.code_float(values, "stop_span_fraction", 0.0)
+        target_fraction = research.code_float(values, "target_span_fraction", 0.0)
+
+        self.assertLess(short_edge, -0.20)
+        self.assertGreater(short.entry_price, state.upper_price)
+        self.assertGreater(stop_fraction, 0.20)
+        self.assertGreater(target_fraction, 0.55)
+        self.assertTrue(any(code.startswith("edge_anchor_pressure:") for code in short.reason_codes))
+        self.assertIn("edge_anchor_large_space:True", short.reason_codes)
+
+    def test_edge_anchor_projection_keeps_lower_wick_long_outside_band_when_spike_block_is_off(self):
+        state = research.replace(
+            self.state(),
+            current_price=98.65,
+            lower_price=98.0,
+            upper_price=102.0,
+            width_percent=4.0,
+            close_position_percent=12.0,
+            long_entry_edge_fraction=0.34,
+            long_stop_span_fraction=0.14,
+            long_target_span_fraction=0.24,
+            recent_spike_depth_percent=2.4,
+            recent_drift_percent=-1.5,
+            instantaneous_vol_percent=0.8,
+            entry_taker_buy_ratio=0.22,
+            long_entry_continuation_fraction=0.18,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=False,
+                dynamic_exit_geometry_enabled=False,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                edge_anchor_projection_enabled=True,
+                edge_anchor_min_outside_fraction=-0.08,
+                wick_min_entry_fraction=-0.42,
+                spike_depth_max_entry_edge_fraction=-0.42,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        values = research.reason_code_map(long.reason_codes)
+        long_edge = research.edge_fraction_for_order("long", long.entry_price, state)
+        stop_fraction = research.code_float(values, "stop_span_fraction", 0.0)
+        target_fraction = research.code_float(values, "target_span_fraction", 0.0)
+
+        self.assertLess(long_edge, -0.20)
+        self.assertLess(long.entry_price, state.lower_price)
+        self.assertGreater(stop_fraction, 0.20)
+        self.assertGreater(target_fraction, 0.55)
+        self.assertTrue(any(code.startswith("edge_anchor_projected_depth_fraction:") for code in long.reason_codes))
+
     def test_directional_path_is_rejected_as_trend_pause(self):
         state, reasons = research.build_micro_grid_state(trend_seconds(count=120), 80, self.profile())
 

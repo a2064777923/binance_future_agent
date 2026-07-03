@@ -39,6 +39,14 @@ class MicroGridLiveConfig:
     dynamic_entry_volatility_push_fraction: float
     dynamic_entry_wick_push_fraction: float
     dynamic_entry_continuation_push_fraction: float
+    edge_anchor_projection_enabled: bool
+    edge_anchor_max_inside_fraction: float
+    edge_anchor_high_pressure_inside_fraction: float
+    edge_anchor_min_outside_fraction: float
+    edge_anchor_large_width_percent: float
+    edge_anchor_pressure_threshold: float
+    edge_anchor_stop_widen_fraction: float
+    edge_anchor_target_mean_ratio: float
     wick_min_entry_fraction: float
     spike_depth_entry_fraction: float
     spike_depth_tail_buffer_fraction: float
@@ -100,6 +108,42 @@ class MicroGridLiveConfig:
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_CONTINUATION_PUSH_FRACTION"), 0.025),
                 0.0,
                 0.20,
+            ),
+            edge_anchor_projection_enabled=_truthy(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_PROJECTION_ENABLED", "true")),
+            edge_anchor_max_inside_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_MAX_INSIDE_FRACTION"), 0.08),
+                -0.20,
+                0.30,
+            ),
+            edge_anchor_high_pressure_inside_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_HIGH_PRESSURE_INSIDE_FRACTION"), 0.02),
+                -0.30,
+                0.20,
+            ),
+            edge_anchor_min_outside_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_MIN_OUTSIDE_FRACTION"), -0.08),
+                -0.80,
+                0.0,
+            ),
+            edge_anchor_large_width_percent=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_LARGE_WIDTH_PERCENT"), 1.20),
+                0.10,
+                10.0,
+            ),
+            edge_anchor_pressure_threshold=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_PRESSURE_THRESHOLD"), 0.55),
+                0.05,
+                0.95,
+            ),
+            edge_anchor_stop_widen_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_STOP_WIDEN_FRACTION"), 0.14),
+                0.0,
+                0.80,
+            ),
+            edge_anchor_target_mean_ratio=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_TARGET_MEAN_RATIO"), 0.82),
+                0.35,
+                1.05,
             ),
             wick_min_entry_fraction=_clip(
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION"), -0.42),
@@ -620,6 +664,14 @@ def _live_profile(research, live_config: MicroGridLiveConfig):
         dynamic_entry_volatility_push_fraction=live_config.dynamic_entry_volatility_push_fraction,
         dynamic_entry_wick_push_fraction=live_config.dynamic_entry_wick_push_fraction,
         dynamic_entry_continuation_push_fraction=live_config.dynamic_entry_continuation_push_fraction,
+        edge_anchor_projection_enabled=live_config.edge_anchor_projection_enabled,
+        edge_anchor_max_inside_fraction=live_config.edge_anchor_max_inside_fraction,
+        edge_anchor_high_pressure_inside_fraction=live_config.edge_anchor_high_pressure_inside_fraction,
+        edge_anchor_min_outside_fraction=live_config.edge_anchor_min_outside_fraction,
+        edge_anchor_large_width_percent=live_config.edge_anchor_large_width_percent,
+        edge_anchor_pressure_threshold=live_config.edge_anchor_pressure_threshold,
+        edge_anchor_stop_widen_fraction=live_config.edge_anchor_stop_widen_fraction,
+        edge_anchor_target_mean_ratio=live_config.edge_anchor_target_mean_ratio,
         dynamic_exit_geometry_enabled=True,
         dynamic_exit_stop_widen_fraction=0.12,
         dynamic_exit_max_stop_fraction=0.56,

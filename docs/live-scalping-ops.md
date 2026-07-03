@@ -93,7 +93,12 @@ position, then the original entry limit keeps filling more size behind it.
 Current live micro-grid behavior is also documented in
 `docs/current-live-strategy.md`: it is a quant-only fast lane, bypasses AI,
 uses `RANGE` regime routing, and has corrected side selection that favors
-upper-edge shorts and lower-edge longs.
+upper-edge shorts and lower-edge longs. As of the 2026-07-04 edge-anchor
+update, micro-grid entries also pass through `edge_anchor_*` geometry before
+grid layers are built. For strong upward needles, shorts are forced back toward
+the upper band edge or outside it; for strong downward needles, longs are forced
+back toward the lower band edge or outside it. The same projection widens the
+initial stop floor and targets a meaningful move back toward the mean.
 
 ## Processed Live Cycle Statuses
 

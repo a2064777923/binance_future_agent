@@ -403,30 +403,42 @@ Micro-grid entry geometry is dynamic:
 - stop and target geometry are adjusted from the same volatility/quality
   context rather than using one fixed distance.
 
-2026-07-03 live no-fill audit: the fast lane was scanning and submitting
-orders, but 135 of 142 recent micro-grid setups ended as `terminal_no_fill`.
-The unfilled entries had a median offset of about `0.90%` from reference price,
-while the median short-range band width was about `0.75%`; the first limit was
-often deeper than the whole active band. The live adapter now exposes the entry
-geometry as env-tunable knobs, and the server is currently set to a tighter
-first-entry profile:
+2026-07-03/04 live no-fill and stop-loss audits found two separate failure
+modes. First, the old shallow server env could post large-space micro-grid
+orders too close to the middle of the active band. Second, the first reprice
+implementation could chase an unfilled passive entry toward current price.
+The current live profile keeps reprice disabled and uses edge-anchored
+projection instead: the entry is still passive, but when flow/momentum/vol/wick
+pressure or a large 240s band says the next needle is likely to overshoot, the
+entry is forced back toward the lower/upper edge or outside the band rather
+than being clipped back to the old min edge.
 
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION=-0.02`
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MAX_PUSH_FRACTION=0.08`
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_FLOW_PUSH_FRACTION=0.025`
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MOMENTUM_PUSH_FRACTION=0.025`
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_VOLATILITY_PUSH_FRACTION=0.02`
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_WICK_PUSH_FRACTION=0.02`
-- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_CONTINUATION_PUSH_FRACTION=0.02`
-- `BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION=-0.28`
-- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_ENTRY_FRACTION=0.36`
-- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_TAIL_BUFFER_FRACTION=0.06`
-- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION=-0.28`
+Current server micro-grid entry geometry:
 
-Immediate server observation after this second tune showed new micro-grid
-offsets around `0.16%` to `0.26%`. If these still remain mostly no-fill, the
-next tuning axis is order lifetime/reprice behavior under the `20s` wait
-window, not another deep-entry push.
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION=-0.03`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MAX_PUSH_FRACTION=0.12`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_FLOW_PUSH_FRACTION=0.04`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MOMENTUM_PUSH_FRACTION=0.04`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_VOLATILITY_PUSH_FRACTION=0.025`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_WICK_PUSH_FRACTION=0.03`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_CONTINUATION_PUSH_FRACTION=0.025`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_PROJECTION_ENABLED=true`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_MAX_INSIDE_FRACTION=0.08`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_HIGH_PRESSURE_INSIDE_FRACTION=0.02`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_MIN_OUTSIDE_FRACTION=-0.08`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_LARGE_WIDTH_PERCENT=1.20`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_PRESSURE_THRESHOLD=0.55`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_STOP_WIDEN_FRACTION=0.14`
+- `BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_TARGET_MEAN_RATIO=0.82`
+- `BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION=-0.42`
+- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_ENTRY_FRACTION=0.48`
+- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_TAIL_BUFFER_FRACTION=0.10`
+- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION=-0.42`
+
+Important implementation note: the edge-anchor projection updates the
+`entry_min_edge_fraction` used by grid layers. Without that, a deep projected
+entry could be computed correctly and then clipped back to the old shallow edge
+when the grid layers were built.
 
 Follow-up observation after the tighter geometry still showed `19` unique
 micro-grid orders ending as unfilled pending/expired orders. Median
@@ -478,6 +490,7 @@ For future diagnostics, inspect these intent reason codes and metadata:
 
 - `dynamic_entry_*`
 - `dynamic_exit_*`
+- `edge_anchor_*`
 - `spike_depth_*`
 - `planner_*`
 - `entry_edge_fraction`

@@ -129,6 +129,10 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         self.assertAlmostEqual(profile.min_wick_opportunity_percent, 0.55)
         self.assertAlmostEqual(profile.dynamic_entry_base_edge_fraction, -0.03)
         self.assertAlmostEqual(profile.dynamic_entry_max_push_fraction, 0.12)
+        self.assertTrue(profile.edge_anchor_projection_enabled)
+        self.assertAlmostEqual(profile.edge_anchor_max_inside_fraction, 0.08)
+        self.assertAlmostEqual(profile.edge_anchor_high_pressure_inside_fraction, 0.02)
+        self.assertAlmostEqual(profile.edge_anchor_min_outside_fraction, -0.08)
         self.assertAlmostEqual(profile.wick_min_entry_fraction, -0.42)
         self.assertAlmostEqual(profile.spike_depth_entry_fraction, 0.48)
         self.assertAlmostEqual(profile.spike_depth_max_entry_edge_fraction, -0.42)
@@ -139,6 +143,9 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
                 env={
                     "BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION": "-0.05",
                     "BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MAX_PUSH_FRACTION": "0.08",
+                    "BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_PROJECTION_ENABLED": "false",
+                    "BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_MAX_INSIDE_FRACTION": "0.04",
+                    "BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_MIN_OUTSIDE_FRACTION": "-0.12",
                     "BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION": "-0.30",
                     "BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_ENTRY_FRACTION": "0.40",
                     "BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION": "-0.35",
@@ -150,6 +157,9 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
 
         self.assertAlmostEqual(profile.dynamic_entry_base_edge_fraction, -0.05)
         self.assertAlmostEqual(profile.dynamic_entry_max_push_fraction, 0.08)
+        self.assertFalse(profile.edge_anchor_projection_enabled)
+        self.assertAlmostEqual(profile.edge_anchor_max_inside_fraction, 0.04)
+        self.assertAlmostEqual(profile.edge_anchor_min_outside_fraction, -0.12)
         self.assertAlmostEqual(profile.wick_min_entry_fraction, -0.30)
         self.assertAlmostEqual(profile.spike_depth_entry_fraction, 0.40)
         self.assertAlmostEqual(profile.spike_depth_max_entry_edge_fraction, -0.35)
