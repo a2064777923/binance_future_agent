@@ -100,6 +100,12 @@ the upper band edge or outside it; for strong downward needles, longs are forced
 back toward the lower band edge or outside it. The same projection widens the
 initial stop floor and targets a meaningful move back toward the mean.
 
+The MANAUSDT follow-up keeps that edge anchoring but prevents unreachable
+orders: `edge_anchor_fillability_*` reason codes show whether recent spike
+depth, instantaneous volatility, drift, and pressure justify a very deep
+outside-band entry. If not, the order is pulled closer to the band edge while
+remaining passive.
+
 The same 2026-07-04 risk hotfix makes exchange leverage downshifts fail closed:
 after Binance accepts a lower leverage than requested, the executor re-runs the
 full risk gate with the lower effective leverage. If actual initial margin now

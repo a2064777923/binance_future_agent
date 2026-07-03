@@ -1079,6 +1079,49 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertGreater(target_fraction, 0.55)
         self.assertTrue(any(code.startswith("edge_anchor_projected_depth_fraction:") for code in long.reason_codes))
 
+    def test_edge_anchor_fillability_pulls_unreachable_deep_entry_closer(self):
+        state = research.replace(
+            self.state(),
+            current_price=98.70,
+            lower_price=98.0,
+            upper_price=102.0,
+            width_percent=4.0,
+            close_position_percent=16.0,
+            long_entry_edge_fraction=-0.42,
+            long_stop_span_fraction=0.20,
+            long_target_span_fraction=0.55,
+            recent_spike_depth_percent=0.10,
+            recent_drift_percent=-0.12,
+            instantaneous_vol_percent=0.05,
+            entry_taker_buy_ratio=0.48,
+            long_entry_continuation_fraction=0.0,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=False,
+                dynamic_exit_geometry_enabled=False,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                edge_anchor_projection_enabled=True,
+                edge_anchor_min_outside_fraction=-0.08,
+                wick_min_entry_fraction=-0.42,
+                spike_depth_max_entry_edge_fraction=-0.42,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        long_edge = research.edge_fraction_for_order("long", long.entry_price, state)
+
+        self.assertGreater(long_edge, -0.20)
+        self.assertLess(long.entry_price, state.lower_price)
+        self.assertTrue(any(code.startswith("edge_anchor_fillability_floor_fraction:") for code in long.reason_codes))
+        self.assertTrue(any(code.startswith("edge_anchor_fillability_adjusted:True") for code in long.reason_codes))
+
     def test_directional_path_is_rejected_as_trend_pause(self):
         state, reasons = research.build_micro_grid_state(trend_seconds(count=120), 80, self.profile())
 

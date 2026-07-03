@@ -85,6 +85,13 @@ class MicroGridProfile:
     edge_anchor_pressure_threshold: float = 0.55
     edge_anchor_stop_widen_fraction: float = 0.14
     edge_anchor_target_mean_ratio: float = 0.82
+    edge_anchor_fillability_enabled: bool = True
+    edge_anchor_fillability_base_outside_fraction: float = 0.08
+    edge_anchor_fillability_max_outside_fraction: float = 0.36
+    edge_anchor_fillability_spike_weight: float = 0.22
+    edge_anchor_fillability_volatility_weight: float = 0.12
+    edge_anchor_fillability_drift_weight: float = 0.08
+    edge_anchor_fillability_pressure_weight: float = 0.08
     dynamic_exit_geometry_enabled: bool = False
     dynamic_exit_stop_widen_fraction: float = 0.14
     dynamic_exit_max_stop_fraction: float = 0.62
@@ -608,6 +615,13 @@ def main() -> int:
     parser.add_argument("--edge-anchor-pressure-threshold", type=float, default=MicroGridProfile.edge_anchor_pressure_threshold)
     parser.add_argument("--edge-anchor-stop-widen-fraction", type=float, default=MicroGridProfile.edge_anchor_stop_widen_fraction)
     parser.add_argument("--edge-anchor-target-mean-ratio", type=float, default=MicroGridProfile.edge_anchor_target_mean_ratio)
+    parser.add_argument("--edge-anchor-fillability-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.edge_anchor_fillability_enabled)
+    parser.add_argument("--edge-anchor-fillability-base-outside-fraction", type=float, default=MicroGridProfile.edge_anchor_fillability_base_outside_fraction)
+    parser.add_argument("--edge-anchor-fillability-max-outside-fraction", type=float, default=MicroGridProfile.edge_anchor_fillability_max_outside_fraction)
+    parser.add_argument("--edge-anchor-fillability-spike-weight", type=float, default=MicroGridProfile.edge_anchor_fillability_spike_weight)
+    parser.add_argument("--edge-anchor-fillability-volatility-weight", type=float, default=MicroGridProfile.edge_anchor_fillability_volatility_weight)
+    parser.add_argument("--edge-anchor-fillability-drift-weight", type=float, default=MicroGridProfile.edge_anchor_fillability_drift_weight)
+    parser.add_argument("--edge-anchor-fillability-pressure-weight", type=float, default=MicroGridProfile.edge_anchor_fillability_pressure_weight)
     parser.add_argument("--dynamic-exit-geometry-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_exit_geometry_enabled)
     parser.add_argument("--dynamic-exit-stop-widen-fraction", type=float, default=MicroGridProfile.dynamic_exit_stop_widen_fraction)
     parser.add_argument("--dynamic-exit-max-stop-fraction", type=float, default=MicroGridProfile.dynamic_exit_max_stop_fraction)
@@ -757,6 +771,13 @@ def main() -> int:
         edge_anchor_pressure_threshold=args.edge_anchor_pressure_threshold,
         edge_anchor_stop_widen_fraction=args.edge_anchor_stop_widen_fraction,
         edge_anchor_target_mean_ratio=args.edge_anchor_target_mean_ratio,
+        edge_anchor_fillability_enabled=args.edge_anchor_fillability_enabled,
+        edge_anchor_fillability_base_outside_fraction=args.edge_anchor_fillability_base_outside_fraction,
+        edge_anchor_fillability_max_outside_fraction=args.edge_anchor_fillability_max_outside_fraction,
+        edge_anchor_fillability_spike_weight=args.edge_anchor_fillability_spike_weight,
+        edge_anchor_fillability_volatility_weight=args.edge_anchor_fillability_volatility_weight,
+        edge_anchor_fillability_drift_weight=args.edge_anchor_fillability_drift_weight,
+        edge_anchor_fillability_pressure_weight=args.edge_anchor_fillability_pressure_weight,
         dynamic_exit_geometry_enabled=args.dynamic_exit_geometry_enabled,
         dynamic_exit_stop_widen_fraction=args.dynamic_exit_stop_widen_fraction,
         dynamic_exit_max_stop_fraction=args.dynamic_exit_max_stop_fraction,
@@ -1821,6 +1842,45 @@ def dynamic_entry_pressure_components(side: str, state: MicroGridState, profile:
     }
 
 
+def edge_anchor_fillability_floor(
+    *,
+    state: MicroGridState,
+    profile: MicroGridProfile,
+    width: float,
+    pressure: float,
+    large_space: bool,
+) -> tuple[float, list[str]]:
+    if not profile.edge_anchor_fillability_enabled:
+        return -float("inf"), ["edge_anchor_fillability_enabled:False"]
+    width = max(width, 0.0001)
+    spike_span = clamp(state.recent_spike_depth_percent / width, 0.0, 1.0)
+    volatility_span = clamp(state.instantaneous_vol_percent / width, 0.0, 1.0)
+    drift_span = clamp(abs(state.recent_drift_percent) / width, 0.0, 1.0)
+    outside = (
+        max(0.0, profile.edge_anchor_fillability_base_outside_fraction)
+        + max(0.0, profile.edge_anchor_fillability_spike_weight) * spike_span
+        + max(0.0, profile.edge_anchor_fillability_volatility_weight) * volatility_span
+        + max(0.0, profile.edge_anchor_fillability_drift_weight) * drift_span
+        + max(0.0, profile.edge_anchor_fillability_pressure_weight) * clamp(pressure, 0.0, 1.0)
+    )
+    if large_space and (spike_span >= 0.25 or pressure >= profile.edge_anchor_pressure_threshold):
+        outside += max(0.0, profile.edge_anchor_fillability_base_outside_fraction) * 0.35
+    max_outside = max(
+        max(0.0, profile.edge_anchor_fillability_base_outside_fraction),
+        max(0.0, profile.edge_anchor_fillability_max_outside_fraction),
+    )
+    outside = clamp(outside, max(0.0, profile.edge_anchor_fillability_base_outside_fraction), max_outside)
+    floor = -outside
+    return floor, [
+        "edge_anchor_fillability_enabled:True",
+        f"edge_anchor_fillability_spike_span:{round(spike_span, 6)}",
+        f"edge_anchor_fillability_volatility_span:{round(volatility_span, 6)}",
+        f"edge_anchor_fillability_drift_span:{round(drift_span, 6)}",
+        f"edge_anchor_fillability_outside_fraction:{round(outside, 6)}",
+        f"edge_anchor_fillability_floor_fraction:{round(floor, 6)}",
+    ]
+
+
 def edge_anchor_projection(
     side: str,
     *,
@@ -1868,7 +1928,15 @@ def edge_anchor_projection(
 
     projected_edge = -max(outside_floor, projected_depth)
     lower = min(minimum_entry_edge_fraction(profile), profile.wick_min_entry_fraction, profile.spike_depth_max_entry_edge_fraction)
-    anchored_edge = clamp(min(edge_fraction, inside_ceiling, projected_edge), lower, profile.max_reservation_edge_fraction)
+    raw_anchored_edge = clamp(min(edge_fraction, inside_ceiling, projected_edge), lower, profile.max_reservation_edge_fraction)
+    fillability_floor, fillability_reasons = edge_anchor_fillability_floor(
+        state=state,
+        profile=profile,
+        width=width,
+        pressure=pressure,
+        large_space=large_space,
+    )
+    anchored_edge = max(raw_anchored_edge, fillability_floor)
     stop_floor = profile.wick_min_stop_fraction + pressure * max(0.0, profile.edge_anchor_stop_widen_fraction)
     if anchored_edge < 0:
         stop_floor += abs(anchored_edge) * 0.22
@@ -1887,9 +1955,12 @@ def edge_anchor_projection(
         f"edge_anchor_spike_depth_span:{round(spike_depth_span, 6)}",
         f"edge_anchor_projected_depth_fraction:{round(projected_depth, 6)}",
         f"edge_anchor_input_edge_fraction:{round(edge_fraction, 6)}",
+        f"edge_anchor_raw_output_edge_fraction:{round(raw_anchored_edge, 6)}",
         f"edge_anchor_output_edge_fraction:{round(anchored_edge, 6)}",
+        f"edge_anchor_fillability_adjusted:{anchored_edge > raw_anchored_edge + 1e-12}",
         f"edge_anchor_stop_floor_fraction:{round(stop_floor, 6)}",
         f"edge_anchor_target_floor_fraction:{round(target_floor, 6)}",
+        *fillability_reasons,
     ]
     return anchored_edge, anchored_stop, anchored_target, reasons
 

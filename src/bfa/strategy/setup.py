@@ -933,11 +933,12 @@ def _trend_near_structure_entry(
         price = min(raw_price, max_price)
         anchor = "resistance_nearby_pullback_long"
     required_offset = abs(price - reference) / reference * 100.0
-    practical_cap = _trend_near_structure_practical_offset_cap(
+    cap_diagnostics = _trend_near_structure_practical_offset_cap_diagnostics(
         features,
         profile=profile,
         min_gap_percent=min_gap_percent,
     )
+    practical_cap = float(cap_diagnostics["practical_offset_cap_percent"])
     capped_offset = min(required_offset, practical_cap)
     if side == "short":
         price = reference * (1.0 + capped_offset / 100.0)
@@ -953,6 +954,7 @@ def _trend_near_structure_entry(
         "required_offset_percent": required_offset,
         "capped_offset_percent": capped_offset,
         "practical_offset_cap_percent": practical_cap,
+        "fillability_cap": cap_diagnostics["fillability_cap"],
         "min_gap_percent": min_gap_percent,
         "support_price": support,
         "resistance_price": resistance,
@@ -966,6 +968,21 @@ def _trend_near_structure_practical_offset_cap(
     profile: TradeSetupProfile,
     min_gap_percent: float,
 ) -> float:
+    return float(
+        _trend_near_structure_practical_offset_cap_diagnostics(
+            features,
+            profile=profile,
+            min_gap_percent=min_gap_percent,
+        )["practical_offset_cap_percent"]
+    )
+
+
+def _trend_near_structure_practical_offset_cap_diagnostics(
+    features: Mapping[str, Any],
+    *,
+    profile: TradeSetupProfile,
+    min_gap_percent: float,
+) -> dict[str, Any]:
     profile_limit = max(_float(profile.limit_entry_max_offset_percent) or 0.0, min_gap_percent)
     hard_limit = max(_float(profile.trend_near_structure_max_offset_percent) or profile_limit, profile_limit)
     volatility_values = [
@@ -977,12 +994,70 @@ def _trend_near_structure_practical_offset_cap(
         if value is not None and value > 0
     ]
     if not volatility_values:
-        return min(hard_limit, profile_limit)
+        return {
+            "practical_offset_cap_percent": min(hard_limit, profile_limit),
+            "volatility_cap_percent": None,
+            "fillability_cap": {
+                "applied": False,
+                "reason": "missing_volatility",
+                "cap_percent": None,
+            },
+        }
     volatility_cap = max(volatility_values) * max(
         _float(profile.trend_near_structure_offset_volatility_multiplier) or 1.0,
         0.1,
     ) + max(_float(profile.trend_near_structure_offset_buffer_percent) or 0.0, 0.0)
-    return min(hard_limit, max(profile_limit, volatility_cap, min_gap_percent))
+    fillability_cap = _trend_limit_fillability_cap(
+        features,
+        profile_limit=profile_limit,
+        min_gap_percent=min_gap_percent,
+        volatility_cap=volatility_cap,
+    )
+    constrained_cap = min(volatility_cap, float(fillability_cap["cap_percent"]))
+    return {
+        "practical_offset_cap_percent": min(hard_limit, max(profile_limit, constrained_cap, min_gap_percent)),
+        "volatility_cap_percent": volatility_cap,
+        "fillability_cap": fillability_cap,
+    }
+
+
+def _trend_limit_fillability_cap(
+    features: Mapping[str, Any],
+    *,
+    profile_limit: float,
+    min_gap_percent: float,
+    volatility_cap: float,
+) -> dict[str, Any]:
+    range_values = [
+        value
+        for value in (
+            _float(features.get("kline_range_mean_percent")),
+            _float(features.get("kline_range_percent")),
+        )
+        if value is not None and value > 0
+    ]
+    micro = abs(_float(features.get("kline_micro_momentum_percent")) or 0.0)
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    base_range_cap = max(range_values) * 1.15 if range_values else volatility_cap
+    fillability_cap = max(profile_limit, min_gap_percent, min(volatility_cap, base_range_cap))
+    multipliers: list[str] = []
+    if volume_change is not None and volume_change <= -50.0:
+        fillability_cap *= 0.75
+        multipliers.append("volume_fade")
+    if micro <= 0.03:
+        fillability_cap *= 0.85
+        multipliers.append("flat_micro_momentum")
+    fillability_cap = max(profile_limit, min_gap_percent, fillability_cap)
+    return {
+        "applied": fillability_cap + 1e-12 < volatility_cap,
+        "cap_percent": fillability_cap,
+        "base_range_cap_percent": base_range_cap,
+        "volatility_cap_percent": volatility_cap,
+        "range_values_percent": [round(value, 8) for value in range_values],
+        "micro_momentum_abs_percent": micro,
+        "volume_change_percent": volume_change,
+        "multipliers": multipliers,
+    }
 
 
 def _trend_structure_breakout_diagnostics(

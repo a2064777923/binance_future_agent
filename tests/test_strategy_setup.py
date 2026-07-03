@@ -794,6 +794,50 @@ class StrategySetupTests(unittest.TestCase):
         self.assertGreater(guard["required_offset_percent"], 1.2)
         self.assertEqual(guard["capped_offset_percent"], guard["practical_offset_cap_percent"])
 
+    def test_live_action_flow_low_fillability_trend_does_not_use_hard_structure_cap(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+
+        setup = build_trade_setup(
+            self.candidate(
+                price_change_percent=6.5,
+                quote_volume=80_000_000,
+                open_interest_value=35_000_000,
+                taker_buy_sell_ratio=1.05,
+                taker_buy_sell_ratio_change=0.01,
+                funding_rate=-0.0001,
+                kline_momentum_percent=3.48,
+                kline_micro_momentum_percent=0.0,
+                kline_close_position_percent=50.0,
+                kline_quote_volume_change_percent=-67.0,
+                kline_range_mean_percent=0.72,
+                kline_range_max_percent=1.50,
+                support_price=0.0712,
+                resistance_price=0.0747,
+                vwap=0.0739,
+                atr_percent=0.77,
+                realized_volatility_percent=1.18,
+                ema_fast=0.07398,
+                ema_slow=0.07361,
+                ema_spread_percent=0.49,
+                rsi=60.0,
+                reference_price=0.07463,
+                indicator_sample_size=30,
+                min_executable_notional=5.0,
+            ),
+            risk_limits=self.risk_limits(),
+            profile=profile,
+        )
+
+        entry_basis = setup.price_basis["entry_basis"]
+        guard = entry_basis["trend_near_structure_guard"]
+
+        self.assertEqual(setup.decision, "trade")
+        self.assertEqual(setup.side, "long")
+        self.assertEqual(entry_basis["anchor"], "resistance_nearby_pullback_long")
+        self.assertLess(entry_basis["offset_percent"], 1.05)
+        self.assertLess(guard["practical_offset_cap_percent"], 1.2)
+        self.assertTrue(guard["fillability_cap"]["applied"])
+
     def test_live_action_flow_strong_breakout_keeps_normal_limit_entry_near_structure(self):
         profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
 

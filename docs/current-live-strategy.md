@@ -251,10 +251,18 @@ with:
 - the existing `limit_entry_max_offset_percent` floor
 - the existing `trend_near_structure_max_offset_percent` hard ceiling
 
-Live also sets `BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS=45` so a delayed trend
-candidate is skipped before setup instead of submitting a 75-second limit order
-from stale market structure. The default config keeps this gate disabled for
-offline tests and historical replay unless explicitly enabled.
+The 2026-07-04 MANAUSDT follow-up added a fillability cap on top of the
+volatility cap. If short-term range is small, micro momentum is flat, and quote
+volume has faded sharply, the near-structure guard no longer uses the hard
+`1.65%` ceiling just because realized volatility once allowed it. The
+diagnostic is persisted under
+`price_basis.entry_basis.trend_near_structure_guard.fillability_cap`.
+
+Live also sets `BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS=120` so a delayed trend
+candidate is still usable at the larger trend-leg time granularity, while very
+old market structure is skipped before setup instead of submitting a 75-second
+limit order. The default config keeps this gate disabled for offline tests and
+historical replay unless explicitly enabled.
 
 The 2026-06-27 WIF/GUSDT hotfix tightened the breakout exemption. Strong
 momentum/volume/taker flow alone is no longer enough to keep a tiny
@@ -447,6 +455,15 @@ Important implementation note: the edge-anchor projection updates the
 `entry_min_edge_fraction` used by grid layers. Without that, a deep projected
 entry could be computed correctly and then clipped back to the old shallow edge
 when the grid layers were built.
+
+The 2026-07-04 MANAUSDT follow-up also added an edge-anchor fillability floor.
+The order is still anchored at the lower/upper band edge first, but a deep
+outside-band entry such as `-0.42` is only kept when recent spike depth,
+instantaneous volatility, drift, and pressure make that depth plausible inside
+the 20-second wait window. Otherwise the entry is pulled back toward a more
+fillable outside-edge price. The reason codes include
+`edge_anchor_fillability_floor_fraction` and
+`edge_anchor_fillability_adjusted:true/false`.
 
 Follow-up observation after the tighter geometry still showed `19` unique
 micro-grid orders ending as unfilled pending/expired orders. Median
