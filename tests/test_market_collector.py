@@ -1,6 +1,7 @@
 import unittest
 
 from bfa.market.collector import MarketDataCollector
+from bfa.market.binance_rest import BinanceMarketDataError
 from bfa.market.models import MarketDataResponse
 
 
@@ -131,6 +132,37 @@ class FakeMarketClient:
         )
 
 
+class OneBadSymbolMarketClient(FakeMarketClient):
+    def exchange_info(self):
+        response = super().exchange_info()
+        payload = dict(response.payload)
+        payload["symbols"] = [
+            *payload["symbols"],
+            {
+                "symbol": "BADUSDT",
+                "status": "PRE_TRADING",
+                "contractType": "PERPETUAL",
+                "baseAsset": "BAD",
+                "quoteAsset": "USDT",
+                "marginAsset": "USDT",
+                "filters": [{"filterType": "PRICE_FILTER", "tickSize": "0.0001"}],
+            },
+        ]
+        return MarketDataResponse(endpoint=response.endpoint, params=response.params, payload=payload)
+
+    def open_interest(self, symbol):
+        if symbol == "BADUSDT":
+            raise BinanceMarketDataError(
+                endpoint="/fapi/v1/openInterest",
+                params={"symbol": symbol},
+                status_code=400,
+                binance_code=-4108,
+                binance_message="Symbol is on delivering or delivered or settling or closed or pre-trading.",
+                headers={"X-MBX-USED-WEIGHT-1M": "42"},
+            )
+        return super().open_interest(symbol)
+
+
 class MarketDataCollectorTests(unittest.TestCase):
     def test_collector_uses_fake_client_and_configured_symbols(self):
         client = FakeMarketClient()
@@ -177,6 +209,26 @@ class MarketDataCollectorTests(unittest.TestCase):
                 max_symbols=1,
             ).collect_rest_snapshots()
         self.assertEqual(client.calls, [])
+
+    def test_collector_records_symbol_error_without_failing_whole_cycle(self):
+        collector = MarketDataCollector(
+            client=OneBadSymbolMarketClient(),
+            symbols=["BTCUSDT", "BADUSDT"],
+            max_symbols=2,
+            received_at="now",
+        )
+
+        snapshots = collector.collect_rest_snapshots()
+
+        event_types_by_symbol = {}
+        for snapshot in snapshots:
+            event_types_by_symbol.setdefault(snapshot.symbol, []).append(snapshot.event_type)
+        self.assertIn("kline", event_types_by_symbol["BTCUSDT"])
+        self.assertIn("market_data_error", event_types_by_symbol["BADUSDT"])
+        bad_error = [s for s in snapshots if s.symbol == "BADUSDT" and s.event_type == "market_data_error"][0]
+        self.assertEqual(bad_error.payload["endpoint"], "/fapi/v1/openInterest")
+        self.assertEqual(bad_error.payload["status_code"], 400)
+        self.assertIn("pre-trading", bad_error.payload["binance_message"])
 
 
 if __name__ == "__main__":

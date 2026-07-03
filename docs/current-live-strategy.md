@@ -5,11 +5,11 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
-Snapshot checked from the server at `2026-06-27T08:56:47Z`
-(`2026-06-27 16:56:47` Asia/Hong_Kong) after the trend loss-control /
-structure-break deploy. Outcome persistence was audited later on
-`2026-06-27`: a manual reconcile backfilled missing closed trades, and the
-repo now includes a dedicated one-minute outcome reconcile timer.
+Snapshot refreshed from the server at `2026-07-03T07:56:20Z`
+(`2026-07-03 15:56:20` Asia/Hong_Kong) after the manual-position capacity
+hotfix, fail-soft market collection hotfix, service reset, and log/raw-feed
+cleanup. The previous `2026-06-27` snapshot remains useful history, but this
+section is now the current live operating state.
 
 ## Source Of Truth Order
 
@@ -33,27 +33,34 @@ checking the newer sources above.
 - This snapshot includes the 2026-06-26 spike-depth/stale-signal micro-grid
   hotfix, the 2026-06-26 trend near-structure entry guard, the 2026-06-27 trend
   fresh-confirmation / layered protection update, the 2026-06-27 WIF/GUSDT
-  protection degradation hotfix, and the 2026-06-27 micro-grid wick-sensitivity
-  update. Use the latest Git commit on this branch as the code reference.
+  protection degradation hotfix, the 2026-06-27 micro-grid wick-sensitivity
+  update, and the 2026-07-03 live reset hotfixes:
+  - live entry capacity ignores manual/excluded position margin when
+    `BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED=false`;
+  - `ops exposure-status` reports the same capacity semantics;
+  - market collection records a per-symbol `market_data_error` snapshot when a
+    single symbol is pre-trading/invalid instead of aborting the whole cycle.
+  Use the latest Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
 - The latest changed files were copied to the deployed app path and verified by
-  server-side `config-check`, a read-only `ops position-sentinel` run, and a
-  subsequent systemd live cycle that exited `0/SUCCESS`:
-  - `src/bfa/config.py`
-  - `src/bfa/ops/position_adjustment.py`
-  - `src/bfa/ops/position_sentinel.py`
-  - `src/bfa/strategy/micro_grid_live.py`
-  - `src/bfa/strategy/setup.py`
+  targeted unit tests locally and on the server, `ops exposure-status`, a
+  systemd reset, and subsequent live cycles that exited `0/SUCCESS`:
+  - `src/bfa/agent.py`
+  - `src/bfa/market/collector.py`
+  - `src/bfa/ops/exposure_status.py`
+  - `tests/test_agent_runner.py`
+  - `tests/test_market_collector.py`
+  - `tests/test_ops_exposure_status.py`
 
 If a future agent changes local code, deploy the changed files or run the
 deployment script before claiming the server is on the same version.
 
-Post-deploy verification for this snapshot observed the live runner emitting
-`limit_entry_anchor:resistance_nearby_pullback_long`, proving the widened
-near-structure trend entry guard was active on the server. The sentinel
-read-only check also loaded the new trend loss-control fields without config
-errors.
+Post-reset verification observed the live runner selecting 80 hot symbols,
+emitting routed `TREND` and `CHOP` decisions for trend candidates, submitting
+new passive limit entries, and the pending-limit watchdog resolving unfilled
+entries as `terminal_no_fill` after exchange cancellation. The manual/excluded
+positions were visible to the sentinel but marked `manual_position_ignored`.
 
 ## Live Services
 
@@ -72,8 +79,15 @@ running. Do not call live "stopped" just because the service is not continuously
 active; check the timer and recent `order_intents` / `exchange_responses`.
 
 At this snapshot the live timer was restored after debugging. A systemd-triggered
-live cycle finished with `status=0/SUCCESS` at `2026-06-27 16:56:47` server
-time.
+live cycle finished with `status=0/SUCCESS` at `2026-07-03 15:56:20` server
+time and reported `status=entry_order_pending`, `submitted=true`, and no
+validation errors.
+
+`binance-futures-agent-paper.timer` is intentionally disabled as of the
+2026-07-03 reset. The forward-paper runner was consuming near-100% CPU for
+multi-minute cycles and competing with live scans and SQLite writes. Re-enable
+paper only when live responsiveness is not the priority and the operator
+explicitly asks for forward-paper evidence collection.
 
 ## Current Risk Profile
 
@@ -97,6 +111,7 @@ Selected non-secret server env values observed at the snapshot:
 - `BFA_MAX_POSITION_NOTIONAL_USDT=600`
 - `BFA_DYNAMIC_POSITION_SIZING_ENABLED=true`
 - `BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED=true`
+- `BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED=false`
 
 The risk layer still calculates final size from the smallest surviving cap:
 available balance, max margin, max notional, portfolio caps, stop-risk cap,
@@ -108,16 +123,26 @@ Raising leverage alone does not guarantee larger margin or notional.
 The live env currently excludes these manual symbols from bot position slots
 and bot margin capacity:
 
-- `BTWUSDT`
-- `DRAMUSDT`
 - `BABAUSDT`
+- `BTCUSDT`
+- `BTWUSDT`
+- `CAPUSDT`
+- `DRAMUSDT`
+- `KORUUSDT`
+- `MUUSDT`
+- `SAMSUNGUSDT`
+- `USUSDT`
+- `VELVETUSDT`
 
 Do not let those symbols block bot capacity analysis, and do not let automated
 ops close or trail them unless the operator explicitly reclassifies them.
 
-At the snapshot, Binance showed manual `BABAUSDT` and `DRAMUSDT` positions and
-bot-managed crypto shorts including `PUMPUSDT`, `SUIUSDT`, and `XRPUSDT`.
-This can change quickly; always re-query signed position risk before acting.
+At the snapshot, Binance showed 11 active manual/excluded position rows,
+including hedged `CAPUSDT` and `VELVETUSDT`. `ops exposure-status` reported
+`active_position_count=0`, `manual_position_count=11`, and
+`can_open_new_position=true`; this is intentional because manual margin pressure
+is disabled. This can change quickly; always re-query signed position risk
+before acting.
 
 ## Strategy Architecture
 
@@ -557,12 +582,15 @@ that is exchange account state, not a USDT funding issue.
 
 ## Data Collection And Retention
 
-At the snapshot:
+At the 2026-07-03 reset snapshot:
 
-- SQLite DB: about `6.6G`.
-- Raw feed directory: about `9.5G`.
-- Runtime: about `41M`.
-- Logs: about `63M`.
+- SQLite DB: about `8.1G`.
+- Raw feed directory: about `9.0G` after deleting seven files older than the
+  24-hour raw-feed retention cutoff.
+- Runtime: about `46M` after rotating stopped manual-rescue action logs.
+- Logs: about `40K` after rotating `ai-decisions.jsonl`.
+- Backups: about `61M`, including compressed `ai-decisions`, `cap_actions`, and
+  `velvet_actions` logs from the reset.
 - Raw-feed seconds cache: about `15M`.
 
 Current data policy:
@@ -580,6 +608,41 @@ Market snapshots are intentionally not persisted at full volume because the DB
 was growing too fast. For later analysis, rely on decision snapshots, raw-feed
 files, order intents, exchange responses, outcomes, fills, and signed
 `userTrades` reconciliation.
+
+The DB size is not from `market_snapshots` at this snapshot: that table had
+zero rows. The largest retained event families were `paper_observation`,
+`position_sentinel`, `candidate`, `paper_signal`, `paper_outcome`, and
+`trade_setup`. Forward-paper is disabled for live responsiveness, but its
+historical rows remain in SQLite until a deliberate archival/compaction pass is
+planned. Do not run `VACUUM` while live services are active.
+
+Raw-feed quality check on `binance-usdm-raw-20260703T072545Z.gz`:
+
+- file size: `26,027,278` bytes;
+- local span: `2026-07-03T07:25:48.787839Z` to
+  `2026-07-03T07:30:32.008040Z`;
+- event span: about `260.563` seconds;
+- lines: `341,886`, bad lines: `0`;
+- event mix: `201,611` trade events and `140,275` depthUpdate events;
+- symbol count: `80`, with highest counts in `ALLOUSDT`, `LABUSDT`, `IDUSDT`,
+  `MAGMAUSDT`, `BLESSUSDT`, `MUSDT`, `ZKPUSDT`, `REUSDT`, and `TLMUSDT`.
+
+Local hftbacktest smoke was run in an isolated `.venv-hft` environment on
+single-symbol slices from that raw-feed file. This validates raw L2/trade
+conversion and passive-quote mechanics, but it is not a complete fused live
+strategy backtest. The script is a passive two-sided grid runner; interpret it
+as a data-path/queue-model smoke test, not production PnL evidence. Rough
+mark-to-market cash-plus-inventory results over the 260-second slice were:
+
+- `ALLOUSDT`: 331,939 hft events, 201 fills, rough equity `-1.400465U`;
+- `LABUSDT`: 171,774 hft events, 203 fills, rough equity `+4.032000U`;
+- `TLMUSDT`: 57,331 hft events, 87 fills, rough equity `+0.641968U`;
+- `ETHUSDT`: 166,887 hft events, 30 fills, rough equity `-0.074160U`;
+- `BTCUSDT`: 179,552 hft events, 18 fills, rough equity `-0.025900U`.
+
+Use `--buffer-size 1000000` or similarly bounded values for this hft runner.
+The script default (`100000000`) preallocates roughly 6GB per process and can
+cause memory failures when several symbols are run in parallel.
 
 Important persistence detail: the live runner does not treat `outcomes` as an
 instant write-on-close table. It writes the local decision/execution artifacts

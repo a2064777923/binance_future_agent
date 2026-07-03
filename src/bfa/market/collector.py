@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
+from bfa.market.binance_rest import BinanceMarketDataError
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.market.normalize import (
     normalize_exchange_info,
@@ -61,7 +62,10 @@ class MarketDataCollector:
             received_at=self.received_at,
         )
         for symbol in symbols:
-            snapshots.extend(self._collect_symbol(symbol))
+            try:
+                snapshots.extend(self._collect_symbol(symbol))
+            except Exception as exc:
+                snapshots.append(_market_data_error_snapshot(symbol, exc, received_at=self.received_at))
         return snapshots
 
     def _collect_symbol(self, symbol: str) -> list[NormalizedMarketSnapshot]:
@@ -123,3 +127,34 @@ def _normalize_symbols(symbols: list[str], *, max_symbols: int) -> list[str]:
     if len(normalized) > max_symbols:
         raise ValueError(f"market symbol count exceeds cap of {max_symbols}")
     return normalized
+
+
+def _market_data_error_snapshot(
+    symbol: str,
+    exc: Exception,
+    *,
+    received_at: int | str,
+) -> NormalizedMarketSnapshot:
+    payload: dict[str, Any] = {
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+    }
+    if isinstance(exc, BinanceMarketDataError):
+        payload.update(
+            {
+                "endpoint": exc.endpoint,
+                "params": dict(exc.params),
+                "status_code": exc.status_code,
+                "binance_code": exc.binance_code,
+                "binance_message": exc.binance_message,
+                "request_weight": exc.request_weight,
+            }
+        )
+    return NormalizedMarketSnapshot(
+        source="binance_usdm",
+        event_type="market_data_error",
+        symbol=symbol.strip().upper(),
+        event_time=None,
+        received_at=received_at,
+        payload=payload,
+    )

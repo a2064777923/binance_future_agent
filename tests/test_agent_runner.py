@@ -1635,6 +1635,58 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertIn("portfolio_margin_cap_reached", result.risk_reasons)
         self.assertIn("manual_margin_pressure_included", result.risk_reasons)
 
+    def test_live_run_once_respects_disabled_manual_margin_pressure_guard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ai_client = FakeAiClient()
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MANUAL_POSITION_SYMBOLS": "BTWUSDT",
+                    "BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED": "false",
+                    "BFA_MAX_OPEN_POSITIONS": "1",
+                    "BFA_MAX_LEVERAGE": "5",
+                    "BFA_MULTI_POSITION_ENABLED": "false",
+                    "BFA_MAX_PORTFOLIO_MARGIN_USDT": "6",
+                    "BFA_MAX_PORTFOLIO_MARGIN_FRACTION": "1",
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(root / "agent.sqlite"),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=ai_client,
+                signed_client=FakeSignedClient(
+                    positions=[
+                        {
+                            "symbol": "BTWUSDT",
+                            "positionAmt": "-556",
+                            "positionSide": "SHORT",
+                            "notional": "-73.2",
+                            "initialMargin": "7.32",
+                            "leverage": "10",
+                        }
+                    ],
+                    open_algo_orders=[{"symbol": "BTWUSDT", "positionSide": "SHORT"}],
+                ),
+            )
+
+        self.assertNotEqual(result.status, "entry_capacity_blocked")
+        self.assertEqual(ai_client.calls, 1)
+        self.assertNotIn("portfolio_margin_cap_reached", result.risk_reasons)
+        self.assertNotIn("manual_margin_pressure_included", result.risk_reasons)
+
     def test_live_run_once_tries_next_candidate_after_duplicate_exposure_reject(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

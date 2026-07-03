@@ -70,6 +70,20 @@ latest checked live caps were `BFA_ACCOUNT_CAPITAL_USDT=200`,
 `docs/current-live-strategy.md` for the full non-secret snapshot. Always verify
 the server env before using these numbers.
 
+2026-07-03 reset status:
+
+- `binance-futures-agent-live.timer`, position sentinel, pending-limit
+  watchdog, outcome reconcile, raw-feed, and DB maintenance are active.
+- `binance-futures-agent-paper.timer` is disabled to avoid CPU/SQLite
+  contention with live trading.
+- `binance-futures-agent-cap-rescue.service` is disabled; CAP/VELVET manual
+  rescue JSONL logs were rotated to compressed backups.
+- Manual/excluded positions are intentionally ignored for bot capacity while
+  `BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED=false`; do not reintroduce manual
+  margin as a portfolio-cap blocker without operator intent.
+- The server path is still a deployed copy, not a git checkout, so pushing to
+  GitHub does not automatically update live.
+
 Do not put server credentials in this repository. Configure SSH access outside
 the repo. Any agent operating from another machine must obtain SSH access and
 the server env file through an out-of-band channel.
@@ -121,6 +135,15 @@ watchdog cannot help because it only reconciles unresolved pending entry
 intents. Classify the symbol as manual only after operator confirmation;
 otherwise handle protection or closure through the explicit confirmation flow.
 
+Two 2026-07-03 live blockers were fixed:
+
+- Manual/excluded position margin no longer blocks live entry capacity when
+  manual margin pressure guard is disabled. The same logic is now reflected in
+  `ops exposure-status`.
+- One invalid/pre-trading symbol no longer aborts the entire market collection
+  cycle; the collector emits a per-symbol `market_data_error` snapshot and
+  continues scanning the rest of the universe.
+
 ## Current Strategy Shape
 
 The current system is a fused live strategy with a regime router:
@@ -171,6 +194,15 @@ same Binance snapshots used elsewhere in the system. Do not reintroduce fake
 liquidity or synthetic `min_executable_notional` values in the live path. If a
 symbol lacks market context, the candidate should carry explicit `missing_*`
 diagnostics or be rejected.
+
+Raw-feed/hft note: on 2026-07-03 a completed server gzip
+`binance-usdm-raw-20260703T072545Z.gz` was copied locally under
+`runtime/raw-feed/` and sliced into single-symbol files for hftbacktest smoke.
+The local `.venv-hft` environment can convert and run these slices. This is
+useful for L2/trade data-path validation, but the current
+`scripts/run_hftbacktest_l2_micro_grid.py` runner is a passive two-sided grid
+smoke test, not the fused live strategy. Use bounded hft conversion buffers
+such as `--buffer-size 1000000`; the default preallocates about 6GB per process.
 
 Trend entries now have an additional fresh-confirmation gate in
 `quant_setup_live_action_flow`: when short-window micro momentum and taker flow

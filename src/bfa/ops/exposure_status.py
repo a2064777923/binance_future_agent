@@ -246,6 +246,8 @@ def _entry_capacity(
     active_margin = sum(_exposure_margin(item) for item in active_exposures)
     manual_margin = sum(_exposure_margin(item) for item in manual_exposures)
     total_margin = active_margin + manual_margin
+    manual_pressure_enabled = _truthy(config.get("BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED"))
+    margin_for_capacity = total_margin if manual_pressure_enabled else active_margin
     max_portfolio_notional = _float_or_none(config.get("BFA_MAX_PORTFOLIO_NOTIONAL_USDT"))
     max_portfolio_margin = min(
         _float_or_none(config.get("BFA_MAX_PORTFOLIO_MARGIN_USDT")) or 0.0,
@@ -263,9 +265,9 @@ def _entry_capacity(
         reasons.append("max_open_positions_reached")
     if max_portfolio_notional is not None and active_notional >= max_portfolio_notional:
         reasons.append("portfolio_notional_cap_reached")
-    if max_portfolio_margin > 0 and total_margin >= max_portfolio_margin:
+    if max_portfolio_margin > 0 and margin_for_capacity >= max_portfolio_margin:
         reasons.append("portfolio_margin_cap_reached")
-        if manual_margin > 0:
+        if manual_pressure_enabled and manual_margin > 0:
             reasons.append("manual_margin_pressure_included")
 
     hypothetical = _hypothetical_capacity(
@@ -445,3 +447,7 @@ def _dedupe(values: list[str]) -> list[str]:
         if value not in deduped:
             deduped.append(value)
     return deduped
+
+
+def _truthy(value: Any) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}

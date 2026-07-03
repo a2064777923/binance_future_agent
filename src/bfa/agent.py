@@ -2998,9 +2998,15 @@ def _live_entry_capacity_blockers(config: AppConfig, risk_state: RiskState | Non
     if risk_state.active_positions > 0 and risk_state.active_positions >= max_open_positions:
         reasons.append("max_open_positions_reached")
     portfolio_margin_cap = _portfolio_margin_cap(config)
-    if portfolio_margin_cap > 0 and risk_state.total_initial_margin_usdt >= portfolio_margin_cap:
+    manual_pressure_enabled = _truthy(config.get("BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED"))
+    margin_for_capacity = (
+        risk_state.total_initial_margin_usdt
+        if manual_pressure_enabled
+        else risk_state.active_initial_margin_usdt
+    )
+    if portfolio_margin_cap > 0 and margin_for_capacity >= portfolio_margin_cap:
         reasons.append("portfolio_margin_cap_reached")
-        if risk_state.manual_initial_margin_usdt > 0:
+        if manual_pressure_enabled and risk_state.manual_initial_margin_usdt > 0:
             reasons.append("manual_margin_pressure_included")
     return _dedupe(reasons)
 
