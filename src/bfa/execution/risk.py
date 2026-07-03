@@ -111,6 +111,15 @@ def evaluate_risk(
         reasons.append("notional_exceeds_cap")
     if intent.leverage > risk_limits.max_leverage:
         reasons.append("leverage_exceeds_cap")
+    position_margin_cap = _float_config(config, "BFA_MAX_MARGIN_PER_POSITION_USDT")
+    if position_margin_cap > 0 and intent.estimated_initial_margin_usdt > position_margin_cap:
+        reasons.append("position_margin_cap_reached")
+    position_margin_fraction_cap = _float_config(config, "BFA_ACCOUNT_CAPITAL_USDT") * _float_config(
+        config,
+        "BFA_MAX_MARGIN_FRACTION",
+    )
+    if position_margin_fraction_cap > 0 and intent.estimated_initial_margin_usdt > position_margin_fraction_cap:
+        reasons.append("position_margin_fraction_reached")
     if risk_state.daily_loss_usdt >= risk_limits.max_daily_loss_usdt:
         reasons.append("daily_loss_cap_reached")
     if not multi_position_enabled(config) and risk_state.active_positions >= 1:

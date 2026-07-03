@@ -323,7 +323,7 @@ class AccountFailingSignedClient(FakeSignedClient):
 
 
 class ExecutionEngineTests(unittest.TestCase):
-    def validation(self, **overrides):
+    def validation(self, risk_limits=None, **overrides):
         payload = {
             "decision": "trade",
             "side": "long",
@@ -338,7 +338,7 @@ class ExecutionEngineTests(unittest.TestCase):
         payload.update(overrides)
         context = context_from_candidate(
             {"symbol": "BTCUSDT", "score": 42},
-            risk_limits=RiskLimits(
+            risk_limits=risk_limits or RiskLimits(
                 account_capital_usdt=100,
                 max_leverage=3,
                 max_position_notional_usdt=20,
@@ -362,6 +362,8 @@ class ExecutionEngineTests(unittest.TestCase):
             "BFA_ACCOUNT_CAPITAL_USDT": "100",
             "BFA_MAX_LEVERAGE": "3",
             "BFA_MAX_POSITION_NOTIONAL_USDT": "20",
+            "BFA_MAX_MARGIN_PER_POSITION_USDT": "20",
+            "BFA_MAX_MARGIN_FRACTION": "1",
             "BFA_MAX_RISK_PER_TRADE_USDT": "1",
             "BFA_MAX_DAILY_LOSS_USDT": "3",
             "BFA_MAX_OPEN_POSITIONS": "2",
@@ -537,6 +539,68 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(result.intent.metadata["exchange_effective_leverage"], 20)
         self.assertEqual(result.exchange_response["margin_setup"]["leverage"]["effective_leverage"], 20)
         self.assertEqual(result.exchange_response["entry_order"]["order_type"], "LIMIT")
+
+    def test_live_downshift_rejects_when_actual_margin_exceeds_position_cap(self):
+        fake_client = InvalidHighLeverageSignedClient(accepted_leverage=10)
+        risk_limits = RiskLimits(
+            account_capital_usdt=200,
+            max_leverage=30,
+            max_position_notional_usdt=1200,
+            max_risk_per_trade_usdt=100,
+            max_daily_loss_usdt=60,
+            max_open_positions=5,
+        )
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_ACCOUNT_CAPITAL_USDT="200",
+                BFA_MAX_LEVERAGE="30",
+                BFA_MAX_POSITION_NOTIONAL_USDT="1200",
+                BFA_MAX_MARGIN_PER_POSITION_USDT="40",
+                BFA_MAX_MARGIN_FRACTION="1",
+                BFA_MAX_RISK_PER_TRADE_USDT="100",
+                BFA_MAX_PORTFOLIO_MARGIN_USDT="200",
+                BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+                BFA_MAX_PORTFOLIO_NOTIONAL_USDT="2000",
+                BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT="2000",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+            risk_limits=risk_limits,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                notional_usdt=700.0,
+                reasons=["entry_order_type:limit"],
+                risk_limits=risk_limits,
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(account_available_balance_usdt=200),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.submitted)
+        self.assertIsNotNone(result.intent)
+        self.assertEqual(result.intent.leverage, 10)
+        self.assertIn("position_margin_cap_reached", result.risk.reason_codes)
+        self.assertEqual(
+            [call for call in fake_client.calls if call[0] == "leverage"],
+            [
+                ("leverage", "BTCUSDT", 30),
+                ("leverage", "BTCUSDT", 25),
+                ("leverage", "BTCUSDT", 20),
+                ("leverage", "BTCUSDT", 15),
+                ("leverage", "BTCUSDT", 12),
+                ("leverage", "BTCUSDT", 10),
+            ],
+        )
+        self.assertNotIn("new_order", [call[0] for call in fake_client.calls])
+        self.assertIsNotNone(result.exchange_response)
+        self.assertEqual(result.exchange_response["margin_setup"]["leverage"]["effective_leverage"], 10)
 
     def test_live_hedge_position_mode_sends_position_side(self):
         fake_client = FakeSignedClient()

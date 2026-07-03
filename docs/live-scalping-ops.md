@@ -100,6 +100,12 @@ the upper band edge or outside it; for strong downward needles, longs are forced
 back toward the lower band edge or outside it. The same projection widens the
 initial stop floor and targets a meaningful move back toward the mean.
 
+The same 2026-07-04 risk hotfix makes exchange leverage downshifts fail closed:
+after Binance accepts a lower leverage than requested, the executor re-runs the
+full risk gate with the lower effective leverage. If actual initial margin now
+exceeds `BFA_MAX_MARGIN_PER_POSITION_USDT` or the account-capital margin
+fraction cap, no entry order is submitted.
+
 ## Processed Live Cycle Statuses
 
 These statuses mean the live runner handled and recorded the exchange state for

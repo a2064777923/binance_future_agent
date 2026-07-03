@@ -99,16 +99,16 @@ Selected non-secret server env values observed at the snapshot:
 - `BFA_MAX_LEVERAGE=30`
 - `BFA_MAX_OPEN_POSITIONS=5`
 - `BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`
-- `BFA_MAX_MARGIN_PER_POSITION_USDT=20`
-- `BFA_MAX_RISK_PER_TRADE_USDT=6`
-- `BFA_MAX_DAILY_LOSS_USDT=25`
-- `BFA_MAX_PORTFOLIO_MARGIN_USDT=160`
+- `BFA_MAX_MARGIN_PER_POSITION_USDT=40`
+- `BFA_MAX_RISK_PER_TRADE_USDT=20`
+- `BFA_MAX_DAILY_LOSS_USDT=60`
+- `BFA_MAX_PORTFOLIO_MARGIN_USDT=200`
 - `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.80`
 - `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=2400`
 - `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=1600`
 - `BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT=1000`
-- `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=600`
-- `BFA_MAX_POSITION_NOTIONAL_USDT=600`
+- `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=1200`
+- `BFA_MAX_POSITION_NOTIONAL_USDT=1200`
 - `BFA_DYNAMIC_POSITION_SIZING_ENABLED=true`
 - `BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED=true`
 - `BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED=false`
@@ -117,6 +117,14 @@ The risk layer still calculates final size from the smallest surviving cap:
 available balance, max margin, max notional, portfolio caps, stop-risk cap,
 symbol filters, duplicate exposure, manual exclusions, and adaptive sizing.
 Raising leverage alone does not guarantee larger margin or notional.
+
+As of the 2026-07-04 margin-downshift hotfix, the execution risk layer also
+enforces the actual per-position initial margin after exchange leverage setup.
+If Binance rejects the requested leverage and the executor downshifts to a
+lower effective leverage, the updated intent is re-checked against
+`BFA_MAX_MARGIN_PER_POSITION_USDT` and `BFA_MAX_MARGIN_FRACTION` before any
+entry order can be submitted. Rejections are recorded as
+`position_margin_cap_reached` or `position_margin_fraction_reached`.
 
 ## Manual Positions
 

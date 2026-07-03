@@ -25,7 +25,7 @@ class ExecutionRiskTests(unittest.TestCase):
             max_open_positions=2,
         )
 
-    def validation(self, **overrides):
+    def validation(self, risk_limits=None, **overrides):
         payload = {
             "decision": "trade",
             "side": "long",
@@ -40,7 +40,7 @@ class ExecutionRiskTests(unittest.TestCase):
         payload.update(overrides)
         context = context_from_candidate(
             {"symbol": "BTCUSDT", "score": 42},
-            risk_limits=self.limits(),
+            risk_limits=risk_limits or self.limits(),
             decided_at="2026-06-20T10:00:00Z",
         )
         return validate_decision_payload(payload, context)
@@ -51,6 +51,8 @@ class ExecutionRiskTests(unittest.TestCase):
             "BFA_ACCOUNT_CAPITAL_USDT": "100",
             "BFA_MAX_LEVERAGE": "3",
             "BFA_MAX_POSITION_NOTIONAL_USDT": "20",
+            "BFA_MAX_MARGIN_PER_POSITION_USDT": "20",
+            "BFA_MAX_MARGIN_FRACTION": "1",
             "BFA_MAX_RISK_PER_TRADE_USDT": "1",
             "BFA_MAX_DAILY_LOSS_USDT": "3",
             "BFA_MAX_OPEN_POSITIONS": "2",
@@ -472,6 +474,44 @@ class ExecutionRiskTests(unittest.TestCase):
 
         self.assertFalse(risk.accepted)
         self.assertIn("portfolio_margin_cap_reached", risk.reason_codes)
+
+    def test_rejects_position_margin_cap(self):
+        limits = RiskLimits(
+            account_capital_usdt=100,
+            max_leverage=3,
+            max_position_notional_usdt=120,
+            max_risk_per_trade_usdt=100,
+            max_daily_loss_usdt=3,
+            max_open_positions=2,
+        )
+        validation = self.validation(notional_usdt=90, risk_limits=limits)
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=limits,
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=limits,
+            risk_state=RiskState(),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MAX_POSITION_NOTIONAL_USDT="120",
+                BFA_MAX_MARGIN_PER_POSITION_USDT="20",
+                BFA_MAX_MARGIN_FRACTION="1",
+                BFA_MAX_RISK_PER_TRADE_USDT="100",
+                BFA_MAX_PORTFOLIO_MARGIN_USDT="100",
+                BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("position_margin_cap_reached", risk.reason_codes)
 
     def test_manual_positions_do_not_consume_bot_portfolio_margin_cap(self):
         validation = self.validation()
