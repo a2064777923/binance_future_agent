@@ -1093,11 +1093,34 @@ def _pending_limit_wait_expired(pending: PendingLimitOrderIntent, *, checked_at:
 
 
 def _pending_limit_age_seconds(pending: PendingLimitOrderIntent, *, checked_at: str) -> float | None:
-    decided = _epoch_seconds(pending.intent.decided_at or pending.occurred_at)
+    decided = _pending_limit_age_start_seconds(pending)
     checked = _epoch_seconds(checked_at)
     if decided is None or checked is None:
         return None
     return checked - decided
+
+
+def _pending_limit_age_start_seconds(pending: PendingLimitOrderIntent) -> float | None:
+    latency = pending.intent.metadata.get("latency")
+    latency_payload = latency if isinstance(latency, Mapping) else {}
+    submit_finished_ms = _int_or_none(latency_payload.get("entry_submit_finished_at_ms"))
+    if submit_finished_ms is not None and submit_finished_ms > 0:
+        return submit_finished_ms / 1000.0
+    entry_order_latency = latency_payload.get("entry_order_latency")
+    order_latency_payload = entry_order_latency if isinstance(entry_order_latency, Mapping) else {}
+    submit_finished_ms = _int_or_none(order_latency_payload.get("entry_submit_finished_at_ms"))
+    if submit_finished_ms is not None and submit_finished_ms > 0:
+        return submit_finished_ms / 1000.0
+    attempts = order_latency_payload.get("attempts")
+    if isinstance(attempts, list):
+        finished_values = [
+            value
+            for value in (_int_or_none(item.get("finished_at_ms")) for item in attempts if isinstance(item, Mapping))
+            if value is not None and value > 0
+        ]
+        if finished_values:
+            return max(finished_values) / 1000.0
+    return _epoch_seconds(pending.intent.decided_at or pending.occurred_at)
 
 
 def _limit_wait_seconds(intent: OrderIntent) -> float:

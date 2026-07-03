@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 
 from bfa.config import load_config
@@ -120,6 +121,20 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def add_latency_to_pending_intent(self, *, entry_submit_finished_at_ms: int):
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT id, payload_json FROM order_intents WHERE payload_json LIKE '%entry_order_pending%' ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+            payload = json.loads(row[1])
+            metadata = payload["intent"].setdefault("metadata", {})
+            metadata["latency"] = {"entry_submit_finished_at_ms": entry_submit_finished_at_ms}
+            connection.execute("UPDATE order_intents SET payload_json = ? WHERE id = ?", (json.dumps(payload), row[0]))
+            connection.commit()
+        finally:
+            connection.close()
+
     def insert_pending_intent(self, intent: OrderIntent, *, status="entry_order_pending"):
         connection = sqlite3.connect(self.db_path)
         try:
@@ -216,6 +231,26 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertEqual(report.items[0].action, "mark_resolved")
         self.assertIn(("cancel_order", {"symbol": "BTCUSDT", "orig_client_order_id": "bfa-btc-pending-1"}), client.calls)
         self.assertGreaterEqual(self.exchange_response_count(), 1)
+
+    def test_execute_mode_waits_from_actual_entry_submit_time_when_available(self):
+        self.add_latency_to_pending_intent(
+            entry_submit_finished_at_ms=int(datetime(2026, 6, 20, 9, 0, 18, tzinfo=UTC).timestamp() * 1000)
+        )
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:25Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.status, "pending_limit_watchdog_checked")
+        self.assertEqual(report.items[0].status, "still_pending")
+        self.assertEqual(report.items[0].action, "watch")
+        self.assertNotIn("cancel_order", [call[0] for call in client.calls])
+        self.assertEqual(self.exchange_response_count(), 0)
 
     def test_observe_mode_reports_expired_pending_order_without_canceling(self):
         client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
