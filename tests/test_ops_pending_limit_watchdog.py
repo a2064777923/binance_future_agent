@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -18,6 +19,7 @@ class FakePendingLimitClient:
         self.active_position = active_position
         self.calls = []
         self.algo_orders = []
+        self.new_orders = []
 
     def query_order(self, **kwargs):
         self.calls.append(("query_order", kwargs))
@@ -55,6 +57,11 @@ class FakePendingLimitClient:
         self.calls.append(("new_algo_order", kwargs))
         self.algo_orders.append(kwargs)
         return {"algoId": 100 + len(self.algo_orders), **kwargs}
+
+    def new_order(self, **kwargs):
+        self.calls.append(("new_order", kwargs))
+        self.new_orders.append(kwargs)
+        return {"orderId": 200 + len(self.new_orders), "status": "NEW", **kwargs}
 
     def cancel_order(self, **kwargs):
         self.calls.append(("cancel_order", kwargs))
@@ -110,6 +117,14 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         connection = sqlite3.connect(self.db_path)
         try:
             return connection.execute("SELECT COUNT(*) FROM exchange_responses").fetchone()[0]
+        finally:
+            connection.close()
+
+    def insert_pending_intent(self, intent: OrderIntent, *, status="entry_order_pending"):
+        connection = sqlite3.connect(self.db_path)
+        try:
+            store = EventStore(connection)
+            persist_order_intent(store, intent=intent, status=status, risk=RiskDecision(True, ["risk_accepted"]))
         finally:
             connection.close()
 
@@ -217,6 +232,82 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertIn("no_matching_active_position", report.items[0].reasons)
         self.assertEqual(client.algo_orders, [])
         self.assertGreaterEqual(self.exchange_response_count(), 1)
+
+    def test_execute_mode_reprices_micro_grid_pending_order_once(self):
+        cache_path = Path(self.tmp.name) / "seconds.json"
+        cache_path.write_text(
+            json.dumps(
+                {
+                    "schema": "bfa_raw_feed_second_bars_v1",
+                    "symbols": {
+                        "ETHUSDT": [
+                            {
+                                "symbol": "ETHUSDT",
+                                "close": 100.0,
+                            }
+                        ]
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.insert_pending_intent(
+            OrderIntent(
+                symbol="ETHUSDT",
+                side="SELL",
+                quantity=1.0,
+                notional_usdt=101.0,
+                entry_price=101.0,
+                stop_price=103.0,
+                target_price=98.0,
+                leverage=10,
+                mode="live",
+                decided_at="2026-06-20T09:00:00Z",
+                order_type="LIMIT",
+                time_in_force="GTX",
+                limit_wait_seconds=20,
+                metadata={"client_order_id": "bfa-eth-pending-1", "strategy_leg": "micro_grid"},
+                reason_codes=["strategy_leg:micro_grid"],
+            )
+        )
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(
+                BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true",
+                BFA_LIVE_MICRO_GRID_SECONDS_CACHE=str(cache_path),
+                BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_AFTER_SECONDS="8",
+                BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_EDGE_BPS="8",
+                BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_WAIT_SECONDS="12",
+            ),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:09Z",
+            execute=True,
+        )
+
+        repriced = [item for item in report.items if item.status == "repriced_pending"]
+        self.assertEqual(report.status, "pending_limit_watchdog_repriced")
+        self.assertEqual(len(repriced), 1)
+        self.assertTrue(report.action_taken)
+        self.assertIn(("cancel_order", {"symbol": "ETHUSDT", "orig_client_order_id": "bfa-eth-pending-1"}), client.calls)
+        self.assertEqual(len(client.new_orders), 1)
+        self.assertEqual(client.new_orders[0]["symbol"], "ETHUSDT")
+        self.assertEqual(client.new_orders[0]["time_in_force"], "GTX")
+        self.assertGreater(client.new_orders[0]["price"], 100.0)
+        self.assertLess(client.new_orders[0]["price"], 101.0)
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            rows = connection.execute("SELECT payload_json FROM order_intents WHERE symbol = 'ETHUSDT'").fetchall()
+        finally:
+            connection.close()
+        payloads = [json.loads(row[0]) for row in rows]
+        pending_payloads = [payload for payload in payloads if payload["status"] == "entry_order_pending"]
+        self.assertEqual(len(pending_payloads), 2)
+        latest_intent = pending_payloads[-1]["intent"]
+        self.assertEqual(latest_intent["metadata"]["pending_limit_watchdog_reprice_count"], 1)
+        self.assertEqual(latest_intent["limit_wait_seconds"], 12)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 import json
 import sqlite3
 from typing import Any, Mapping, Protocol
@@ -32,6 +33,21 @@ class PendingLimitWatchdogClient(Protocol):
         symbol: str,
         order_id: int | str | None = None,
         orig_client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    def new_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        order_type: str,
+        quantity: float,
+        price: float | None = None,
+        time_in_force: str | None = None,
+        reduce_only: bool = False,
+        position_side: str | None = None,
+        new_client_order_id: str | None = None,
     ) -> dict[str, Any]:
         ...
 
@@ -116,7 +132,7 @@ class PendingLimitWatchdogReport:
 
     @property
     def action_taken(self) -> bool:
-        return any(item.action in {"place_protective_orders", "mark_resolved"} for item in self.items)
+        return any(item.action in {"place_protective_orders", "mark_resolved", "reprice_pending_order"} for item in self.items)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -214,6 +230,7 @@ def execute_pending_limit_watchdog(
             for item in _load_unresolved_pending_limit_intents(connection)
             if item.intent.symbol.upper() not in manual_symbols
         ]
+        latest_prices = _load_latest_seconds_prices(config, checked_at=checked) if pending else {}
         items: list[PendingLimitWatchdogItem] = []
         for pending_intent in pending[: max(0, max_items)]:
             items.append(
@@ -224,6 +241,7 @@ def execute_pending_limit_watchdog(
                     pending_intent,
                     checked_at=checked,
                     execute_protective_orders=execute_protective_orders,
+                    latest_prices=latest_prices,
                 )
             )
         return PendingLimitWatchdogReport(
@@ -248,6 +266,7 @@ def _check_pending_intent(
     *,
     checked_at: str,
     execute_protective_orders: bool,
+    latest_prices: Mapping[str, Mapping[str, float]],
 ) -> PendingLimitWatchdogItem:
     response: dict[str, Any] = {
         "response_type": "pending_limit_watchdog",
@@ -304,6 +323,30 @@ def _check_pending_intent(
                     query_status=query_status,
                 )
             return _persist_terminal_no_fill(connection, pending, response, checked_at=checked_at, query_status=query_status)
+        if query is not None and _should_reprice_pending_limit(config, pending, query, checked_at=checked_at):
+            if not execute_protective_orders:
+                return PendingLimitWatchdogItem(
+                    intent_event_id=pending.event_id,
+                    symbol=pending.intent.symbol,
+                    status="pending_limit_reprice_ready",
+                    action="reprice_pending_order",
+                    reasons=["pending_limit_reprice_ready", "execution_disabled_observe_only"],
+                    client_order_id=pending.client_order_id,
+                    query_status=query_status,
+                )
+            repriced = _reprice_pending_limit_entry(
+                config,
+                connection,
+                client,
+                pending,
+                query,
+                response,
+                checked_at=checked_at,
+                query_status=query_status,
+                latest_prices=latest_prices,
+            )
+            if repriced is not None:
+                return repriced
         if query is not None and _pending_limit_wait_expired(pending, checked_at=checked_at):
             if not execute_protective_orders:
                 return PendingLimitWatchdogItem(
@@ -447,6 +490,232 @@ def _persist_terminal_no_fill(
         exchange_response_event_id=persisted.get("exchange_response"),
         order_intent_event_id=persisted.get("order_intent"),
     )
+
+
+def _should_reprice_pending_limit(
+    config: AppConfig,
+    pending: PendingLimitOrderIntent,
+    query: Mapping[str, Any],
+    *,
+    checked_at: str,
+) -> bool:
+    if not _truthy(config.get("BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_ENABLED", "true")):
+        return False
+    if not _is_micro_grid_intent(pending.intent):
+        return False
+    if _pending_reprice_count(pending.intent) >= _int_or_default(
+        config.get("BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_MAX_ATTEMPTS", "1"),
+        1,
+    ):
+        return False
+    if _order_status(query) not in _OPEN_ORDER_STATUSES:
+        return False
+    if _executed_quantity(query) > 0:
+        return False
+    age = _pending_limit_age_seconds(pending, checked_at=checked_at)
+    if age is None:
+        return False
+    return age >= _float_or_default(config.get("BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_AFTER_SECONDS", "8"), 8.0)
+
+
+def _reprice_pending_limit_entry(
+    config: AppConfig,
+    connection: sqlite3.Connection,
+    client: PendingLimitWatchdogClient,
+    pending: PendingLimitOrderIntent,
+    query: Mapping[str, Any],
+    response: Mapping[str, Any],
+    *,
+    checked_at: str,
+    query_status: str | None,
+    latest_prices: Mapping[str, Mapping[str, float]],
+) -> PendingLimitWatchdogItem | None:
+    latest = latest_prices.get(pending.intent.symbol.upper())
+    if not latest:
+        return None
+    latest_price = _float(latest.get("price"))
+    age_seconds = _float(latest.get("age_seconds"))
+    max_age = _float_or_default(config.get("BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_MAX_MARK_AGE_SECONDS", "15"), 15.0)
+    if latest_price is None or latest_price <= 0 or age_seconds is None or age_seconds > max_age:
+        return None
+
+    edge_bps = _float_or_default(config.get("BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_EDGE_BPS", "8"), 8.0)
+    new_entry = _repriced_entry_price(pending.intent, latest_price=latest_price, edge_bps=edge_bps)
+    if new_entry is None or abs(new_entry - pending.intent.entry_price) <= 0:
+        return None
+
+    response_payload = {
+        **dict(response),
+        "watchdog_status": "repriced",
+        "reprice_model": "micro_grid_watchdog_reanchor_v1",
+        "reprice_latest_price": latest_price,
+        "reprice_latest_age_seconds": age_seconds,
+        "reprice_edge_bps": edge_bps,
+        "reprice_original_entry_price": pending.intent.entry_price,
+        "reprice_new_entry_price": new_entry,
+    }
+    cancel_response = _cancel_expired_pending_limit(client, pending)
+    response_payload["entry_order_cancel"] = cancel_response
+    if _executed_quantity(cancel_response) > 0:
+        active_intent = _intent_with_fill(pending.intent, cancel_response)
+        protective = _place_missing_protective_orders(config, client, active_intent, checked_at=checked_at)
+        response_payload.update(protective["response"])
+        status = "filled_protected" if protective["complete"] else "protection_failed"
+        response_payload["watchdog_status"] = status
+        persisted = _persist_watchdog_resolution(
+            connection,
+            intent=replace(
+                active_intent,
+                decided_at=checked_at,
+                reason_codes=_dedupe([*active_intent.reason_codes, "pending_limit_cancel_found_fill"]),
+            ),
+            intent_status="submitted" if protective["complete"] else "protective_order_failed_open",
+            response=response_payload,
+            risk=RiskDecision(protective["complete"], ["pending_limit_cancel_found_fill", *protective["reason_codes"]]),
+        )
+        return PendingLimitWatchdogItem(
+            intent_event_id=pending.event_id,
+            symbol=pending.intent.symbol,
+            status=status,
+            action="place_protective_orders",
+            reasons=["pending_limit_cancel_found_fill", *protective["reason_codes"]],
+            client_order_id=pending.client_order_id,
+            query_status=query_status,
+            position_side=_position_side(active_intent, config),
+            exchange_response_event_id=persisted.get("exchange_response"),
+            order_intent_event_id=persisted.get("order_intent"),
+        )
+
+    cancel_status = _order_status(cancel_response)
+    if cancel_status not in _CLOSED_ORDER_STATUSES:
+        return PendingLimitWatchdogItem(
+            intent_event_id=pending.event_id,
+            symbol=pending.intent.symbol,
+            status="pending_limit_reprice_cancel_failed",
+            action="watch",
+            reasons=["pending_limit_reprice_ready", "pending_limit_reprice_cancel_failed"],
+            client_order_id=pending.client_order_id,
+            query_status=query_status,
+        )
+
+    new_count = _pending_reprice_count(pending.intent) + 1
+    new_client_order_id = _client_order_id(pending.intent, checked_at=checked_at, suffix=f"rp{new_count}")
+    stop_price, target_price, reanchor = _reanchored_protective_prices(pending.intent, new_entry)
+    wait_seconds = _int_or_default(config.get("BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_WAIT_SECONDS", "12"), 12)
+    new_intent = replace(
+        pending.intent,
+        decided_at=checked_at,
+        entry_price=new_entry,
+        notional_usdt=pending.intent.quantity * new_entry,
+        stop_price=stop_price,
+        target_price=target_price,
+        limit_wait_seconds=wait_seconds,
+        reason_codes=_dedupe(
+            [
+                *pending.intent.reason_codes,
+                "pending_limit_watchdog_repriced",
+                "micro_grid_watchdog_reanchored_protective_prices",
+            ]
+        ),
+        metadata={
+            **pending.intent.metadata,
+            "client_order_id": new_client_order_id,
+            "pending_limit_watchdog_reprice_count": new_count,
+            "pending_limit_watchdog_reprice": {
+                "model": "micro_grid_watchdog_reanchor_v1",
+                "original_event_id": pending.event_id,
+                "original_client_order_id": pending.client_order_id,
+                "original_entry_price": pending.intent.entry_price,
+                "new_entry_price": new_entry,
+                "latest_price": latest_price,
+                "latest_age_seconds": age_seconds,
+                "edge_bps": edge_bps,
+                "wait_seconds": wait_seconds,
+                "protective_reanchor": reanchor,
+            },
+        },
+    )
+    try:
+        new_order = client.new_order(
+            symbol=new_intent.symbol,
+            side=new_intent.side,
+            order_type=new_intent.order_type,
+            quantity=new_intent.quantity,
+            price=new_intent.entry_price,
+            time_in_force=new_intent.time_in_force or "GTX",
+            reduce_only=new_intent.reduce_only,
+            position_side=_position_side(new_intent, config),
+            new_client_order_id=new_client_order_id,
+        )
+    except (AttributeError, TypeError) as exc:
+        response_payload["entry_order_reprice_error"] = {"message": str(exc), "kind": type(exc).__name__}
+        persisted = _persist_terminal_no_fill(connection, pending, response_payload, checked_at=checked_at, query_status=cancel_status)
+        return replace(
+            persisted,
+            status="terminal_no_fill_reprice_failed",
+            reasons=["pending_limit_reprice_failed", "pending_limit_terminal_no_fill"],
+        )
+    except BinanceSignedError as exc:
+        response_payload["entry_order_reprice_error"] = _signed_error_payload(exc)
+        persisted = _persist_terminal_no_fill(connection, pending, response_payload, checked_at=checked_at, query_status=cancel_status)
+        return replace(
+            persisted,
+            status="terminal_no_fill_reprice_failed",
+            reasons=["pending_limit_reprice_failed", "pending_limit_terminal_no_fill"],
+        )
+
+    response_payload["entry_order_reprice"] = new_order
+    persisted = _persist_watchdog_reprice(
+        connection,
+        old_intent=pending.intent,
+        new_intent=new_intent,
+        response=response_payload,
+    )
+    return PendingLimitWatchdogItem(
+        intent_event_id=pending.event_id,
+        symbol=pending.intent.symbol,
+        status="repriced_pending",
+        action="reprice_pending_order",
+        reasons=["pending_limit_repriced", "pending_limit_reprice_waiting_for_fill"],
+        client_order_id=new_client_order_id,
+        query_status=query_status,
+        order_intent_event_id=persisted.get("new_order_intent"),
+        exchange_response_event_id=persisted.get("exchange_response"),
+    )
+
+
+def _persist_watchdog_reprice(
+    connection: sqlite3.Connection,
+    *,
+    old_intent: OrderIntent,
+    new_intent: OrderIntent,
+    response: Mapping[str, Any],
+) -> dict[str, int]:
+    store = EventStore(connection)
+    persisted = {
+        "old_order_intent": persist_order_intent(
+            store,
+            intent=replace(
+                old_intent,
+                reason_codes=_dedupe([*old_intent.reason_codes, "pending_limit_watchdog_repriced_old_order"]),
+            ),
+            status="entry_order_repriced_canceled",
+            risk=RiskDecision(True, ["pending_limit_watchdog_repriced_old_order"]),
+        ),
+    }
+    persisted["exchange_response"] = persist_exchange_response(
+        store,
+        intent=old_intent,
+        response=dict(response),
+        response_type="pending_limit_watchdog",
+    )
+    persisted["new_order_intent"] = persist_order_intent(
+        store,
+        intent=new_intent,
+        status="entry_order_pending",
+        risk=RiskDecision(True, ["pending_limit_watchdog_repriced_pending"]),
+    )
+    return persisted
 
 
 def _handle_filled_without_active_position(
@@ -735,6 +1004,7 @@ def _resolved_pending_event_ids(connection: sqlite3.Connection) -> set[int]:
             "position_reconciled_protected",
             "terminal_no_fill",
             "filled_no_active_position",
+            "repriced",
         }:
             continue
         event_id = _int_or_none(response_payload.get("pending_intent_event_id"))
@@ -790,12 +1060,18 @@ def _intent_client_order_id(intent: OrderIntent) -> str:
 
 
 def _pending_limit_wait_expired(pending: PendingLimitOrderIntent, *, checked_at: str) -> bool:
+    age = _pending_limit_age_seconds(pending, checked_at=checked_at)
+    if age is None:
+        return False
+    return age >= _limit_wait_seconds(pending.intent)
+
+
+def _pending_limit_age_seconds(pending: PendingLimitOrderIntent, *, checked_at: str) -> float | None:
     decided = _epoch_seconds(pending.intent.decided_at or pending.occurred_at)
     checked = _epoch_seconds(checked_at)
     if decided is None or checked is None:
-        return False
-    wait = _limit_wait_seconds(pending.intent)
-    return checked - decided >= wait
+        return None
+    return checked - decided
 
 
 def _limit_wait_seconds(intent: OrderIntent) -> float:
@@ -841,6 +1117,109 @@ def _cancel_expired_pending_limit(
         }
 
 
+def _is_micro_grid_intent(intent: OrderIntent) -> bool:
+    metadata = intent.metadata if isinstance(intent.metadata, Mapping) else {}
+    if str(metadata.get("strategy_leg") or "").strip().lower() == "micro_grid":
+        return True
+    return any(str(reason).strip().lower() == "strategy_leg:micro_grid" for reason in intent.reason_codes)
+
+
+def _pending_reprice_count(intent: OrderIntent) -> int:
+    metadata = intent.metadata if isinstance(intent.metadata, Mapping) else {}
+    return max(0, _int_or_none(metadata.get("pending_limit_watchdog_reprice_count")) or 0)
+
+
+def _repriced_entry_price(intent: OrderIntent, *, latest_price: float, edge_bps: float) -> float | None:
+    original = Decimal(str(intent.entry_price))
+    latest = Decimal(str(latest_price))
+    if original <= 0 or latest <= 0:
+        return None
+    edge = max(Decimal(str(edge_bps)), Decimal("1")) / Decimal("10000")
+    side = intent.side.upper()
+    if side == "BUY":
+        target = latest * (Decimal("1") - edge)
+        candidate = max(original, target)
+        rounded = _round_price_like(candidate, original, up=False)
+        if rounded >= latest or rounded <= original:
+            return None
+    elif side == "SELL":
+        target = latest * (Decimal("1") + edge)
+        candidate = min(original, target)
+        rounded = _round_price_like(candidate, original, up=True)
+        if rounded <= latest or rounded >= original:
+            return None
+    else:
+        return None
+    return float(rounded)
+
+
+def _round_price_like(value: Decimal, reference: Decimal, *, up: bool) -> Decimal:
+    exponent = reference.as_tuple().exponent
+    quantum = Decimal(1).scaleb(exponent) if exponent < 0 else Decimal("1")
+    rounding = ROUND_UP if up else ROUND_DOWN
+    rounded = value.quantize(quantum, rounding=rounding)
+    return rounded if rounded > 0 else value
+
+
+def _reanchored_protective_prices(intent: OrderIntent, entry_price: float) -> tuple[float, float, dict[str, Any] | None]:
+    old_entry = intent.entry_price
+    if old_entry <= 0 or entry_price <= 0:
+        return intent.stop_price, intent.target_price, None
+    risk_fraction = abs(old_entry - intent.stop_price) / old_entry
+    reward_fraction = abs(intent.target_price - old_entry) / old_entry
+    if risk_fraction <= 0 or reward_fraction <= 0:
+        return intent.stop_price, intent.target_price, None
+    if intent.side.upper() == "BUY":
+        stop_price = entry_price * (1.0 - risk_fraction)
+        target_price = entry_price * (1.0 + reward_fraction)
+    else:
+        stop_price = entry_price * (1.0 + risk_fraction)
+        target_price = entry_price * (1.0 - reward_fraction)
+    return stop_price, target_price, {
+        "model": "pending_limit_micro_grid_reanchor_v1",
+        "original_entry_price": old_entry,
+        "new_entry_price": entry_price,
+        "original_stop_price": intent.stop_price,
+        "original_target_price": intent.target_price,
+        "reanchored_stop_price": stop_price,
+        "reanchored_target_price": target_price,
+        "risk_fraction": risk_fraction,
+        "reward_fraction": reward_fraction,
+    }
+
+
+def _load_latest_seconds_prices(config: AppConfig, *, checked_at: str) -> dict[str, dict[str, float]]:
+    path = str(config.get("BFA_LIVE_MICRO_GRID_SECONDS_CACHE") or "").strip()
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    symbols = payload.get("symbols") if isinstance(payload, Mapping) else None
+    if not isinstance(symbols, Mapping):
+        return {}
+    checked_epoch = _epoch_seconds(checked_at)
+    checked_ms = checked_epoch * 1000.0 if checked_epoch is not None else None
+    result: dict[str, dict[str, float]] = {}
+    for symbol, bars in symbols.items():
+        if not isinstance(bars, list) or not bars:
+            continue
+        latest = bars[-1]
+        if not isinstance(latest, Mapping):
+            continue
+        close = _float(latest.get("close"))
+        close_time = _float(latest.get("close_time"))
+        if close is None or close <= 0:
+            continue
+        age_seconds = 0.0
+        if checked_ms is not None and close_time is not None:
+            age_seconds = max(0.0, (checked_ms - close_time) / 1000.0)
+        result[str(symbol).upper()] = {"price": close, "age_seconds": age_seconds}
+    return result
+
+
 def _client_order_id(intent: OrderIntent, *, checked_at: str, suffix: str) -> str:
     seed_time = "".join(ch for ch in (checked_at or intent.decided_at) if ch.isdigit())
     base = f"bfa-{intent.symbol.lower()}-{seed_time}"
@@ -877,6 +1256,11 @@ _CLOSED_ORDER_STATUSES = {
     "REJECTED",
     "EXPIRED",
     "EXPIRED_IN_MATCH",
+}
+
+
+_OPEN_ORDER_STATUSES = {
+    "NEW",
 }
 
 
@@ -928,6 +1312,8 @@ def _report_status(
         return "pending_limit_watchdog_protection_failed"
     if any(status in statuses for status in {"filled_unprotected", "pending_limit_wait_expired"}):
         return "pending_limit_watchdog_action_ready"
+    if any(status in statuses for status in {"pending_limit_reprice_ready", "repriced_pending"}):
+        return "pending_limit_watchdog_repriced" if execution_enabled else "pending_limit_watchdog_action_ready"
     if "filled_position_check_failed" in statuses:
         return "pending_limit_watchdog_check_failed"
     if any(status in statuses for status in {"filled_protected", "position_reconciled_protected"}):
@@ -944,6 +1330,11 @@ def _float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    parsed = _float(value)
+    return parsed if parsed is not None else default
 
 
 def _int_or_none(value: Any) -> int | None:

@@ -127,6 +127,32 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         self.assertAlmostEqual(profile.max_drift_to_width, 1.15)
         self.assertAlmostEqual(profile.min_width_cost_ratio, 1.55)
         self.assertAlmostEqual(profile.min_wick_opportunity_percent, 0.55)
+        self.assertAlmostEqual(profile.dynamic_entry_base_edge_fraction, -0.03)
+        self.assertAlmostEqual(profile.dynamic_entry_max_push_fraction, 0.12)
+        self.assertAlmostEqual(profile.wick_min_entry_fraction, -0.42)
+        self.assertAlmostEqual(profile.spike_depth_entry_fraction, 0.48)
+        self.assertAlmostEqual(profile.spike_depth_max_entry_edge_fraction, -0.42)
+
+    def test_live_profile_allows_entry_geometry_overrides(self):
+        live_config = MicroGridLiveConfig.from_app(
+            load_config(
+                env={
+                    "BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION": "-0.05",
+                    "BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MAX_PUSH_FRACTION": "0.08",
+                    "BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION": "-0.30",
+                    "BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_ENTRY_FRACTION": "0.40",
+                    "BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION": "-0.35",
+                }
+            )
+        )
+
+        profile = _live_profile(research, live_config)
+
+        self.assertAlmostEqual(profile.dynamic_entry_base_edge_fraction, -0.05)
+        self.assertAlmostEqual(profile.dynamic_entry_max_push_fraction, 0.08)
+        self.assertAlmostEqual(profile.wick_min_entry_fraction, -0.30)
+        self.assertAlmostEqual(profile.spike_depth_entry_fraction, 0.40)
+        self.assertAlmostEqual(profile.spike_depth_max_entry_edge_fraction, -0.35)
 
     def test_config_reads_micro_grid_max_signal_age(self):
         live_config = MicroGridLiveConfig.from_app(

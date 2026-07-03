@@ -32,6 +32,17 @@ class MicroGridLiveConfig:
     max_hold_seconds: int | None
     model_horizon_seconds: int
     max_signal_age_seconds: float
+    dynamic_entry_base_edge_fraction: float
+    dynamic_entry_max_push_fraction: float
+    dynamic_entry_flow_push_fraction: float
+    dynamic_entry_momentum_push_fraction: float
+    dynamic_entry_volatility_push_fraction: float
+    dynamic_entry_wick_push_fraction: float
+    dynamic_entry_continuation_push_fraction: float
+    wick_min_entry_fraction: float
+    spike_depth_entry_fraction: float
+    spike_depth_tail_buffer_fraction: float
+    spike_depth_max_entry_edge_fraction: float
 
     @classmethod
     def from_app(cls, config: AppConfig) -> "MicroGridLiveConfig":
@@ -55,6 +66,60 @@ class MicroGridLiveConfig:
             max_signal_age_seconds=max(
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS"), 12.0),
                 1.0,
+            ),
+            dynamic_entry_base_edge_fraction=_float_or_default(
+                config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION"),
+                -0.03,
+            ),
+            dynamic_entry_max_push_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MAX_PUSH_FRACTION"), 0.12),
+                0.0,
+                0.35,
+            ),
+            dynamic_entry_flow_push_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_FLOW_PUSH_FRACTION"), 0.04),
+                0.0,
+                0.20,
+            ),
+            dynamic_entry_momentum_push_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MOMENTUM_PUSH_FRACTION"), 0.04),
+                0.0,
+                0.20,
+            ),
+            dynamic_entry_volatility_push_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_VOLATILITY_PUSH_FRACTION"), 0.025),
+                0.0,
+                0.20,
+            ),
+            dynamic_entry_wick_push_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_WICK_PUSH_FRACTION"), 0.03),
+                0.0,
+                0.20,
+            ),
+            dynamic_entry_continuation_push_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_CONTINUATION_PUSH_FRACTION"), 0.025),
+                0.0,
+                0.20,
+            ),
+            wick_min_entry_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION"), -0.42),
+                -1.35,
+                0.0,
+            ),
+            spike_depth_entry_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_ENTRY_FRACTION"), 0.48),
+                0.10,
+                1.20,
+            ),
+            spike_depth_tail_buffer_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_TAIL_BUFFER_FRACTION"), 0.10),
+                0.0,
+                0.35,
+            ),
+            spike_depth_max_entry_edge_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION"), -0.42),
+                -1.35,
+                0.0,
             ),
         )
 
@@ -548,13 +613,13 @@ def _live_profile(research, live_config: MicroGridLiveConfig):
         grid_layer_spacing_fraction=0.42,
         min_reservation_edge_fraction=-0.36,
         dynamic_entry_edge_enabled=True,
-        dynamic_entry_base_edge_fraction=-0.08,
-        dynamic_entry_max_push_fraction=0.24,
-        dynamic_entry_flow_push_fraction=0.08,
-        dynamic_entry_momentum_push_fraction=0.07,
-        dynamic_entry_volatility_push_fraction=0.04,
-        dynamic_entry_wick_push_fraction=0.07,
-        dynamic_entry_continuation_push_fraction=0.05,
+        dynamic_entry_base_edge_fraction=live_config.dynamic_entry_base_edge_fraction,
+        dynamic_entry_max_push_fraction=live_config.dynamic_entry_max_push_fraction,
+        dynamic_entry_flow_push_fraction=live_config.dynamic_entry_flow_push_fraction,
+        dynamic_entry_momentum_push_fraction=live_config.dynamic_entry_momentum_push_fraction,
+        dynamic_entry_volatility_push_fraction=live_config.dynamic_entry_volatility_push_fraction,
+        dynamic_entry_wick_push_fraction=live_config.dynamic_entry_wick_push_fraction,
+        dynamic_entry_continuation_push_fraction=live_config.dynamic_entry_continuation_push_fraction,
         dynamic_exit_geometry_enabled=True,
         dynamic_exit_stop_widen_fraction=0.12,
         dynamic_exit_max_stop_fraction=0.56,
@@ -563,13 +628,13 @@ def _live_profile(research, live_config: MicroGridLiveConfig):
         dynamic_exit_target_beyond_mean_fraction=0.14,
         dynamic_exit_max_target_fraction=1.12,
         dynamic_exit_min_target_stop_ratio=0.88,
-        wick_min_entry_fraction=-1.35,
+        wick_min_entry_fraction=live_config.wick_min_entry_fraction,
         wick_max_entry_fraction=0.7,
         wick_max_stop_fraction=0.72,
-        spike_depth_entry_fraction=0.92,
+        spike_depth_entry_fraction=live_config.spike_depth_entry_fraction,
         spike_depth_stop_fraction=1.45,
-        spike_depth_tail_buffer_fraction=0.22,
-        spike_depth_max_entry_edge_fraction=-1.35,
+        spike_depth_tail_buffer_fraction=live_config.spike_depth_tail_buffer_fraction,
+        spike_depth_max_entry_edge_fraction=live_config.spike_depth_max_entry_edge_fraction,
         spike_depth_max_stop_fraction=1.25,
         dynamic_level_planner_enabled=True,
         planner_max_stop_fraction=1.0,

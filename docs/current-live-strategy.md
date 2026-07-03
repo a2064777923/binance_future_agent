@@ -403,6 +403,52 @@ Micro-grid entry geometry is dynamic:
 - stop and target geometry are adjusted from the same volatility/quality
   context rather than using one fixed distance.
 
+2026-07-03 live no-fill audit: the fast lane was scanning and submitting
+orders, but 135 of 142 recent micro-grid setups ended as `terminal_no_fill`.
+The unfilled entries had a median offset of about `0.90%` from reference price,
+while the median short-range band width was about `0.75%`; the first limit was
+often deeper than the whole active band. The live adapter now exposes the entry
+geometry as env-tunable knobs, and the server is currently set to a tighter
+first-entry profile:
+
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION=-0.02`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MAX_PUSH_FRACTION=0.08`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_FLOW_PUSH_FRACTION=0.025`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_MOMENTUM_PUSH_FRACTION=0.025`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_VOLATILITY_PUSH_FRACTION=0.02`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_WICK_PUSH_FRACTION=0.02`
+- `BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_CONTINUATION_PUSH_FRACTION=0.02`
+- `BFA_LIVE_MICRO_GRID_WICK_MIN_ENTRY_FRACTION=-0.28`
+- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_ENTRY_FRACTION=0.36`
+- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_TAIL_BUFFER_FRACTION=0.06`
+- `BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION=-0.28`
+
+Immediate server observation after this second tune showed new micro-grid
+offsets around `0.16%` to `0.26%`. If these still remain mostly no-fill, the
+next tuning axis is order lifetime/reprice behavior under the `20s` wait
+window, not another deep-entry push.
+
+Follow-up observation after the tighter geometry still showed `19` unique
+micro-grid orders ending as unfilled pending/expired orders. Median
+signal-to-entry-submit latency was about `9s`, while the exchange submit itself
+was only about `15ms`; the bottleneck was stale signal/queue time plus a
+single static passive limit, not Binance order placement. The pending-limit
+watchdog now has a micro-grid-only one-shot reprice path:
+
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_ENABLED=true`
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_AFTER_SECONDS=8`
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_EDGE_BPS=8`
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_WAIT_SECONDS=12`
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_MAX_ATTEMPTS=1`
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_MAX_MARK_AGE_SECONDS=15`
+
+When a micro-grid GTX limit is still `NEW` after the configured age, the
+watchdog cancels the old order, reads the latest raw-feed seconds cache, moves
+the entry once toward current price while preserving a passive edge, reanchors
+the planned stop/target around the new entry, and persists a fresh
+`entry_order_pending` intent. Trend orders are not repriced by this path, and a
+micro-grid order is never repriced after a partial/complete fill.
+
 SLXUSDT 2026-06-26 forensic note: the `03:54:38Z` micro-grid short was
 directionally correct but geometrically too shallow. The signal saw current
 price around `0.41896`, posted a short at `0.42088`, filled at `03:55:53Z`,
@@ -609,12 +655,20 @@ was growing too fast. For later analysis, rely on decision snapshots, raw-feed
 files, order intents, exchange responses, outcomes, fills, and signed
 `userTrades` reconciliation.
 
-The DB size is not from `market_snapshots` at this snapshot: that table had
+The DB size was not from `market_snapshots` at this snapshot: that table had
 zero rows. The largest retained event families were `paper_observation`,
 `position_sentinel`, `candidate`, `paper_signal`, `paper_outcome`, and
-`trade_setup`. Forward-paper is disabled for live responsiveness, but its
-historical rows remain in SQLite until a deliberate archival/compaction pass is
-planned. Do not run `VACUUM` while live services are active.
+`trade_setup`.
+
+On 2026-07-03 a deliberate archival/compaction pass paused DB-writing timers,
+archived old noisy payloads to
+`/opt/binance-futures-agent/data/event-archive/20260703-182305`, kept the
+original DB backup at
+`/opt/binance-futures-agent/data/agent.sqlite.bak.20260703-182305`, and shrank
+the live SQLite file from about `8.2G` to about `429M`. Core execution evidence
+(`order_intent`, `exchange_response`, `fill`, `outcome`) was left in SQLite;
+older noisy diagnostic rows were retained as compressed JSONL. Do not run
+`VACUUM` while live services are active.
 
 Raw-feed quality check on `binance-usdm-raw-20260703T072545Z.gz`:
 
