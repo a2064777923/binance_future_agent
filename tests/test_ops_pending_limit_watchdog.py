@@ -166,6 +166,25 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertEqual([order["order_type"] for order in client.algo_orders], ["STOP_MARKET", "TAKE_PROFIT_MARKET"])
         self.assertGreaterEqual(self.exchange_response_count(), 1)
 
+    def test_execute_mode_cancels_partial_entry_remainder_before_protection(self):
+        client = FakePendingLimitClient(order_status="PARTIALLY_FILLED", executed_qty="0.2")
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:05Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.status, "pending_limit_watchdog_protected")
+        self.assertEqual(report.items[0].status, "position_reconciled_protected")
+        self.assertIn("pending_limit_partial_entry_remainder_canceled", report.items[0].reasons)
+        call_names = [call[0] for call in client.calls]
+        self.assertLess(call_names.index("cancel_order"), call_names.index("open_algo_orders"))
+        self.assertLess(call_names.index("cancel_order"), call_names.index("new_algo_order"))
+        self.assertIn(("cancel_order", {"symbol": "BTCUSDT", "orig_client_order_id": "bfa-btc-pending-1"}), client.calls)
+
     def test_execute_flag_without_env_permission_stays_observe_only(self):
         client = FakePendingLimitClient()
 
@@ -275,6 +294,7 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         report = build_pending_limit_watchdog_report(
             self.config(
                 BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true",
+                BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_ENABLED="true",
                 BFA_LIVE_MICRO_GRID_SECONDS_CACHE=str(cache_path),
                 BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_AFTER_SECONDS="8",
                 BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_EDGE_BPS="8",

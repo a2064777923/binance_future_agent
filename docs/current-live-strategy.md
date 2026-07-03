@@ -435,19 +435,25 @@ was only about `15ms`; the bottleneck was stale signal/queue time plus a
 single static passive limit, not Binance order placement. The pending-limit
 watchdog now has a micro-grid-only one-shot reprice path:
 
-- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_ENABLED=true`
+- `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_ENABLED=false`
 - `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_AFTER_SECONDS=8`
 - `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_EDGE_BPS=8`
 - `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_WAIT_SECONDS=12`
 - `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_MAX_ATTEMPTS=1`
 - `BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_MAX_MARK_AGE_SECONDS=15`
 
-When a micro-grid GTX limit is still `NEW` after the configured age, the
-watchdog cancels the old order, reads the latest raw-feed seconds cache, moves
-the entry once toward current price while preserving a passive edge, reanchors
-the planned stop/target around the new entry, and persists a fresh
-`entry_order_pending` intent. Trend orders are not repriced by this path, and a
-micro-grid order is never repriced after a partial/complete fill.
+The reprice path is now disabled in live by default. The 2026-07-03 review found
+that it could convert good no-fills into worse fills by moving a lower-edge BUY
+up toward current price, or an upper-edge SELL down toward current price. That
+chased the market instead of waiting for a needle. If re-enabled for research,
+it must first revalidate the current band/flow regime and must not move the
+entry away from the intended edge.
+
+The pending-limit watchdog also explicitly handles partial fills now: if a
+pending entry is `PARTIALLY_FILLED`, it cancels the unfilled entry remainder
+before placing or confirming protective orders. This prevents the old entry
+order from continuing to fill after stop-loss/take-profit protection has been
+placed.
 
 SLXUSDT 2026-06-26 forensic note: the `03:54:38Z` micro-grid short was
 directionally correct but geometrically too shallow. The signal saw current

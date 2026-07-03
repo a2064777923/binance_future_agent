@@ -293,7 +293,21 @@ def _check_pending_intent(
     query_active_intent = _active_intent_from_order_query(pending.intent, query) if query is not None else None
     active_intent = None
     position_payload = None
+    pre_protective_reasons: list[str] = []
     if query_active_intent is not None:
+        if query is not None and _is_partially_filled_open_order(query):
+            if execute_protective_orders:
+                cancel_response = _cancel_expired_pending_limit(client, pending)
+                response["partial_entry_cancel"] = cancel_response
+                response["entry_order_final"] = cancel_response
+                if _executed_quantity(cancel_response) > _executed_quantity(query):
+                    query_active_intent = _intent_with_fill(pending.intent, cancel_response)
+                if _order_status(cancel_response) in _CLOSED_ORDER_STATUSES:
+                    pre_protective_reasons.append("pending_limit_partial_entry_remainder_canceled")
+                else:
+                    pre_protective_reasons.append("pending_limit_partial_entry_cancel_failed")
+            else:
+                pre_protective_reasons.append("pending_limit_partial_entry_remainder_open")
         active_intent, position_payload = _active_intent_from_position(config, client, query_active_intent)
         response["position_reconcile"] = position_payload
         if active_intent is None:
@@ -403,6 +417,7 @@ def _check_pending_intent(
             action="watch" if protected else "place_protective_orders_pending",
             reasons=[
                 "pending_limit_filled",
+                *pre_protective_reasons,
                 "protective_orders_already_present" if protected else "execution_disabled_observe_only",
             ],
             client_order_id=pending.client_order_id,
@@ -418,7 +433,7 @@ def _check_pending_intent(
     persisted_intent = replace(
         active_intent,
         decided_at=checked_at,
-        reason_codes=_dedupe([*active_intent.reason_codes, "pending_limit_watchdog_reconciled"]),
+        reason_codes=_dedupe([*active_intent.reason_codes, *pre_protective_reasons, "pending_limit_watchdog_reconciled"]),
         metadata={
             **active_intent.metadata,
             "pending_intent_event_id": pending.event_id,
@@ -433,7 +448,9 @@ def _check_pending_intent(
         response=response,
         risk=RiskDecision(
             protective["complete"],
-            ["pending_limit_watchdog_reconciled"] if protective["complete"] else ["pending_limit_watchdog_protection_failed"],
+            [*pre_protective_reasons, "pending_limit_watchdog_reconciled"]
+            if protective["complete"]
+            else [*pre_protective_reasons, "pending_limit_watchdog_protection_failed"],
         ),
     )
     if position_payload and position_payload.get("status") == "position_found" and protective["complete"]:
@@ -443,7 +460,7 @@ def _check_pending_intent(
         symbol=active_intent.symbol,
         status=status,
         action="place_protective_orders",
-        reasons=["pending_limit_filled", *protective["reason_codes"]],
+        reasons=["pending_limit_filled", *pre_protective_reasons, *protective["reason_codes"]],
         client_order_id=pending.client_order_id,
         query_status=query_status,
         position_side=_position_side(active_intent, config),
@@ -898,6 +915,15 @@ def _active_intent_from_order_query(intent: OrderIntent, query: Mapping[str, Any
     if status != "FILLED" and quantity <= 0:
         return None
     return _intent_with_fill(intent, query)
+
+
+def _is_partially_filled_open_order(query: Mapping[str, Any]) -> bool:
+    status = _order_status(query)
+    if _executed_quantity(query) <= 0:
+        return False
+    if status == "FILLED" or status in _CLOSED_ORDER_STATUSES:
+        return False
+    return status == "PARTIALLY_FILLED" or status in _OPEN_ORDER_STATUSES
 
 
 def _active_intent_from_position(

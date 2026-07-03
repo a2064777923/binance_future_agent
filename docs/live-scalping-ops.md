@@ -77,13 +77,18 @@ When micro-grid intents reach the exchange but show
 limit order, but price did not touch the limit within
 `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS`.
 
-The pending-limit watchdog can re-anchor a still-open micro-grid GTX entry once
-before it reaches the final no-fill state. The current live profile keeps the
-main wait window at `20s`, then lets the watchdog reprice after about `8s` if
-the raw-feed seconds cache is fresh. The reprice preserves a passive edge,
-updates TP/SL around the new entry, writes a fresh `entry_order_pending` intent,
-and records `pending_limit_watchdog_repriced`. It does not apply to trend
-orders and it does not reprice partial or complete fills.
+The pending-limit watchdog has a micro-grid re-anchor path, but it is disabled
+in live by default. The 2026-07-03 loss review showed that the first version
+could chase a passive entry toward current price and turn otherwise safe
+no-fills into bad fills. Keep
+`BFA_PENDING_LIMIT_MICRO_GRID_REPRICE_ENABLED=false` unless a revised reprice
+model revalidates the current band/flow state and keeps the entry near the
+intended edge.
+
+If a pending entry is partially filled, the watchdog must cancel the unfilled
+entry remainder before placing or confirming protective orders. This avoids the
+failure mode where a close-position stop is placed for the initial partial
+position, then the original entry limit keeps filling more size behind it.
 
 Current live micro-grid behavior is also documented in
 `docs/current-live-strategy.md`: it is a quant-only fast lane, bypasses AI,
