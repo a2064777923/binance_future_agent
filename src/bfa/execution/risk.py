@@ -221,17 +221,37 @@ def _route_metadata_from_reasons(reasons: list[str]) -> dict[str, str]:
     values = _reason_values(reasons)
     return {
         key: str(values[key]).strip()
-        for key in ("strategy_leg", "regime_label", "route_decision")
+        for key in (
+            "strategy_leg",
+            "regime_label",
+            "route_decision",
+            "micro_grid_ladder_group_id",
+            "micro_grid_ladder_layer",
+            "micro_grid_ladder_notional_fraction",
+            "micro_grid_ladder_protection_source",
+        )
         if key in values and str(values[key]).strip()
     }
 
 
 def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+    intent_ladder_group = _micro_grid_ladder_group_id(intent)
+    intent_ladder_layer = _micro_grid_ladder_layer(intent)
     for exposure in risk_state.active_exposures:
         symbol = str(exposure.get("symbol", "")).upper()
         direction = str(exposure.get("direction", "")).upper()
         if symbol == intent.symbol.upper() and direction == intended_direction:
+            exposure_ladder_group = str(exposure.get("micro_grid_ladder_group_id") or "").strip()
+            exposure_ladder_layer = str(exposure.get("micro_grid_ladder_layer") or "").strip()
+            if (
+                intent_ladder_group
+                and exposure_ladder_group == intent_ladder_group
+                and intent_ladder_layer
+                and exposure_ladder_layer
+                and exposure_ladder_layer != intent_ladder_layer
+            ):
+                continue
             return True
     return False
 
@@ -276,6 +296,28 @@ def _is_micro_grid_intent(intent: OrderIntent) -> bool:
     regime = str(metadata.get("regime_label") or "").strip().upper()
     reasons = [str(reason).strip().lower() for reason in intent.reason_codes]
     return leg == "micro_grid" or regime == "RANGE" or any(reason == "strategy_leg:micro_grid" for reason in reasons)
+
+
+def _micro_grid_ladder_group_id(intent: OrderIntent) -> str:
+    if not _is_micro_grid_intent(intent):
+        return ""
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    value = str(metadata.get("micro_grid_ladder_group_id") or "").strip()
+    if value:
+        return value
+    values = _reason_values(intent.reason_codes)
+    return str(values.get("micro_grid_ladder_group_id") or "").strip()
+
+
+def _micro_grid_ladder_layer(intent: OrderIntent) -> str:
+    if not _is_micro_grid_intent(intent):
+        return ""
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    value = str(metadata.get("micro_grid_ladder_layer") or "").strip()
+    if value:
+        return value
+    values = _reason_values(intent.reason_codes)
+    return str(values.get("micro_grid_ladder_layer") or "").strip()
 
 
 def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:

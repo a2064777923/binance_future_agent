@@ -425,6 +425,24 @@ class ConfigTests(unittest.TestCase):
 
         self.assertNotIn("UNRELATED_PUBLIC_PATH", config.values)
 
+    def test_loader_accepts_micro_grid_entry_ladder_controls(self):
+        config = load_config(
+            base_env(
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED="false",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION="0.45",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MAX_QUALITY_SCALE="0.75",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MIN_WIDTH_PERCENT="0.12",
+            )
+        )
+        result = validate_config(config)
+
+        self.assertTrue(result.valid)
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED"), "false")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION"), "0.45")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MAX_QUALITY_SCALE"), "0.75")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MIN_WIDTH_PERCENT"), "0.12")
+        self.assertIn("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION", result.redacted)
+
     def test_redacted_summary_excludes_sensitive_inputs(self):
         config = load_config(
             base_env(

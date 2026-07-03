@@ -84,6 +84,26 @@ entries on one symbol still require basket-aware protection before they should
 be enabled live, otherwise a later fill can invalidate the stop/take-profit
 geometry of the first fill.
 
+The 2026-07-04 ladder update enables a controlled two-layer micro-grid entry for
+moderate-fillability signals:
+
+```bash
+BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED=true
+BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION=0.5
+```
+
+When enabled, the closer layer is placed halfway between current price and the
+original anchor entry, while the anchor layer remains at the original computed
+price. Each layer uses about half of the original notional budget, so the ladder
+does not double the intended exposure. The closer layer deliberately keeps the
+original anchor stop/take-profit geometry instead of recalculating tighter
+protection from the closer entry.
+
+`BFA_MAX_MARGIN_PER_POSITION_USDT` is a hard ceiling, not a target. Actual
+micro-grid margin can be much lower when quality scaling, outcome-health
+downsizing, compressed volatility, stop-risk caps, available portfolio margin,
+or Binance leverage downshifts reduce notional.
+
 When micro-grid intents reach the exchange but show
 `entry_order_expired_canceled`, the signal passed risk and submitted a post-only
 limit order, but price did not touch the limit within

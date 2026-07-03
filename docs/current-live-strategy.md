@@ -361,6 +361,8 @@ Micro-grid is live and independent from AI:
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_NOTIONAL_FRACTION=1.0`
+- `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED=true`
+- `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION=0.5`
 
 Micro-grid submits GTX/post-only limits and may expire or be canceled without a
 fill. A recent intent with `entry_order_expired_canceled` or
@@ -381,11 +383,17 @@ mandatory: it queries pending orders, backfills stop/take-profit if filled, and
 cancels unfilled pending entries once their `limit_wait_seconds` has expired.
 
 The 2026-07-04 capacity update raises the micro-grid fast-lane per-cycle cap to
-five pending entries. This allows more symbols to be posted in the same live
-cycle, but it does not by itself enable two simultaneous same-symbol/same-side
-ladder entries. Same-symbol duplicate exposure is still blocked until the live
-protection layer can manage basket-aware stop/take-profit prices for merged
-same-side positions.
+five pending entries and enables a controlled two-layer ladder for moderate
+fillability signals. The closer layer posts halfway between current price and
+the original anchor entry, while the anchor layer remains at the original
+computed entry. Each layer uses about half of the original notional budget, so
+the ladder does not double the intended exposure. The closer layer deliberately
+keeps the original anchor stop/take-profit geometry instead of recalculating
+tighter protection from the closer entry.
+
+Same-symbol duplicate exposure is still blocked by default. The only exception
+is one micro-grid ladder group where `closer` and `anchor` are the same symbol,
+same direction, and different ladder layers.
 Trend limits keep the old synchronous behavior.
 
 The 2026-06-27 wick-sensitivity update makes the fast lane easier to trigger

@@ -390,6 +390,89 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertFalse(risk.accepted)
         self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
 
+    def test_micro_grid_ladder_allows_same_symbol_same_direction_different_layer(self):
+        validation = self.validation(
+            reasons=[
+                "strategy_leg:micro_grid",
+                "regime_label:RANGE",
+                "entry_order_type:limit",
+                "micro_grid_ladder_group_id:BTCUSDT:long:100:99.0",
+                "micro_grid_ladder_layer:anchor",
+            ]
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                active_positions=1,
+                active_exposures=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "direction": "LONG",
+                        "micro_grid_ladder_group_id": "BTCUSDT:long:100:99.0",
+                        "micro_grid_ladder_layer": "closer",
+                    }
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+        self.assertEqual(intent.metadata["micro_grid_ladder_group_id"], "BTCUSDT:long:100:99.0")
+        self.assertEqual(intent.metadata["micro_grid_ladder_layer"], "anchor")
+
+    def test_micro_grid_ladder_blocks_same_symbol_same_direction_same_layer(self):
+        validation = self.validation(
+            reasons=[
+                "strategy_leg:micro_grid",
+                "regime_label:RANGE",
+                "entry_order_type:limit",
+                "micro_grid_ladder_group_id:BTCUSDT:long:100:99.0",
+                "micro_grid_ladder_layer:closer",
+            ]
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                active_positions=1,
+                active_exposures=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "direction": "LONG",
+                        "micro_grid_ladder_group_id": "BTCUSDT:long:100:99.0",
+                        "micro_grid_ladder_layer": "closer",
+                    }
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
+
     def test_multi_position_blocks_same_symbol_opposite_direction_by_default(self):
         validation = self.validation(side="short", stop_price=104.0, target_price=92.0)
         intent, _risk = intent_from_ai_decision(

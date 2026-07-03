@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,9 +11,9 @@ from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceSignedError
-from bfa.execution.executor import ExecutionEngine
+from bfa.execution.executor import ExecutionEngine, _client_order_id
 from bfa.execution.filters import SymbolExecutionFilters
-from bfa.execution.models import RiskState
+from bfa.execution.models import OrderIntent, RiskState
 
 
 EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchange_info.json"
@@ -323,6 +324,29 @@ class AccountFailingSignedClient(FakeSignedClient):
 
 
 class ExecutionEngineTests(unittest.TestCase):
+    def test_micro_grid_ladder_client_order_ids_are_unique_per_layer(self):
+        base = OrderIntent(
+            symbol="BTCUSDT",
+            side="BUY",
+            quantity=0.2,
+            notional_usdt=20.0,
+            entry_price=100.0,
+            stop_price=95.0,
+            target_price=108.0,
+            leverage=3,
+            mode="live",
+            decided_at="2026-06-20T10:00:00Z",
+            order_type="LIMIT",
+            time_in_force="GTX",
+            reason_codes=["strategy_leg:micro_grid"],
+        )
+        closer = replace(base, metadata={"micro_grid_ladder_layer": "closer"})
+        anchor = replace(base, metadata={"micro_grid_ladder_layer": "anchor"})
+
+        self.assertEqual(_client_order_id(closer), "bfa-btcusdt-20260620100000-mgc")
+        self.assertEqual(_client_order_id(anchor), "bfa-btcusdt-20260620100000-mga")
+        self.assertEqual(_client_order_id(closer, suffix="r1"), "bfa-btcusdt-20260620100000-mgc-r1")
+
     def validation(self, risk_limits=None, **overrides):
         payload = {
             "decision": "trade",
@@ -918,6 +942,39 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order"])
         self.assertNotIn("query_order", [call[0] for call in fake_client.calls])
         self.assertTrue(result.exchange_response["limit_entry_pending"]["watchdog_required"])
+
+    def test_micro_grid_ladder_entry_uses_layer_specific_client_order_id(self):
+        fake_client = LimitExpiredSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_LIVE_MICRO_GRID_ASYNC_PENDING_ENABLED="true",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:20",
+                    "micro_grid_ladder_layer:anchor",
+                    "micro_grid_ladder_group_id:BTCUSDT:long:1:100.0",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        entry_call = [call[1] for call in fake_client.calls if call[0] == "new_order"][0]
+        self.assertEqual(entry_call["new_client_order_id"], "bfa-btcusdt-20260620100000-mga")
+        self.assertEqual(result.intent.metadata["client_order_id"], "bfa-btcusdt-20260620100000-mga")
 
     def test_live_limit_entry_unknown_state_reconciles_position_and_places_protection(self):
         fake_client = LimitUnknownFilledPositionSignedClient()

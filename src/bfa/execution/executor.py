@@ -1032,10 +1032,34 @@ def _epoch_ms() -> int:
 def _client_order_id(intent: OrderIntent, *, suffix: str | None = None) -> str:
     cleaned_time = "".join(ch for ch in intent.decided_at if ch.isdigit())
     base = f"bfa-{intent.symbol.lower()}-{cleaned_time}"
+    suffix = _client_order_suffix(intent, explicit_suffix=suffix)
     if suffix:
         suffix_text = f"-{suffix}"
         return f"{base[: 36 - len(suffix_text)]}{suffix_text}"
     return base[:36]
+
+
+def _client_order_suffix(intent: OrderIntent, *, explicit_suffix: str | None = None) -> str | None:
+    ladder_suffix = _micro_grid_ladder_client_suffix(intent)
+    if explicit_suffix and ladder_suffix:
+        return f"{ladder_suffix}-{explicit_suffix}"
+    return explicit_suffix or ladder_suffix
+
+
+def _micro_grid_ladder_client_suffix(intent: OrderIntent) -> str | None:
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    layer = str(metadata.get("micro_grid_ladder_layer") or "").strip().lower()
+    if not layer:
+        for reason in intent.reason_codes:
+            text = str(reason)
+            if text.startswith("micro_grid_ladder_layer:"):
+                layer = text.split(":", 1)[1].strip().lower()
+                break
+    if layer == "closer":
+        return "mgc"
+    if layer == "anchor":
+        return "mga"
+    return None
 
 
 _TERMINAL_ORDER_STATUSES = {

@@ -2401,6 +2401,13 @@ def _risk_state_with_pending_intent(risk_state: RiskState, intent) -> RiskState:
         "leverage": float(intent.leverage),
         "source": "pending_limit_entry",
     }
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    ladder_group_id = str(metadata.get("micro_grid_ladder_group_id") or "").strip()
+    if ladder_group_id:
+        exposure["micro_grid_ladder_group_id"] = ladder_group_id
+    ladder_layer = str(metadata.get("micro_grid_ladder_layer") or "").strip()
+    if ladder_layer:
+        exposure["micro_grid_ladder_layer"] = ladder_layer
     return replace(
         risk_state,
         active_positions=int(risk_state.active_positions) + 1,

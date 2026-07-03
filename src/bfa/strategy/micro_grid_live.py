@@ -7,7 +7,7 @@ import json
 import math
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -51,6 +51,10 @@ class MicroGridLiveConfig:
     spike_depth_entry_fraction: float
     spike_depth_tail_buffer_fraction: float
     spike_depth_max_entry_edge_fraction: float
+    entry_ladder_enabled: bool
+    entry_ladder_closer_fraction: float
+    entry_ladder_max_quality_scale: float
+    entry_ladder_min_width_percent: float
 
     @classmethod
     def from_app(cls, config: AppConfig) -> "MicroGridLiveConfig":
@@ -164,6 +168,22 @@ class MicroGridLiveConfig:
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_SPIKE_DEPTH_MAX_ENTRY_EDGE_FRACTION"), -0.42),
                 -1.35,
                 0.0,
+            ),
+            entry_ladder_enabled=_truthy(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED", "true")),
+            entry_ladder_closer_fraction=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION"), 0.50),
+                0.10,
+                0.90,
+            ),
+            entry_ladder_max_quality_scale=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MAX_QUALITY_SCALE"), 0.80),
+                0.05,
+                1.0,
+            ),
+            entry_ladder_min_width_percent=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MIN_WIDTH_PERCENT"), 0.18),
+                0.0,
+                5.0,
             ),
         )
 
@@ -284,19 +304,26 @@ def build_micro_grid_live_candidates(
         if score < live_config.min_score:
             rejection_counts["micro_grid_score_below_min"] = rejection_counts.get("micro_grid_score_below_min", 0) + 1
             continue
-        candidates.append(
-            _candidate_from_order(
-                selected,
-                generated_at=generated_at,
-                score=score,
-                quality_scale=quality_scale,
-                quality_reasons=quality_reasons,
-                max_position_notional_usdt=max_position_notional_usdt,
-                live_config=live_config,
-                cache_updated_at_ms=updated_at_ms,
-                market_context=context,
+        for ladder_order, ladder_reasons, ladder_notional_fraction in _ladder_orders_for_live(
+            selected,
+            research=research,
+            live_config=live_config,
+            quality_scale=quality_scale,
+        ):
+            candidates.append(
+                _candidate_from_order(
+                    ladder_order,
+                    generated_at=generated_at,
+                    score=score,
+                    quality_scale=quality_scale,
+                    quality_reasons=[*quality_reasons, *ladder_reasons],
+                    max_position_notional_usdt=max_position_notional_usdt,
+                    live_config=live_config,
+                    cache_updated_at_ms=updated_at_ms,
+                    market_context=context,
+                    ladder_notional_fraction=ladder_notional_fraction,
+                )
             )
-        )
 
     candidates.sort(key=lambda item: (-item.score, item.symbol))
     selected_candidates = candidates[: live_config.top_n]
@@ -309,6 +336,79 @@ def build_micro_grid_live_candidates(
         }
     )
     return selected_candidates, health
+
+
+def _ladder_orders_for_live(order, *, research, live_config: MicroGridLiveConfig, quality_scale: float):
+    if not _should_ladder_order(order, live_config=live_config, quality_scale=quality_scale):
+        return [(order, ["micro_grid_ladder_disabled_or_not_needed"], 1.0)]
+    closer = _closer_ladder_order(order, closer_fraction=live_config.entry_ladder_closer_fraction)
+    if closer is None:
+        return [(order, ["micro_grid_ladder_closer_unavailable"], 1.0)]
+    group_id = _ladder_group_id(order)
+    original = _order_with_ladder_reasons(
+        order,
+        [
+            "micro_grid_ladder_enabled",
+            "micro_grid_ladder_layer:anchor",
+            f"micro_grid_ladder_group_id:{group_id}",
+            "micro_grid_ladder_notional_fraction:0.5",
+        ],
+    )
+    closer = _order_with_ladder_reasons(
+        closer,
+        [
+            "micro_grid_ladder_enabled",
+            "micro_grid_ladder_layer:closer",
+            f"micro_grid_ladder_group_id:{group_id}",
+            f"micro_grid_ladder_closer_fraction:{round(live_config.entry_ladder_closer_fraction, 6)}",
+            "micro_grid_ladder_protection_source:anchor",
+            "micro_grid_ladder_notional_fraction:0.5",
+        ],
+    )
+    return [
+        (closer, ["micro_grid_ladder_layer:closer"], 0.5),
+        (original, ["micro_grid_ladder_layer:anchor"], 0.5),
+    ]
+
+
+def _should_ladder_order(order, *, live_config: MicroGridLiveConfig, quality_scale: float) -> bool:
+    if not live_config.entry_ladder_enabled:
+        return False
+    state = getattr(order, "state", None)
+    if state is None:
+        return False
+    if float(getattr(state, "width_percent", 0.0) or 0.0) < live_config.entry_ladder_min_width_percent:
+        return False
+    if quality_scale > live_config.entry_ladder_max_quality_scale:
+        return False
+    current = _positive_float(getattr(state, "current_price", None))
+    entry = _positive_float(getattr(order, "entry_price", None))
+    if current is None or entry is None:
+        return False
+    distance_percent = abs(current - entry) / current * 100.0 if current > 0 else 0.0
+    return distance_percent > max(float(getattr(state, "instantaneous_vol_percent", 0.0) or 0.0), 0.01)
+
+
+def _closer_ladder_order(order, *, closer_fraction: float):
+    state = order.state
+    current = float(state.current_price)
+    entry = float(order.entry_price)
+    closer_entry = current + (entry - current) * closer_fraction
+    if order.side == "long" and closer_entry >= current:
+        return None
+    if order.side == "short" and closer_entry <= current:
+        return None
+    if abs(closer_entry - entry) <= 0:
+        return None
+    return replace(order, entry_price=closer_entry)
+
+
+def _order_with_ladder_reasons(order, reasons: list[str]):
+    return replace(order, reason_codes=_dedupe([*list(order.reason_codes), *reasons]))
+
+
+def _ladder_group_id(order) -> str:
+    return f"{order.symbol}:{order.side}:{order.signal_index}:{round(float(order.entry_price), 10)}"
 
 
 def micro_grid_setup_from_candidate(
@@ -334,12 +434,17 @@ def micro_grid_setup_from_candidate(
     target_distance_percent = abs(target - entry) / entry * 100.0
     risk_reward = target_distance_percent / stop_distance_percent if stop_distance_percent > 0 else None
     quality_scale = _clip(_float_or_default(features.get("micro_grid_quality_scale"), 1.0), 0.0, 1.0)
+    ladder_notional_fraction = _clip(
+        _float_or_default(features.get("micro_grid_ladder_notional_fraction"), 1.0),
+        0.05,
+        1.0,
+    )
     notional, sizing_reasons = _micro_notional(
         risk_limits,
         entry=entry,
         stop=stop,
         min_executable_notional=_positive_float(features.get("min_executable_notional")),
-        notional_fraction=notional_fraction * quality_scale,
+        notional_fraction=notional_fraction * quality_scale * ladder_notional_fraction,
     )
     hold_seconds = _int_or_default(features.get("micro_grid_max_hold_seconds"), 120)
     time_exit_enabled = hold_seconds > 0
@@ -360,6 +465,7 @@ def micro_grid_setup_from_candidate(
             "micro_grid_time_exit_enabled" if time_exit_enabled else "micro_grid_time_exit_disabled",
             *candidate.reason_codes,
             f"micro_grid_applied_quality_scale:{round(quality_scale, 6)}",
+            f"micro_grid_ladder_applied_notional_fraction:{round(ladder_notional_fraction, 6)}",
             *sizing_reasons,
         ]
     )
@@ -436,6 +542,7 @@ def _candidate_from_order(
     live_config: MicroGridLiveConfig,
     cache_updated_at_ms: int | None,
     market_context: Mapping[str, Any] | None = None,
+    ladder_notional_fraction: float = 1.0,
 ) -> CandidateSignal:
     state = order.state
     side = order.side
@@ -472,6 +579,7 @@ def _candidate_from_order(
         "micro_grid_model_horizon_seconds": int(order.max_hold_seconds),
         "micro_grid_size_weight": float(order.size_weight),
         "micro_grid_quality_scale": float(quality_scale),
+        "micro_grid_ladder_notional_fraction": float(ladder_notional_fraction),
         "micro_grid_quality_reasons": list(quality_reasons),
         "micro_grid_score": round(score, 8),
         "micro_grid_order_type": live_config.order_type,
