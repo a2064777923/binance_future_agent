@@ -72,6 +72,18 @@ trend leg:
 BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT=1000
 ```
 
+Fast-lane micro-grid submissions are capped per live cycle by:
+
+```bash
+BFA_LIVE_MICRO_GRID_ASYNC_MAX_PER_CYCLE=5
+```
+
+This cap is for concurrently posting more qualified micro-grid symbols in one
+cycle. It is not the same as same-symbol laddering: two simultaneous same-side
+entries on one symbol still require basket-aware protection before they should
+be enabled live, otherwise a later fill can invalidate the stop/take-profit
+geometry of the first fill.
+
 When micro-grid intents reach the exchange but show
 `entry_order_expired_canceled`, the signal passed risk and submitted a post-only
 limit order, but price did not touch the limit within
