@@ -90,14 +90,29 @@ moderate-fillability signals:
 ```bash
 BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED=true
 BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION=0.5
+BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LAYER_PROTECTION_ENABLED=true
+BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_TARGET_DISTANCE_PERCENT=0.35
+BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_RISK_REWARD=0.88
 ```
 
 When enabled, the closer layer is placed halfway between current price and the
 original anchor entry, while the anchor layer remains at the original computed
 price. Each layer uses about half of the original notional budget, so the ladder
-does not double the intended exposure. The closer layer deliberately keeps the
-original anchor stop/take-profit geometry instead of recalculating tighter
-protection from the closer entry.
+does not double the intended exposure. The closer layer now projects its own
+stop/take-profit from the anchor order's `stop_span_fraction` and
+`target_span_fraction`. If that projected closer layer cannot keep enough target
+distance or risk/reward, the closer layer is skipped and the anchor layer keeps
+the full notional budget.
+
+The micro-grid setup also carries live gates for very thin opportunities:
+
+```bash
+BFA_LIVE_MICRO_GRID_MIN_TARGET_DISTANCE_PERCENT=0.30
+BFA_LIVE_MICRO_GRID_MIN_RISK_REWARD=0.75
+```
+
+These gates are meant to suppress narrow-band scalps where fees can consume the
+entire edge.
 
 `BFA_MAX_MARGIN_PER_POSITION_USDT` is a hard ceiling, not a target. Actual
 micro-grid margin can be much lower when quality scaling, outcome-health

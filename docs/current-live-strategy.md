@@ -95,20 +95,20 @@ Selected non-secret server env values observed at the snapshot:
 
 - `BFA_MODE=live`
 - `BINANCE_USE_TESTNET=false`
-- `BFA_ACCOUNT_CAPITAL_USDT=200`
+- `BFA_ACCOUNT_CAPITAL_USDT=400`
 - `BFA_MAX_LEVERAGE=30`
 - `BFA_MAX_OPEN_POSITIONS=5`
 - `BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`
-- `BFA_MAX_MARGIN_PER_POSITION_USDT=40`
-- `BFA_MAX_RISK_PER_TRADE_USDT=20`
-- `BFA_MAX_DAILY_LOSS_USDT=60`
-- `BFA_MAX_PORTFOLIO_MARGIN_USDT=200`
-- `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.80`
-- `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=2400`
-- `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=1600`
-- `BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT=1000`
-- `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=1200`
-- `BFA_MAX_POSITION_NOTIONAL_USDT=1200`
+- `BFA_MAX_MARGIN_PER_POSITION_USDT=80`
+- `BFA_MAX_RISK_PER_TRADE_USDT=40`
+- `BFA_MAX_DAILY_LOSS_USDT=120`
+- `BFA_MAX_PORTFOLIO_MARGIN_USDT=400`
+- `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=1.00`
+- `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=4800`
+- `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=3200`
+- `BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT=2000`
+- `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=2400`
+- `BFA_MAX_POSITION_NOTIONAL_USDT=2400`
 - `BFA_DYNAMIC_POSITION_SIZING_ENABLED=true`
 - `BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED=true`
 - `BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED=false`
@@ -361,8 +361,13 @@ Micro-grid is live and independent from AI:
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_NOTIONAL_FRACTION=1.0`
+- `BFA_LIVE_MICRO_GRID_MIN_TARGET_DISTANCE_PERCENT=0.30`
+- `BFA_LIVE_MICRO_GRID_MIN_RISK_REWARD=0.75`
 - `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED=true`
 - `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION=0.5`
+- `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LAYER_PROTECTION_ENABLED=true`
+- `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_TARGET_DISTANCE_PERCENT=0.35`
+- `BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_RISK_REWARD=0.88`
 
 Micro-grid submits GTX/post-only limits and may expire or be canceled without a
 fill. A recent intent with `entry_order_expired_canceled` or
@@ -387,9 +392,10 @@ five pending entries and enables a controlled two-layer ladder for moderate
 fillability signals. The closer layer posts halfway between current price and
 the original anchor entry, while the anchor layer remains at the original
 computed entry. Each layer uses about half of the original notional budget, so
-the ladder does not double the intended exposure. The closer layer deliberately
-keeps the original anchor stop/take-profit geometry instead of recalculating
-tighter protection from the closer entry.
+the ladder does not double the intended exposure. The closer layer projects its
+own stop/take-profit from the anchor order's span fractions; if the projected
+target distance or risk/reward is too thin, the closer layer is skipped and the
+anchor keeps the full notional budget.
 
 Same-symbol duplicate exposure is still blocked by default. The only exception
 is one micro-grid ladder group where `closer` and `anchor` are the same symbol,

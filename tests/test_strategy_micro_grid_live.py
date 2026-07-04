@@ -108,8 +108,13 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
 
         self.assertEqual(live_config.order_wait_seconds, 20)
         self.assertEqual(live_config.max_signal_age_seconds, 12.0)
+        self.assertEqual(live_config.min_target_distance_percent, 0.30)
+        self.assertEqual(live_config.min_risk_reward, 0.75)
         self.assertTrue(live_config.entry_ladder_enabled)
         self.assertEqual(live_config.entry_ladder_closer_fraction, 0.5)
+        self.assertTrue(live_config.entry_ladder_layer_protection_enabled)
+        self.assertEqual(live_config.entry_ladder_closer_min_target_distance_percent, 0.35)
+        self.assertEqual(live_config.entry_ladder_closer_min_risk_reward, 0.88)
 
     def test_live_profile_is_sensitive_to_wick_scalp_signals(self):
         live_config = MicroGridLiveConfig.from_app(
@@ -316,7 +321,7 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         self.assertNotIn("missing_quote_volume", candidate.data_quality_notes)
         self.assertNotIn("missing_min_executable_notional", candidate.data_quality_notes)
 
-    def test_ladder_closer_layer_keeps_anchor_protection_and_halves_notional(self):
+    def test_ladder_closer_layer_projects_own_protection_and_halves_notional(self):
         state = replace(
             self.micro_state(close_position_percent=24.0, long_ready=True, short_ready=False),
             current_price=100.0,
@@ -346,12 +351,14 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         closer, closer_reasons, closer_fraction = ladder[0]
         anchor_layer, anchor_reasons, anchor_fraction = ladder[1]
         self.assertAlmostEqual(closer.entry_price, 99.5)
-        self.assertEqual(closer.stop_price, anchor.stop_price)
-        self.assertEqual(closer.target_price, anchor.target_price)
+        self.assertNotEqual(closer.stop_price, anchor.stop_price)
+        self.assertNotEqual(closer.target_price, anchor.target_price)
+        self.assertAlmostEqual(closer.stop_price, 99.02)
+        self.assertAlmostEqual(closer.target_price, 100.7)
         self.assertEqual(closer_fraction, 0.5)
         self.assertEqual(anchor_fraction, 0.5)
         self.assertIn("micro_grid_ladder_layer:closer", closer.reason_codes)
-        self.assertIn("micro_grid_ladder_protection_source:anchor", closer.reason_codes)
+        self.assertIn("micro_grid_ladder_protection_source:layer_projected", closer.reason_codes)
         self.assertIn("micro_grid_ladder_layer:anchor", anchor_layer.reason_codes)
         self.assertIn("micro_grid_ladder_layer:closer", closer_reasons)
         self.assertIn("micro_grid_ladder_layer:anchor", anchor_reasons)
@@ -380,7 +387,67 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
 
         self.assertEqual(setup.decision, "trade")
         self.assertIn("micro_grid_ladder_applied_notional_fraction:0.5", setup.reasons)
+        self.assertIn("micro_grid_ladder_protection_source:layer_projected", setup.reasons)
         self.assertLess(setup.notional_usdt, self.risk_limits().max_position_notional_usdt)
+
+    def test_micro_grid_setup_rejects_too_small_target_distance(self):
+        candidate = self.candidate(max_hold_seconds=0, order_wait_seconds=20)
+        candidate = replace(
+            candidate,
+            features={
+                **candidate.features,
+                "micro_grid_target_price": 100.2,
+                "micro_grid_min_target_distance_percent": 0.35,
+            },
+        )
+
+        setup = micro_grid_setup_from_candidate(
+            candidate,
+            risk_limits=self.risk_limits(),
+            notional_fraction=1.0,
+            order_type="LIMIT",
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("micro_grid_target_distance_below_min:0.2<0.35", setup.reasons)
+
+    def test_ladder_skips_closer_when_projected_reward_is_too_small(self):
+        state = replace(
+            self.micro_state(close_position_percent=24.0, long_ready=True, short_ready=False),
+            current_price=100.0,
+            width_percent=0.24,
+            instantaneous_vol_percent=0.04,
+        )
+        anchor = replace(
+            self.grid_order(side="long", state=state),
+            entry_price=99.0,
+            stop_price=98.9,
+            target_price=99.2,
+            reason_codes=[
+                *self.grid_order(side="long", state=state).reason_codes,
+                "stop_span_fraction:0.05",
+                "target_span_fraction:0.10",
+            ],
+        )
+        live_config = MicroGridLiveConfig.from_app(
+            load_config(
+                env={
+                    "BFA_LIVE_MICRO_GRID_ENTRY_LADDER_ENABLED": "true",
+                    "BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION": "0.5",
+                    "BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MAX_QUALITY_SCALE": "0.8",
+                    "BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_TARGET_DISTANCE_PERCENT": "0.35",
+                }
+            )
+        )
+
+        ladder = _ladder_orders_for_live(anchor, research=research, live_config=live_config, quality_scale=0.55)
+
+        self.assertEqual(len(ladder), 1)
+        only, reasons, fraction = ladder[0]
+        self.assertEqual(only.entry_price, anchor.entry_price)
+        self.assertEqual(fraction, 1.0)
+        self.assertIn("micro_grid_ladder_closer_unavailable", reasons)
+        self.assertTrue(any(reason.startswith("micro_grid_ladder_closer_target_distance_below_min:") for reason in reasons))
 
 
 if __name__ == "__main__":

@@ -432,6 +432,11 @@ class ConfigTests(unittest.TestCase):
                 BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION="0.45",
                 BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MAX_QUALITY_SCALE="0.75",
                 BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MIN_WIDTH_PERCENT="0.12",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LAYER_PROTECTION_ENABLED="true",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_TARGET_DISTANCE_PERCENT="0.35",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_RISK_REWARD="0.9",
+                BFA_LIVE_MICRO_GRID_MIN_TARGET_DISTANCE_PERCENT="0.3",
+                BFA_LIVE_MICRO_GRID_MIN_RISK_REWARD="0.75",
             )
         )
         result = validate_config(config)
@@ -441,6 +446,11 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION"), "0.45")
         self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MAX_QUALITY_SCALE"), "0.75")
         self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MIN_WIDTH_PERCENT"), "0.12")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LAYER_PROTECTION_ENABLED"), "true")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_TARGET_DISTANCE_PERCENT"), "0.35")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_RISK_REWARD"), "0.9")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_MIN_TARGET_DISTANCE_PERCENT"), "0.3")
+        self.assertEqual(config.get("BFA_LIVE_MICRO_GRID_MIN_RISK_REWARD"), "0.75")
         self.assertIn("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_FRACTION", result.redacted)
 
     def test_redacted_summary_excludes_sensitive_inputs(self):

@@ -32,6 +32,8 @@ class MicroGridLiveConfig:
     max_hold_seconds: int | None
     model_horizon_seconds: int
     max_signal_age_seconds: float
+    min_target_distance_percent: float
+    min_risk_reward: float
     dynamic_entry_base_edge_fraction: float
     dynamic_entry_max_push_fraction: float
     dynamic_entry_flow_push_fraction: float
@@ -55,6 +57,9 @@ class MicroGridLiveConfig:
     entry_ladder_closer_fraction: float
     entry_ladder_max_quality_scale: float
     entry_ladder_min_width_percent: float
+    entry_ladder_layer_protection_enabled: bool
+    entry_ladder_closer_min_target_distance_percent: float
+    entry_ladder_closer_min_risk_reward: float
 
     @classmethod
     def from_app(cls, config: AppConfig) -> "MicroGridLiveConfig":
@@ -78,6 +83,16 @@ class MicroGridLiveConfig:
             max_signal_age_seconds=max(
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS"), 12.0),
                 1.0,
+            ),
+            min_target_distance_percent=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MIN_TARGET_DISTANCE_PERCENT"), 0.30),
+                0.0,
+                5.0,
+            ),
+            min_risk_reward=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MIN_RISK_REWARD"), 0.75),
+                0.0,
+                5.0,
             ),
             dynamic_entry_base_edge_fraction=_float_or_default(
                 config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION"),
@@ -182,6 +197,22 @@ class MicroGridLiveConfig:
             ),
             entry_ladder_min_width_percent=_clip(
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_MIN_WIDTH_PERCENT"), 0.18),
+                0.0,
+                5.0,
+            ),
+            entry_ladder_layer_protection_enabled=_truthy(
+                config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LAYER_PROTECTION_ENABLED", "true")
+            ),
+            entry_ladder_closer_min_target_distance_percent=_clip(
+                _float_or_default(
+                    config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_TARGET_DISTANCE_PERCENT"),
+                    0.35,
+                ),
+                0.0,
+                5.0,
+            ),
+            entry_ladder_closer_min_risk_reward=_clip(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_ENTRY_LADDER_CLOSER_MIN_RISK_REWARD"), 0.88),
                 0.0,
                 5.0,
             ),
@@ -341,9 +372,13 @@ def build_micro_grid_live_candidates(
 def _ladder_orders_for_live(order, *, research, live_config: MicroGridLiveConfig, quality_scale: float):
     if not _should_ladder_order(order, live_config=live_config, quality_scale=quality_scale):
         return [(order, ["micro_grid_ladder_disabled_or_not_needed"], 1.0)]
-    closer = _closer_ladder_order(order, closer_fraction=live_config.entry_ladder_closer_fraction)
+    closer, closer_projection_reasons = _closer_ladder_order(
+        order,
+        research=research,
+        live_config=live_config,
+    )
     if closer is None:
-        return [(order, ["micro_grid_ladder_closer_unavailable"], 1.0)]
+        return [(order, ["micro_grid_ladder_closer_unavailable", *closer_projection_reasons], 1.0)]
     group_id = _ladder_group_id(order)
     original = _order_with_ladder_reasons(
         order,
@@ -361,7 +396,7 @@ def _ladder_orders_for_live(order, *, research, live_config: MicroGridLiveConfig
             "micro_grid_ladder_layer:closer",
             f"micro_grid_ladder_group_id:{group_id}",
             f"micro_grid_ladder_closer_fraction:{round(live_config.entry_ladder_closer_fraction, 6)}",
-            "micro_grid_ladder_protection_source:anchor",
+            *closer_projection_reasons,
             "micro_grid_ladder_notional_fraction:0.5",
         ],
     )
@@ -389,18 +424,83 @@ def _should_ladder_order(order, *, live_config: MicroGridLiveConfig, quality_sca
     return distance_percent > max(float(getattr(state, "instantaneous_vol_percent", 0.0) or 0.0), 0.01)
 
 
-def _closer_ladder_order(order, *, closer_fraction: float):
+def _closer_ladder_order(order, *, research, live_config: MicroGridLiveConfig):
     state = order.state
     current = float(state.current_price)
     entry = float(order.entry_price)
+    closer_fraction = live_config.entry_ladder_closer_fraction
     closer_entry = current + (entry - current) * closer_fraction
     if order.side == "long" and closer_entry >= current:
-        return None
+        return None, ["micro_grid_ladder_closer_invalid_long_entry"]
     if order.side == "short" and closer_entry <= current:
-        return None
+        return None, ["micro_grid_ladder_closer_invalid_short_entry"]
     if abs(closer_entry - entry) <= 0:
+        return None, ["micro_grid_ladder_closer_entry_unchanged"]
+    if not live_config.entry_ladder_layer_protection_enabled:
+        return replace(order, entry_price=closer_entry), ["micro_grid_ladder_protection_source:anchor"]
+
+    projected = _project_ladder_layer_protection(order, closer_entry=closer_entry, research=research)
+    if projected is None:
+        return None, ["micro_grid_ladder_closer_projection_unavailable"]
+    stop, target, projection_reasons = projected
+    target_distance_percent = abs(target - closer_entry) / closer_entry * 100.0 if closer_entry > 0 else 0.0
+    stop_distance_percent = abs(closer_entry - stop) / closer_entry * 100.0 if closer_entry > 0 else 0.0
+    risk_reward = target_distance_percent / stop_distance_percent if stop_distance_percent > 0 else 0.0
+    if target_distance_percent < live_config.entry_ladder_closer_min_target_distance_percent:
+        return None, [
+            *projection_reasons,
+            f"micro_grid_ladder_closer_target_distance_below_min:{round(target_distance_percent, 6)}",
+        ]
+    if risk_reward < live_config.entry_ladder_closer_min_risk_reward:
+        return None, [
+            *projection_reasons,
+            f"micro_grid_ladder_closer_risk_reward_below_min:{round(risk_reward, 6)}",
+        ]
+    return replace(order, entry_price=closer_entry, stop_price=stop, target_price=target), [
+        "micro_grid_ladder_protection_source:layer_projected",
+        *projection_reasons,
+        f"micro_grid_ladder_closer_target_distance_percent:{round(target_distance_percent, 6)}",
+        f"micro_grid_ladder_closer_stop_distance_percent:{round(stop_distance_percent, 6)}",
+        f"micro_grid_ladder_closer_risk_reward:{round(risk_reward, 6)}",
+    ]
+
+
+def _project_ladder_layer_protection(order, *, closer_entry: float, research) -> tuple[float, float, list[str]] | None:
+    state = getattr(order, "state", None)
+    if state is None:
         return None
-    return replace(order, entry_price=closer_entry)
+    span = float(getattr(state, "upper_price", 0.0) or 0.0) - float(getattr(state, "lower_price", 0.0) or 0.0)
+    if span <= 0 or closer_entry <= 0:
+        return None
+    values = research.reason_code_map(order.reason_codes)
+    stop_fraction = research.code_float(values, "stop_span_fraction", 0.0)
+    target_fraction = research.code_float(values, "target_span_fraction", 0.0)
+    if stop_fraction <= 0:
+        stop_fraction = abs(float(order.entry_price) - float(order.stop_price)) / span
+    if target_fraction <= 0:
+        target_fraction = abs(float(order.target_price) - float(order.entry_price)) / span
+    if stop_fraction <= 0 or target_fraction <= 0:
+        return None
+    stop_distance = span * stop_fraction
+    target_distance = span * target_fraction
+    side = str(getattr(order, "side", "")).lower()
+    if side == "long":
+        stop = closer_entry - stop_distance
+        target = min(closer_entry + target_distance, float(state.upper_price))
+    elif side == "short":
+        stop = closer_entry + stop_distance
+        target = max(closer_entry - target_distance, float(state.lower_price))
+    else:
+        return None
+    reward = (target - closer_entry) if side == "long" else (closer_entry - target)
+    risk = (closer_entry - stop) if side == "long" else (stop - closer_entry)
+    if reward <= 0 or risk <= 0:
+        return None
+    return stop, target, [
+        "micro_grid_ladder_layer_protection_enabled",
+        f"micro_grid_ladder_layer_stop_span_fraction:{round(stop_fraction, 6)}",
+        f"micro_grid_ladder_layer_target_span_fraction:{round(target_fraction, 6)}",
+    ]
 
 
 def _order_with_ladder_reasons(order, reasons: list[str]):
@@ -433,6 +533,8 @@ def micro_grid_setup_from_candidate(
     stop_distance_percent = abs(entry - stop) / entry * 100.0
     target_distance_percent = abs(target - entry) / entry * 100.0
     risk_reward = target_distance_percent / stop_distance_percent if stop_distance_percent > 0 else None
+    min_target_distance_percent = max(_float_or_default(features.get("micro_grid_min_target_distance_percent"), 0.0), 0.0)
+    min_risk_reward = max(_float_or_default(features.get("micro_grid_min_risk_reward"), 0.0), 0.0)
     quality_scale = _clip(_float_or_default(features.get("micro_grid_quality_scale"), 1.0), 0.0, 1.0)
     ladder_notional_fraction = _clip(
         _float_or_default(features.get("micro_grid_ladder_notional_fraction"), 1.0),
@@ -469,6 +571,22 @@ def micro_grid_setup_from_candidate(
             *sizing_reasons,
         ]
     )
+    if target_distance_percent < min_target_distance_percent:
+        return _pass_setup(
+            symbol,
+            reasons=[
+                *reasons,
+                f"micro_grid_target_distance_below_min:{round(target_distance_percent, 6)}<{round(min_target_distance_percent, 6)}",
+            ],
+        )
+    if risk_reward is not None and risk_reward < min_risk_reward:
+        return _pass_setup(
+            symbol,
+            reasons=[
+                *reasons,
+                f"micro_grid_risk_reward_below_min:{round(risk_reward, 6)}<{round(min_risk_reward, 6)}",
+            ],
+        )
     if notional is None:
         return TradeSetup(
             symbol=symbol,
@@ -580,6 +698,8 @@ def _candidate_from_order(
         "micro_grid_size_weight": float(order.size_weight),
         "micro_grid_quality_scale": float(quality_scale),
         "micro_grid_ladder_notional_fraction": float(ladder_notional_fraction),
+        "micro_grid_min_target_distance_percent": float(live_config.min_target_distance_percent),
+        "micro_grid_min_risk_reward": float(live_config.min_risk_reward),
         "micro_grid_quality_reasons": list(quality_reasons),
         "micro_grid_score": round(score, 8),
         "micro_grid_order_type": live_config.order_type,
