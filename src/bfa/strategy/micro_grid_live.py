@@ -546,6 +546,11 @@ def micro_grid_setup_from_candidate(
     min_target_distance_percent = max(_float_or_default(features.get("micro_grid_min_target_distance_percent"), 0.0), 0.0)
     min_risk_reward = max(_float_or_default(features.get("micro_grid_min_risk_reward"), 0.0), 0.0)
     quality_scale = _clip(_float_or_default(features.get("micro_grid_quality_scale"), 1.0), 0.0, 1.0)
+    quality_rejections = _micro_grid_quality_rejections(
+        candidate.reason_codes,
+        quality_scale=quality_scale,
+        risk_reward=risk_reward,
+    )
     ladder_notional_fraction = _clip(
         _float_or_default(features.get("micro_grid_ladder_notional_fraction"), 1.0),
         0.05,
@@ -597,6 +602,8 @@ def micro_grid_setup_from_candidate(
                 f"micro_grid_risk_reward_below_min:{round(risk_reward, 6)}<{round(min_risk_reward, 6)}",
             ],
         )
+    if quality_rejections:
+        return _pass_setup(symbol, reasons=[*reasons, *quality_rejections])
     if notional is None:
         return TradeSetup(
             symbol=symbol,
@@ -650,6 +657,71 @@ def micro_grid_setup_from_candidate(
         reasons=reasons,
         warnings=[],
     )
+
+
+def _micro_grid_quality_rejections(
+    reason_codes: list[str],
+    *,
+    quality_scale: float,
+    risk_reward: float | None,
+) -> list[str]:
+    codes = [str(code) for code in reason_codes or []]
+    take_profit_probability = _reason_float(codes, "planner_take_profit_probability")
+    wrong_direction_probability = _reason_float(codes, "planner_wrong_direction_probability")
+    strong_historical_edge = _reason_bool(codes, "planner_strong_historical_edge")
+    warning_codes = [
+        code
+        for code in codes
+        if any(
+            token in code
+            for token in (
+                "quality_wick_ev_negative",
+                "quality_wick_ev_weak",
+                "quality_wick_stop_rate_high",
+                "quality_wick_stop_rate_extreme",
+                "quality_structure_drift_high",
+                "quality_recent_drift_extreme",
+            )
+        )
+    ]
+    high_probability_edge = (
+        take_profit_probability is not None
+        and wrong_direction_probability is not None
+        and quality_scale >= 0.55
+        and take_profit_probability >= 0.62
+        and wrong_direction_probability <= 0.08
+    )
+    strong_probability_edge = (
+        strong_historical_edge
+        and take_profit_probability is not None
+        and wrong_direction_probability is not None
+        and quality_scale >= 0.50
+        and take_profit_probability >= 0.58
+        and wrong_direction_probability <= 0.12
+    )
+    has_edge_override = high_probability_edge or strong_probability_edge
+    rejections: list[str] = []
+    if quality_scale < 0.20:
+        rejections.append(f"micro_grid_quality_hard_reject:{round(quality_scale, 6)}")
+    elif quality_scale < 0.35 and not has_edge_override:
+        rejections.append(f"micro_grid_low_quality_without_edge:{round(quality_scale, 6)}")
+    if take_profit_probability is not None and take_profit_probability < 0.50 and not has_edge_override:
+        rejections.append(f"micro_grid_planner_tp_probability_too_low:{round(take_profit_probability, 6)}")
+    if wrong_direction_probability is not None and wrong_direction_probability > 0.18 and not has_edge_override:
+        rejections.append(
+            f"micro_grid_planner_wrong_direction_too_high:{round(wrong_direction_probability, 6)}"
+        )
+    if risk_reward is not None and risk_reward < 0.85 and not has_edge_override:
+        rejections.append(f"micro_grid_inverted_rr_without_edge:{round(risk_reward, 6)}")
+    if warning_codes and not has_edge_override:
+        weak_warning_combo = quality_scale < 0.35 or (
+            risk_reward is not None
+            and risk_reward < 0.90
+            and (take_profit_probability is None or take_profit_probability < 0.58)
+        )
+        if weak_warning_combo:
+            rejections.append("micro_grid_low_quality_warning_combo")
+    return _dedupe(rejections)
 
 
 def is_micro_grid_candidate(candidate: Any) -> bool:
@@ -1221,6 +1293,24 @@ def _positive_float(value: Any) -> float | None:
     if parsed is None or parsed <= 0:
         return None
     return parsed
+
+
+def _reason_float(reason_codes: list[str], key: str) -> float | None:
+    prefix = f"{key}:"
+    for code in reason_codes:
+        if not str(code).startswith(prefix):
+            continue
+        return _float_or_none(str(code).split(":", 1)[1])
+    return None
+
+
+def _reason_bool(reason_codes: list[str], key: str) -> bool:
+    prefix = f"{key}:"
+    for code in reason_codes:
+        if not str(code).startswith(prefix):
+            continue
+        return str(code).split(":", 1)[1].strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 def _float_or_default(value: Any, default: float) -> float:

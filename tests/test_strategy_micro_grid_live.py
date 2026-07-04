@@ -432,6 +432,113 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
         self.assertEqual(setup.decision, "pass")
         self.assertIn("micro_grid_target_distance_below_min:0.2<0.35", setup.reasons)
 
+    def test_micro_grid_setup_rejects_hard_low_quality_even_with_wide_target(self):
+        candidate = self.candidate(max_hold_seconds=0, order_wait_seconds=20)
+        candidate = replace(
+            candidate,
+            reason_codes=[
+                *candidate.reason_codes,
+                "planner_take_profit_probability:0.72",
+                "planner_wrong_direction_probability:0.04",
+                "planner_strong_historical_edge:True",
+            ],
+            features={**candidate.features, "micro_grid_quality_scale": 0.19},
+        )
+
+        setup = micro_grid_setup_from_candidate(
+            candidate,
+            risk_limits=self.risk_limits(),
+            notional_fraction=1.0,
+            order_type="LIMIT",
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("micro_grid_quality_hard_reject:0.19", setup.reasons)
+
+    def test_micro_grid_setup_rejects_inverted_reward_without_planner_edge(self):
+        candidate = self.candidate(max_hold_seconds=0, order_wait_seconds=20)
+        candidate = replace(
+            candidate,
+            reason_codes=[
+                *candidate.reason_codes,
+                "planner_take_profit_probability:0.49",
+                "planner_wrong_direction_probability:0.10",
+                "planner_strong_historical_edge:False",
+            ],
+            features={
+                **candidate.features,
+                "micro_grid_target_price": 100.8,
+                "micro_grid_quality_scale": 0.80,
+            },
+        )
+
+        setup = micro_grid_setup_from_candidate(
+            candidate,
+            risk_limits=self.risk_limits(),
+            notional_fraction=1.0,
+            order_type="LIMIT",
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("micro_grid_planner_tp_probability_too_low:0.49", setup.reasons)
+        self.assertIn("micro_grid_inverted_rr_without_edge:0.8", setup.reasons)
+
+    def test_micro_grid_setup_allows_inverted_reward_with_strong_planner_edge(self):
+        candidate = self.candidate(max_hold_seconds=0, order_wait_seconds=20)
+        candidate = replace(
+            candidate,
+            reason_codes=[
+                *candidate.reason_codes,
+                "planner_take_profit_probability:0.64",
+                "planner_wrong_direction_probability:0.06",
+                "planner_strong_historical_edge:True",
+            ],
+            features={
+                **candidate.features,
+                "micro_grid_target_price": 100.8,
+                "micro_grid_quality_scale": 0.70,
+            },
+        )
+
+        setup = micro_grid_setup_from_candidate(
+            candidate,
+            risk_limits=self.risk_limits(),
+            notional_fraction=1.0,
+            order_type="LIMIT",
+        )
+
+        self.assertEqual(setup.decision, "trade")
+        self.assertAlmostEqual(setup.risk_reward_ratio, 0.8)
+
+    def test_micro_grid_setup_rejects_weak_warning_combo(self):
+        candidate = self.candidate(max_hold_seconds=0, order_wait_seconds=20)
+        candidate = replace(
+            candidate,
+            reason_codes=[
+                *candidate.reason_codes,
+                "micro_grid_quality_wick_ev_negative",
+                "micro_grid_quality_wick_stop_rate_high",
+                "planner_take_profit_probability:0.54",
+                "planner_wrong_direction_probability:0.11",
+                "planner_strong_historical_edge:False",
+            ],
+            features={
+                **candidate.features,
+                "micro_grid_target_price": 100.88,
+                "micro_grid_quality_scale": 0.55,
+            },
+        )
+
+        setup = micro_grid_setup_from_candidate(
+            candidate,
+            risk_limits=self.risk_limits(),
+            notional_fraction=1.0,
+            order_type="LIMIT",
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("micro_grid_low_quality_warning_combo", setup.reasons)
+
     def test_ladder_skips_closer_when_projected_reward_is_too_small(self):
         state = replace(
             self.micro_state(close_position_percent=24.0, long_ready=True, short_ready=False),
