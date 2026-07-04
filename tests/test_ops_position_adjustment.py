@@ -373,6 +373,53 @@ class PositionAdjustmentTests(unittest.TestCase):
         self.assertIn("trailing_activated_by_loss_control", order_plan.reason_codes)
         self.assertIn("trailing_lock_r:-0.3", order_plan.reason_codes)
 
+    def test_sentinel_profit_trailing_keeps_stop_buffered_from_current_mark(self):
+        item = PositionReviewItem(
+            symbol="BTCUSDT",
+            position_side="LONG",
+            position_amt=0.2,
+            recommendation="trail_or_reduce",
+            urgency="normal",
+            reasons=[
+                "sentinel_reversal_risk_trailing",
+                "sentinel_profit_protection",
+                "sentinel_min_profit_r:0.45",
+                "sentinel_min_target_progress:0.25",
+                "sentinel_lock_r:1.2",
+                "sentinel_giveback_r:0.05",
+                "sentinel_target_extension_r:0.20",
+            ],
+            entry_price=100,
+            mark_price=103.0,
+            stop_price=96,
+            target_price=108,
+            stop_r_multiple=0.75,
+            target_progress=0.375,
+            algo_protection_count=2,
+            algo_orders=protective_algo_orders(),
+            matching_intent_event_id=123,
+        )
+
+        adjustment = position_adjustment_plan_from_review(
+            PositionReviewReport(
+                status="review_required",
+                action_required=True,
+                checked_at="2026-06-20T04:00:00Z",
+                positions=[item],
+            ),
+            position_mode="hedge",
+            trailing_protection_enabled=True,
+            trailing_activate_r=0.0,
+            filters_by_symbol={"BTCUSDT": SymbolExecutionFilters(symbol="BTCUSDT", tick_size=Decimal("0.01"))},
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_ready")
+        order_plan = adjustment.plans[0].order_plan
+        self.assertGreaterEqual(103.0 - order_plan.stop_price, 0.70)
+        self.assertTrue(
+            any(reason.startswith("trailing_mark_buffer_distance:") for reason in order_plan.reason_codes)
+        )
+
     def test_partial_take_profit_quantity_respects_step_size(self):
         adjustment = position_adjustment_plan_from_review(
             self.review(mark_price=107),

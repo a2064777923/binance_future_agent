@@ -13,11 +13,20 @@ from bfa.ops.pending_limit_watchdog import build_pending_limit_watchdog_report
 
 
 class FakePendingLimitClient:
-    def __init__(self, *, order_status="FILLED", executed_qty="0.2", protected=False, active_position=True):
+    def __init__(
+        self,
+        *,
+        order_status="FILLED",
+        executed_qty="0.2",
+        protected=False,
+        active_position=True,
+        position_qty=None,
+    ):
         self.order_status = order_status
         self.executed_qty = executed_qty
         self.protected = protected
         self.active_position = active_position
+        self.position_qty = position_qty
         self.calls = []
         self.algo_orders = []
         self.new_orders = []
@@ -34,10 +43,11 @@ class FakePendingLimitClient:
     def position_risk(self, symbol=None):
         self.calls.append(("position_risk", symbol))
         if self.active_position:
+            position_qty = self.position_qty if self.position_qty is not None else self.executed_qty
             return [
                 {
                     "symbol": symbol or "BTCUSDT",
-                    "positionAmt": self.executed_qty,
+                    "positionAmt": position_qty,
                     "positionSide": "LONG",
                     "entryPrice": "100",
                     "markPrice": "100.5",
@@ -231,6 +241,28 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertEqual(report.items[0].action, "mark_resolved")
         self.assertIn(("cancel_order", {"symbol": "BTCUSDT", "orig_client_order_id": "bfa-btc-pending-1"}), client.calls)
         self.assertGreaterEqual(self.exchange_response_count(), 1)
+
+    def test_unfilled_open_order_does_not_reconcile_against_existing_same_side_position(self):
+        client = FakePendingLimitClient(
+            order_status="NEW",
+            executed_qty="0",
+            active_position=True,
+            position_qty="0.2",
+        )
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:05Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.status, "pending_limit_watchdog_checked")
+        self.assertEqual(report.items[0].status, "still_pending")
+        self.assertEqual(report.items[0].action, "watch")
+        self.assertEqual(client.algo_orders, [])
+        self.assertNotIn("position_risk", [call[0] for call in client.calls])
 
     def test_execute_mode_waits_from_actual_entry_submit_time_when_available(self):
         self.add_latency_to_pending_intent(

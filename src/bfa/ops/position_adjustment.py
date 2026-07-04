@@ -23,6 +23,10 @@ from bfa.ops.position_review import (
 )
 
 
+_TRAILING_MIN_MARK_BUFFER_R = 0.18
+_TRAILING_MIN_MARK_BUFFER_PERCENT = 0.0012
+
+
 @dataclass(frozen=True)
 class PositionAdjustmentOrderPlan:
     symbol: str
@@ -993,6 +997,20 @@ def _trail_prices(
     if loss_control_activation:
         giveback_r = max(giveback_r, overrides.get("min_giveback_r", 0.0))
     target_extension_r = max(overrides.get("target_extension_r", target_extension_r), 0.0)
+    mark_buffer = 0.0
+    if not loss_control_activation:
+        mark_buffer = _trailing_mark_buffer_distance(
+            entry=entry,
+            risk_distance=risk_distance,
+            filters=filters,
+            min_buffer_r=max(overrides.get("min_mark_buffer_r", _TRAILING_MIN_MARK_BUFFER_R), 0.0),
+            min_buffer_percent=max(
+                overrides.get("min_mark_buffer_percent", _TRAILING_MIN_MARK_BUFFER_PERCENT),
+                0.0,
+            ),
+        )
+        if mark_buffer > 0:
+            reason_codes.append(f"trailing_mark_buffer_distance:{round(mark_buffer, 8)}")
     # Bug fix: lock_r=0 places the stop exactly at entry (break-even), but
     # fees+slippage on exit make break-even a guaranteed small loss. The lock
     # must cover at least one round-trip cost so "保本" actually preserves
@@ -1009,16 +1027,24 @@ def _trail_prices(
             # above current price, fall back to stopping just below mark. This keeps
             # the trailing guard active while preserving valid geometry.
             lock_price = entry + lock_r * risk_distance
-            effective_lock = min(lock_price, mark - 0.0001 * entry)
+            mark_buffer_limit = mark - mark_buffer
+            effective_lock = min(lock_price, mark_buffer_limit)
             candidate_stop = max(stop, effective_lock, mark - giveback_r * risk_distance)
+            if mark_buffer > 0 and candidate_stop > mark_buffer_limit:
+                candidate_stop = mark_buffer_limit
+                reason_codes.append("trailing_stop_clamped_to_mark_buffer")
         candidate_target = max(target, mark + target_extension_r * risk_distance)
     else:
         if loss_control_activation:
             candidate_stop = min(stop, mark + giveback_r * risk_distance)
         else:
             lock_price = entry - lock_r * risk_distance
-            effective_lock = max(lock_price, mark + 0.0001 * entry)
+            mark_buffer_limit = mark + mark_buffer
+            effective_lock = max(lock_price, mark_buffer_limit)
             candidate_stop = min(stop, effective_lock, mark + giveback_r * risk_distance)
+            if mark_buffer > 0 and candidate_stop < mark_buffer_limit:
+                candidate_stop = mark_buffer_limit
+                reason_codes.append("trailing_stop_clamped_to_mark_buffer")
         candidate_target = min(target, mark - target_extension_r * risk_distance)
 
     candidate_stop = _round_price(
@@ -1073,6 +1099,8 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
         "sentinel_giveback_r": "giveback_r",
         "sentinel_min_giveback_r": "min_giveback_r",
         "sentinel_target_extension_r": "target_extension_r",
+        "sentinel_min_mark_buffer_r": "min_mark_buffer_r",
+        "sentinel_min_mark_buffer_percent": "min_mark_buffer_percent",
     }
     for reason in reasons:
         if ":" not in str(reason):
@@ -1085,6 +1113,28 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
         if parsed is not None and (parsed >= 0 or target == "lock_r"):
             values[target] = parsed
     return values
+
+
+def _trailing_mark_buffer_distance(
+    *,
+    entry: float,
+    risk_distance: float,
+    filters: SymbolExecutionFilters | None,
+    min_buffer_r: float,
+    min_buffer_percent: float,
+) -> float:
+    tick_buffer = 0.0
+    if filters is not None and filters.tick_size is not None:
+        try:
+            tick_buffer = float(filters.tick_size) * 2.0
+        except (TypeError, ValueError):
+            tick_buffer = 0.0
+    return max(
+        risk_distance * min_buffer_r,
+        entry * min_buffer_percent,
+        tick_buffer,
+        0.0,
+    )
 
 
 def _sentinel_profit_gate_met(item: PositionReviewItem, *, current_r: float, target_progress: float) -> bool:

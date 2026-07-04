@@ -320,9 +320,15 @@ def _check_pending_intent(
                 execute_protective_orders=execute_protective_orders,
                 position_payload=position_payload,
             )
-    else:
+    elif query is None:
         active_intent, position_payload = _active_intent_from_position(config, client, pending.intent)
         response["position_reconcile"] = position_payload
+    else:
+        response["position_reconcile"] = {
+            "status": "skipped_order_query_not_executed",
+            "order_status": query_status,
+            "executed_quantity": _executed_quantity(query),
+        }
 
     if active_intent is None:
         if query is not None and _order_status(query) in _CLOSED_ORDER_STATUSES and _executed_quantity(query) <= 0:

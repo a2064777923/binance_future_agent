@@ -9,7 +9,9 @@ Snapshot refreshed from the server at `2026-07-03T07:56:20Z`
 (`2026-07-03 15:56:20` Asia/Hong_Kong) after the manual-position capacity
 hotfix, fail-soft market collection hotfix, service reset, and log/raw-feed
 cleanup. The previous `2026-06-27` snapshot remains useful history, but this
-section is now the current live operating state.
+section is now the current live operating state. A 2026-07-04 hotfix was later
+deployed to the server for micro-grid continuation veto, pending-limit
+watchdog attribution, and buffered profit-lock protection.
 
 ## Source Of Truth Order
 
@@ -40,18 +42,32 @@ checking the newer sources above.
   - `ops exposure-status` reports the same capacity semantics;
   - market collection records a per-symbol `market_data_error` snapshot when a
     single symbol is pre-trading/invalid instead of aborting the whole cycle.
+  - 2026-07-04 TAIKO/UB follow-up: micro-grid rejects upper/lower edge fades
+    when taker flow, momentum, and continuation pressure still confirm a
+    same-direction breakout; the pending-limit watchdog no longer reconciles a
+    `NEW`/zero-fill entry against an unrelated same-side position; sentinel
+    profit-lock replacement keeps the new stop buffered from current mark.
   Use the latest Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
 - The latest changed files were copied to the deployed app path and verified by
   targeted unit tests locally and on the server, `ops exposure-status`, a
-  systemd reset, and subsequent live cycles that exited `0/SUCCESS`:
+  systemd reset, and subsequent live cycles that exited `0/SUCCESS`. The
+  2026-07-04 continuation/watchdog/profit-buffer hotfix was copied directly to
+  the deployed app path and verified with local targeted unit tests, server
+  `py_compile`, server imports, and an active live timer:
   - `src/bfa/agent.py`
   - `src/bfa/market/collector.py`
   - `src/bfa/ops/exposure_status.py`
+  - `src/bfa/ops/pending_limit_watchdog.py`
+  - `src/bfa/ops/position_adjustment.py`
+  - `src/bfa/strategy/micro_grid_live.py`
   - `tests/test_agent_runner.py`
   - `tests/test_market_collector.py`
   - `tests/test_ops_exposure_status.py`
+  - `tests/test_ops_pending_limit_watchdog.py`
+  - `tests/test_ops_position_adjustment.py`
+  - `tests/test_strategy_micro_grid_live.py`
 
 If a future agent changes local code, deploy the changed files or run the
 deployment script before claiming the server is on the same version.
@@ -429,6 +445,15 @@ Micro-grid side selection has been corrected to prefer mean-reversion geometry:
 - fresh-edge checks are now a quality reduction, not a hard block;
 - `entry_path_too_directional` remains a hard block in research logic.
 
+2026-07-04 TAIKOUSDT follow-up: mean reversion is not allowed to fade a strong
+same-direction breakout. The live adapter now assigns an untradeable score and
+records `micro_grid_strong_same_direction_flow_veto` when the selected
+micro-grid side is against extreme taker flow, high momentum pressure, and
+confirmed continuation pressure. Example: an upper-edge short is vetoed when
+the entry taker-buy fraction is extreme and the move is still pushing upward;
+the system waits for actual exhaustion rather than shorting the still-active
+needle.
+
 Micro-grid entry geometry is dynamic:
 
 - base entry edge is close to the band edge;
@@ -512,6 +537,13 @@ pending entry is `PARTIALLY_FILLED`, it cancels the unfilled entry remainder
 before placing or confirming protective orders. This prevents the old entry
 order from continuing to fill after stop-loss/take-profit protection has been
 placed.
+
+2026-07-04 UBUSDT follow-up: when the exchange order query returns an open
+unfilled entry such as `status=NEW` with `executedQty=0`, the watchdog does not
+look at same-symbol positions to infer that this pending order filled. That
+same-side-position fallback is only allowed when the order query is unavailable
+or when the order query itself shows execution. This prevents an old ladder
+anchor from being marked protected because a closer sibling filled first.
 
 SLXUSDT 2026-06-26 forensic note: the `03:54:38Z` micro-grid short was
 directionally correct but geometrically too shallow. The signal saw current

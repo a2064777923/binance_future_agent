@@ -306,6 +306,11 @@ def build_micro_grid_live_candidates(
             continue
         ranked = sorted(orders, key=lambda order: _order_rank_key(order, research))
         selected = ranked[0]
+        continuation_veto_reasons = _micro_grid_strong_continuation_reasons(
+            selected,
+            research.reason_code_map(selected.reason_codes),
+            research,
+        )
         score = _order_score(selected, research)
         quality_scale, quality_reasons = research.micro_trade_quality_scale_from_reason_codes(selected.reason_codes)
         signal_time_ms = _iso_to_epoch_ms(selected.signal_time)
@@ -327,6 +332,11 @@ def build_micro_grid_live_candidates(
                 "target_price": selected.target_price,
             }
         )
+        if continuation_veto_reasons:
+            symbol_health.update({"status": "rejected", "reasons": continuation_veto_reasons})
+            for reason in continuation_veto_reasons:
+                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            continue
         if signal_age_seconds is None or signal_age_seconds > live_config.max_signal_age_seconds:
             reason = "micro_grid_signal_too_stale"
             symbol_health.update({"status": "rejected", "reasons": [reason]})
@@ -977,6 +987,8 @@ def _order_score(order, research) -> float:
     quality_scale, _quality_reasons = research.micro_trade_quality_scale_from_reason_codes(order.reason_codes)
     if quality_scale <= 0:
         return -1_000_000.0
+    if _micro_grid_strong_continuation_reasons(order, values, research):
+        return -1_000_000.0
     side = order.side
     pullback_key = "long_pullback_quality" if side == "long" else "short_pullback_quality"
     pullback_quality = research.code_float(values, pullback_key, 0.0)
@@ -1006,6 +1018,37 @@ def _order_score(order, research) -> float:
         - max(stop_fraction - 0.32, 0.0) * 0.75
     )
     return raw_score * quality_scale + side_context_score
+
+
+def _micro_grid_strong_continuation_reasons(order, values: Mapping[str, str], research) -> list[str]:
+    side = str(getattr(order, "side", "")).lower()
+    state = getattr(order, "state", None)
+    if side not in {"long", "short"} or state is None:
+        return []
+
+    taker_buy_fraction = _float_or_default(getattr(state, "entry_taker_buy_ratio", None), 0.5)
+    flow_pressure = research.code_float(values, "dynamic_entry_flow_pressure", 0.0)
+    momentum_pressure = research.code_float(values, "dynamic_entry_momentum_pressure", 0.0)
+    continuation_pressure = research.code_float(values, "dynamic_entry_continuation_pressure", 0.0)
+    entry_continuation = research.code_float(values, "entry_continuation_fraction", 0.0)
+
+    same_direction_flow = (
+        taker_buy_fraction >= 0.66
+        if side == "short"
+        else taker_buy_fraction <= 0.34
+    )
+    strong_pressure = flow_pressure >= 0.85 and momentum_pressure >= 0.85
+    continuation_confirmed = continuation_pressure >= 0.65 or entry_continuation >= 0.06
+    if not (same_direction_flow and strong_pressure and continuation_confirmed):
+        return []
+
+    return [
+        "micro_grid_strong_same_direction_flow_veto",
+        f"micro_grid_veto_taker_buy_fraction:{round(taker_buy_fraction, 6)}",
+        f"micro_grid_veto_flow_pressure:{round(flow_pressure, 6)}",
+        f"micro_grid_veto_momentum_pressure:{round(momentum_pressure, 6)}",
+        f"micro_grid_veto_entry_continuation:{round(entry_continuation, 6)}",
+    ]
 
 
 def _mean_reversion_side_context_score(order, values: Mapping[str, str], research) -> float:

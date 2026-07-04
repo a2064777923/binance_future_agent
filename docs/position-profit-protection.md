@@ -79,6 +79,14 @@ Note: `lock_r` is floored to cover at least one round-trip transaction cost
 (~0.08% of entry / risk_distance) so a "break-even" lock never becomes a
 guaranteed small loss after fees. This floor is applied in code, not config.
 
+2026-07-04 hotfix: profit-lock trailing also keeps the replacement stop away
+from current mark by at least `max(0.18R, 0.12% of entry, 2 ticks)` unless the
+signal is explicitly in loss-control mode. This avoids the earlier failure mode
+where a valid profit-protection decision set the stop only a few ticks from
+mark and ordinary noise immediately closed the position. The buffer can be
+overridden by sentinel reason codes `sentinel_min_mark_buffer_r` and
+`sentinel_min_mark_buffer_percent` when a profile has been retuned with data.
+
 Trend positions use wider protection to avoid closing too often:
 
 - `BFA_POSITION_SENTINEL_TREND_MIN_PROFIT_R=0.35`

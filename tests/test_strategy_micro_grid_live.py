@@ -283,6 +283,27 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
 
         self.assertGreater(long_score, short_score)
 
+    def test_live_score_rejects_upper_edge_short_when_buy_flow_is_still_breaking_out(self):
+        state = replace(
+            self.micro_state(close_position_percent=94.0, long_ready=False, short_ready=True),
+            entry_taker_buy_ratio=0.70,
+            recent_drift_percent=0.72,
+            short_entry_continuation_fraction=0.16,
+        )
+        order = replace(
+            self.grid_order(side="short", state=state),
+            reason_codes=[
+                *self.grid_order(side="short", state=state).reason_codes,
+                "dynamic_entry_flow_pressure:1.0",
+                "dynamic_entry_momentum_pressure:1.0",
+                "dynamic_entry_continuation_pressure:1.0",
+            ],
+        )
+
+        score = _order_score(order, research)
+
+        self.assertLess(score, -50.0)
+
     def test_micro_grid_market_context_missing_rejects_instead_of_faking_liquidity(self):
         self.assertEqual(_market_context_rejections({}), ["micro_grid_missing_market_context"])
         self.assertEqual(
