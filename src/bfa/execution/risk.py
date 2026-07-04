@@ -128,7 +128,7 @@ def evaluate_risk(
         reasons.append("max_open_positions_reached")
     if _duplicate_exposure(intent, risk_state):
         reasons.append("duplicate_symbol_direction_exposure")
-    if _same_symbol_opposite_exposure(intent, risk_state) and not _same_symbol_opposite_positions_enabled(config):
+    if _same_symbol_opposite_exposure_blocked(intent, risk_state, config):
         reasons.append("same_symbol_opposite_exposure_blocked")
     if _portfolio_margin_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_MARGIN_USDT"):
         reasons.append("portfolio_margin_cap_reached")
@@ -229,6 +229,10 @@ def _route_metadata_from_reasons(reasons: list[str]) -> dict[str, str]:
             "micro_grid_ladder_layer",
             "micro_grid_ladder_notional_fraction",
             "micro_grid_ladder_protection_source",
+            "trend_entry_ladder_group_id",
+            "trend_entry_ladder_layer",
+            "trend_entry_ladder_notional_fraction",
+            "trend_entry_ladder_protection_source",
         )
         if key in values and str(values[key]).strip()
     }
@@ -236,16 +240,18 @@ def _route_metadata_from_reasons(reasons: list[str]) -> dict[str, str]:
 
 def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
-    intent_ladder_group = _micro_grid_ladder_group_id(intent)
-    intent_ladder_layer = _micro_grid_ladder_layer(intent)
+    intent_ladder_kind = _ladder_kind(intent)
+    intent_ladder_group = _ladder_group_id(intent)
+    intent_ladder_layer = _ladder_layer(intent)
     for exposure in risk_state.active_exposures:
         symbol = str(exposure.get("symbol", "")).upper()
         direction = str(exposure.get("direction", "")).upper()
         if symbol == intent.symbol.upper() and direction == intended_direction:
-            exposure_ladder_group = str(exposure.get("micro_grid_ladder_group_id") or "").strip()
-            exposure_ladder_layer = str(exposure.get("micro_grid_ladder_layer") or "").strip()
+            exposure_ladder_group = str(exposure.get(f"{intent_ladder_kind}_group_id") or "").strip()
+            exposure_ladder_layer = str(exposure.get(f"{intent_ladder_kind}_layer") or "").strip()
             if (
-                intent_ladder_group
+                intent_ladder_kind
+                and intent_ladder_group
                 and exposure_ladder_group == intent_ladder_group
                 and intent_ladder_layer
                 and exposure_ladder_layer
@@ -265,6 +271,29 @@ def _same_symbol_opposite_exposure(intent: OrderIntent, risk_state: RiskState) -
         if symbol == intent.symbol.upper() and direction == opposite_direction:
             return True
     return False
+
+
+def _same_symbol_opposite_exposure_blocked(
+    intent: OrderIntent,
+    risk_state: RiskState,
+    config: AppConfig,
+) -> bool:
+    intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+    opposite_direction = "SHORT" if intended_direction == "LONG" else "LONG"
+    intent_leg = _strategy_leg(intent)
+    blocked = False
+    for exposure in risk_state.active_exposures:
+        symbol = str(exposure.get("symbol", "")).upper()
+        direction = str(exposure.get("direction", "")).upper()
+        if symbol != intent.symbol.upper() or direction != opposite_direction:
+            continue
+        exposure_leg = str(exposure.get("strategy_leg") or "").strip().lower()
+        if intent_leg == "micro_grid" and exposure_leg == "trend":
+            continue
+        if intent_leg == "trend" and exposure_leg == "micro_grid":
+            return True
+        blocked = True
+    return blocked and not _same_symbol_opposite_positions_enabled(config)
 
 
 def _same_symbol_opposite_positions_enabled(config: AppConfig) -> bool:
@@ -291,11 +320,37 @@ def _effective_same_direction_notional_cap(intent: OrderIntent, config: AppConfi
 
 
 def _is_micro_grid_intent(intent: OrderIntent) -> bool:
+    return _strategy_leg(intent) == "micro_grid"
+
+
+def _strategy_leg(intent: OrderIntent) -> str:
     metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
     leg = str(metadata.get("strategy_leg") or "").strip().lower()
     regime = str(metadata.get("regime_label") or "").strip().upper()
     reasons = [str(reason).strip().lower() for reason in intent.reason_codes]
-    return leg == "micro_grid" or regime == "RANGE" or any(reason == "strategy_leg:micro_grid" for reason in reasons)
+    if leg:
+        return leg
+    if regime == "RANGE" or any(reason == "strategy_leg:micro_grid" for reason in reasons):
+        return "micro_grid"
+    if any(reason == "strategy_leg:trend" for reason in reasons) or regime == "TREND":
+        return "trend"
+    return ""
+
+
+def _ladder_kind(intent: OrderIntent) -> str:
+    if _trend_ladder_group_id(intent):
+        return "trend_entry_ladder"
+    if _micro_grid_ladder_group_id(intent):
+        return "micro_grid_ladder"
+    return ""
+
+
+def _ladder_group_id(intent: OrderIntent) -> str:
+    return _trend_ladder_group_id(intent) or _micro_grid_ladder_group_id(intent)
+
+
+def _ladder_layer(intent: OrderIntent) -> str:
+    return _trend_ladder_layer(intent) or _micro_grid_ladder_layer(intent)
 
 
 def _micro_grid_ladder_group_id(intent: OrderIntent) -> str:
@@ -318,6 +373,28 @@ def _micro_grid_ladder_layer(intent: OrderIntent) -> str:
         return value
     values = _reason_values(intent.reason_codes)
     return str(values.get("micro_grid_ladder_layer") or "").strip()
+
+
+def _trend_ladder_group_id(intent: OrderIntent) -> str:
+    if _strategy_leg(intent) != "trend":
+        return ""
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    value = str(metadata.get("trend_entry_ladder_group_id") or "").strip()
+    if value:
+        return value
+    values = _reason_values(intent.reason_codes)
+    return str(values.get("trend_entry_ladder_group_id") or "").strip()
+
+
+def _trend_ladder_layer(intent: OrderIntent) -> str:
+    if _strategy_leg(intent) != "trend":
+        return ""
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    value = str(metadata.get("trend_entry_ladder_layer") or "").strip()
+    if value:
+        return value
+    values = _reason_values(intent.reason_codes)
+    return str(values.get("trend_entry_ladder_layer") or "").strip()
 
 
 def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:

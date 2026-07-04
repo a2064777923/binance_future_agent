@@ -229,6 +229,51 @@ class StrategySetupTests(unittest.TestCase):
         self.assertEqual(setup.side, "flat")
         self.assertIn("trend_long_edge_exhaustion", setup.reasons)
 
+    def test_live_action_flow_builds_three_layer_trend_entry_ladder(self):
+        profile = built_in_variants()["quant_setup_live_action_flow"].setup_profile
+        setup = build_trade_setup(
+            self.candidate(
+                price_change_percent=-4.0,
+                taker_buy_sell_ratio=0.72,
+                taker_buy_sell_ratio_change=-0.1,
+                funding_rate=0.0002,
+                kline_momentum_percent=-1.4,
+                kline_micro_momentum_percent=-0.3,
+                kline_close_position_percent=18,
+                kline_quote_volume_change_percent=20,
+                support_price=96.0,
+                resistance_price=102.2,
+                vwap=100.7,
+                ema_fast=99.1,
+                ema_slow=100.4,
+                ema_spread_percent=-1.2948,
+                rsi=31.0,
+                reference_price=96.2,
+            ),
+            risk_limits=RiskLimits(
+                account_capital_usdt=100,
+                max_leverage=30,
+                max_position_notional_usdt=600,
+                max_risk_per_trade_usdt=4,
+                max_daily_loss_usdt=10,
+                max_open_positions=5,
+            ),
+            profile=profile,
+        )
+
+        self.assertEqual(setup.decision, "trade")
+        ladder = setup.price_basis["trend_entry_ladder"]
+        self.assertEqual([layer["layer"] for layer in ladder], ["closer", "mid", "anchor"])
+        self.assertAlmostEqual(sum(layer["notional_fraction"] for layer in ladder), 1.0)
+        entries = [layer["entry_price"] for layer in ladder]
+        self.assertTrue(entries[0] < entries[1] < entries[2])
+        for layer in ladder:
+            self.assertGreater(layer["stop_price"], layer["entry_price"])
+            self.assertLess(layer["target_price"], layer["entry_price"])
+            self.assertGreaterEqual(layer["risk_reward_ratio"], profile["min_risk_reward"])
+            self.assertIn("trend_entry_ladder_group_id", layer)
+            self.assertIn(f"trend_entry_ladder_layer:{layer['layer']}", layer["reason_codes"])
+
     def test_profile_can_disable_side_without_changing_default(self):
         short_candidate = self.candidate(
             price_change_percent=-4.0,

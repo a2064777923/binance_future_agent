@@ -183,6 +183,7 @@ def run_agent_once(
         _risk_state_from_exchange(
             signed_client,
             manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
+            db_path=db_path or config.get("BFA_DB_PATH"),
         )
         if mode is RuntimeMode.LIVE
         else None
@@ -210,6 +211,7 @@ def run_agent_once(
         preflight_risk_state = _risk_state_from_exchange(
             signed_client,
             manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
+            db_path=db_path or config.get("BFA_DB_PATH"),
         )
     position_adjustment_plan = (
         _live_position_adjustment_plan(config, db_path=db_path, signed_client=signed_client, market_client=market)
@@ -1632,6 +1634,7 @@ def _evaluate_candidate_queue(
     ai_decisions_persisted = 0
     trade_setups_persisted = 0
     async_micro_pending_submitted = 0
+    async_trend_pending_submitted = 0
     skipped_risk_reasons: list[str] = []
     last_status = "no_candidate"
     last_validation_errors: list[str] = []
@@ -1959,29 +1962,91 @@ def _evaluate_candidate_queue(
             )
             continue
 
-        execution_started_at_ms = _epoch_ms()
-        _record_latency_stage(candidate_evaluation, "pre_execution", started_at_ms=execution_started_at_ms, finished_at_ms=execution_started_at_ms)
-        execution = ExecutionEngine(
-            config=config,
-            signed_client=signed_client,
-            store=store,
-            risk_limits=risk_limits,
-        ).run(
-            symbol=candidate.symbol,
-            validation=ai_run.validation,
-            decided_at=started_at,
-            risk_state=risk_state,
-            filters=filters,
-            now=started_at,
-            telemetry=_execution_latency_telemetry(candidate_evaluation, candidate=candidate, started_at=started_at),
-        )
-        _record_latency_stage(
-            candidate_evaluation,
-            "execution",
-            started_at_ms=execution_started_at_ms,
-            finished_at_ms=_epoch_ms(),
-            extra={"status": execution.status, "submitted": execution.submitted},
-        )
+        execution_runs = _execution_ai_runs_for_setup(ai_run, setup, micro_grid=micro_grid)
+        trend_ladder_pending_results: list[Any] = []
+        execution = None
+        for execution_index, execution_ai_run in enumerate(execution_runs):
+            execution_started_at_ms = _epoch_ms()
+            _record_latency_stage(
+                candidate_evaluation,
+                "pre_execution",
+                started_at_ms=execution_started_at_ms,
+                finished_at_ms=execution_started_at_ms,
+                extra={"execution_index": execution_index + 1, "execution_count": len(execution_runs)},
+            )
+            execution = ExecutionEngine(
+                config=config,
+                signed_client=signed_client,
+                store=store,
+                risk_limits=risk_limits,
+            ).run(
+                symbol=candidate.symbol,
+                validation=execution_ai_run.validation,
+                decided_at=started_at,
+                risk_state=risk_state,
+                filters=filters,
+                now=started_at,
+                telemetry=_execution_latency_telemetry(candidate_evaluation, candidate=candidate, started_at=started_at),
+            )
+            _record_latency_stage(
+                candidate_evaluation,
+                "execution",
+                started_at_ms=execution_started_at_ms,
+                finished_at_ms=_epoch_ms(),
+                extra={"status": execution.status, "submitted": execution.submitted, "execution_index": execution_index + 1},
+            )
+            _record_candidate_layer_execution(candidate_evaluation, execution, execution_index=execution_index)
+            if _is_trend_ladder_pending_execution(setup, execution):
+                async_trend_pending_submitted += 1
+                trend_ladder_pending_results.append(execution)
+                if execution.intent is not None:
+                    risk_state = _risk_state_with_pending_intent(risk_state, execution.intent)
+                last_status = execution.status
+                last_risk_reasons = list(execution.risk.reason_codes)
+                skipped_risk_reasons.append(f"{candidate.symbol}:trend_ladder_entry_order_pending")
+                continue
+            break
+        else:
+            execution = trend_ladder_pending_results[-1] if trend_ladder_pending_results else None
+            if execution is not None:
+                _finish_candidate_evaluation(
+                    candidate_evaluation,
+                    execution_status=execution.status,
+                    risk_reasons=list(execution.risk.reason_codes),
+                    continued=False,
+                    end_reason="trend_ladder_async_pending",
+                )
+                return AgentRunResult(
+                    status=execution.status,
+                    mode=mode.value,
+                    started_at=started_at,
+                    market_snapshot_count=market_snapshot_count,
+                    narrative_record_count=narrative_record_count,
+                    candidate_count=candidate_count,
+                    rejected_count=rejected_count,
+                    scan_symbols=scan_symbols,
+                    selected_symbol=candidate.symbol,
+                    evaluated_symbols=evaluated_symbols,
+                    ai_accepted=True,
+                    execution_status=execution.status,
+                    submitted=True,
+                    risk_reasons=_dedupe([*skipped_risk_reasons, *execution.risk.reason_codes]),
+                    position_review=_position_review_summary(position_adjustment_plan),
+                    position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                    paper_guard=paper_guard.to_dict() if paper_guard is not None else None,
+                    source_health=source_health,
+                    candidate_evaluations=candidate_evaluations,
+                    persisted={
+                        **_position_lifecycle_persisted(position_lifecycle_event_id),
+                        **_decision_snapshot_persisted(decision_snapshot_event_id),
+                        "candidates": persisted_candidate_count,
+                        "trade_setups": trade_setups_persisted,
+                        "ai_decisions": ai_decisions_persisted,
+                        **_merged_execution_persisted(trend_ladder_pending_results),
+                    },
+                )
+        if execution is None:
+            continue
         if micro_grid and execution.status == "entry_order_pending":
             async_micro_pending_submitted += 1
             if execution.intent is not None:
@@ -2402,12 +2467,21 @@ def _risk_state_with_pending_intent(risk_state: RiskState, intent) -> RiskState:
         "source": "pending_limit_entry",
     }
     metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    strategy_leg = str(metadata.get("strategy_leg") or "").strip()
+    if strategy_leg:
+        exposure["strategy_leg"] = strategy_leg
     ladder_group_id = str(metadata.get("micro_grid_ladder_group_id") or "").strip()
     if ladder_group_id:
         exposure["micro_grid_ladder_group_id"] = ladder_group_id
     ladder_layer = str(metadata.get("micro_grid_ladder_layer") or "").strip()
     if ladder_layer:
         exposure["micro_grid_ladder_layer"] = ladder_layer
+    trend_ladder_group_id = str(metadata.get("trend_entry_ladder_group_id") or "").strip()
+    if trend_ladder_group_id:
+        exposure["trend_entry_ladder_group_id"] = trend_ladder_group_id
+    trend_ladder_layer = str(metadata.get("trend_entry_ladder_layer") or "").strip()
+    if trend_ladder_layer:
+        exposure["trend_entry_ladder_layer"] = trend_ladder_layer
     return replace(
         risk_state,
         active_positions=int(risk_state.active_positions) + 1,
@@ -2664,6 +2738,140 @@ def _ai_run_with_quant_execution_reasons(ai_run: AiDecisionRun, setup) -> AiDeci
         ),
     )
     return replace(ai_run, validation=merged_validation)
+
+
+def _execution_ai_runs_for_setup(ai_run: AiDecisionRun, setup, *, micro_grid: bool) -> list[AiDecisionRun]:
+    if micro_grid:
+        return [ai_run]
+    layers = _trend_entry_ladder_layers(setup)
+    if not layers:
+        return [ai_run]
+    runs: list[AiDecisionRun] = []
+    for layer in layers:
+        layer_run = _ai_run_for_trend_ladder_layer(ai_run, layer)
+        if layer_run is not None:
+            runs.append(layer_run)
+    return runs or [ai_run]
+
+
+def _trend_entry_ladder_layers(setup) -> list[Mapping[str, Any]]:
+    if str(getattr(setup, "decision", "") or "") != "trade":
+        return []
+    price_basis = getattr(setup, "price_basis", {}) or {}
+    if not isinstance(price_basis, Mapping):
+        return []
+    layers = price_basis.get("trend_entry_ladder")
+    if not isinstance(layers, list):
+        return []
+    valid_layers: list[Mapping[str, Any]] = []
+    for layer in layers:
+        if not isinstance(layer, Mapping):
+            continue
+        if _float_or_none(layer.get("entry_price")) is None:
+            continue
+        if _float_or_none(layer.get("stop_price")) is None:
+            continue
+        if _float_or_none(layer.get("target_price")) is None:
+            continue
+        valid_layers.append(layer)
+    return valid_layers
+
+
+def _ai_run_for_trend_ladder_layer(ai_run: AiDecisionRun, layer: Mapping[str, Any]) -> AiDecisionRun | None:
+    validation = ai_run.validation
+    decision = validation.decision
+    if decision is None or decision.decision != "trade":
+        return None
+    entry = _float_or_none(layer.get("entry_price"))
+    stop = _float_or_none(layer.get("stop_price"))
+    target = _float_or_none(layer.get("target_price"))
+    if entry is None or stop is None or target is None:
+        return None
+    layer_notional = _float_or_none(layer.get("notional_usdt"))
+    if layer_notional is None:
+        fraction = _float_or_none(layer.get("notional_fraction")) or 1.0
+        layer_notional = (decision.notional_usdt or 0.0) * fraction
+    if layer_notional <= 0:
+        return None
+    layer_reason_codes = [str(reason) for reason in layer.get("reason_codes") or [] if str(reason).strip()]
+    merged_decision = replace(
+        decision,
+        entry_price=entry,
+        stop_price=stop,
+        target_price=target,
+        notional_usdt=layer_notional,
+        reasons=_dedupe([*decision.reasons, *layer_reason_codes]),
+    )
+    merged_validation = replace(
+        validation,
+        decision=merged_decision,
+        validation_warnings=_dedupe(
+            [
+                *validation.validation_warnings,
+                "trend_entry_ladder_layer_execution",
+            ]
+        ),
+    )
+    return replace(ai_run, validation=merged_validation)
+
+
+def _is_trend_ladder_pending_execution(setup, execution) -> bool:
+    if execution is None or execution.status != "entry_order_pending":
+        return False
+    intent = execution.intent
+    if intent is None:
+        return False
+    metadata = intent.metadata if isinstance(intent.metadata, Mapping) else {}
+    if str(metadata.get("strategy_leg") or "").strip().lower() != "trend":
+        return False
+    if str(metadata.get("trend_entry_ladder_layer") or "").strip():
+        return True
+    return any(str(reason).startswith("trend_entry_ladder_layer:") for reason in intent.reason_codes)
+
+
+def _record_candidate_layer_execution(candidate_evaluation: dict[str, Any], execution, *, execution_index: int) -> None:
+    if execution is None:
+        return
+    intent = execution.intent
+    metadata = intent.metadata if intent is not None and isinstance(intent.metadata, Mapping) else {}
+    layer = metadata.get("trend_entry_ladder_layer") or metadata.get("micro_grid_ladder_layer")
+    if layer is None and intent is not None:
+        values = _reason_values(intent.reason_codes)
+        layer = values.get("trend_entry_ladder_layer") or values.get("micro_grid_ladder_layer")
+    executions = candidate_evaluation.setdefault("layer_executions", [])
+    if isinstance(executions, list):
+        executions.append(
+            {
+                "index": execution_index + 1,
+                "status": execution.status,
+                "submitted": execution.submitted,
+                "layer": layer,
+                "risk_reasons": list(execution.risk.reason_codes),
+            }
+        )
+
+
+def _merged_execution_persisted(executions: list[Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    counts: Counter[str] = Counter()
+    for execution in executions:
+        for key, value in dict(getattr(execution, "persisted", {}) or {}).items():
+            counts[key] += 1
+            merged[key] = value
+    for key, count in counts.items():
+        if count > 1:
+            merged[f"{key}_count"] = count
+    return merged
+
+
+def _reason_values(reasons: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for reason in reasons:
+        if ":" not in str(reason):
+            continue
+        key, value = str(reason).split(":", 1)
+        values[key] = value
+    return values
 
 
 def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, signed_client, market_client=None):
@@ -2943,7 +3151,12 @@ def _build_signed_client(config: AppConfig, mode: RuntimeMode):
     )
 
 
-def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None = None) -> RiskState | None:
+def _risk_state_from_exchange(
+    signed_client,
+    *,
+    manual_symbols: set[str] | None = None,
+    db_path: str | None = None,
+) -> RiskState | None:
     if signed_client is None:
         return None
     try:
@@ -2960,6 +3173,7 @@ def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None 
         account_available_balance = _float_or_none(account.get("availableBalance"))
         account_total_wallet_balance = _float_or_none(account.get("totalWalletBalance"))
     excluded = {symbol.upper() for symbol in (manual_symbols or set())}
+    intent_metadata = _latest_intent_metadata_by_symbol_direction(db_path)
     active_positions = 0
     active_exposures: list[dict[str, Any]] = []
     manual_exposures: list[dict[str, Any]] = []
@@ -2978,6 +3192,7 @@ def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None 
             "initial_margin_usdt": _position_initial_margin(position),
             "leverage": _position_leverage(position),
         }
+        exposure.update(intent_metadata.get((symbol, str(exposure["direction"]).upper()), {}))
         if symbol in excluded:
             manual_exposures.append(exposure)
         else:
@@ -2990,6 +3205,83 @@ def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None 
         account_available_balance_usdt=account_available_balance,
         account_total_wallet_balance_usdt=account_total_wallet_balance,
     )
+
+
+def _latest_intent_metadata_by_symbol_direction(db_path: str | None) -> dict[tuple[str, str], dict[str, Any]]:
+    if not db_path:
+        return {}
+    path = Path(str(db_path))
+    if str(db_path) != ":memory:" and not path.exists():
+        return {}
+    connection = None
+    try:
+        connection = connect(db_path)
+        rows = connection.execute(
+            """
+            SELECT occurred_at, symbol, payload_json
+            FROM order_intents
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT 500
+            """
+        ).fetchall()
+    except Exception:
+        return {}
+    finally:
+        if connection is not None:
+            connection.close()
+
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    terminal_statuses = {
+        "rejected",
+        "entry_order_expired_canceled",
+        "entry_order_unknown_canceled",
+        "entry_order_unknown_cancel_failed",
+        "protective_order_failed_closed",
+        "dry_run",
+        "test_order_checked",
+    }
+    for row in rows:
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except Exception:
+            continue
+        status = str(payload.get("status") or "").strip()
+        if status in terminal_statuses:
+            continue
+        intent = payload.get("intent")
+        if not isinstance(intent, Mapping):
+            continue
+        symbol = str(intent.get("symbol") or row["symbol"] or "").upper()
+        side = str(intent.get("side") or "").upper()
+        direction = "LONG" if side == "BUY" else "SHORT" if side == "SELL" else ""
+        if not symbol or not direction:
+            continue
+        key = (symbol, direction)
+        if key in result:
+            continue
+        metadata = _intent_strategy_metadata(intent)
+        if metadata:
+            result[key] = metadata
+    return result
+
+
+def _intent_strategy_metadata(intent: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = dict(intent.get("metadata") or {}) if isinstance(intent.get("metadata"), Mapping) else {}
+    reason_values = _reason_values([str(reason) for reason in intent.get("reason_codes") or []])
+    extracted: dict[str, Any] = {}
+    for key in (
+        "strategy_leg",
+        "regime_label",
+        "route_decision",
+        "micro_grid_ladder_group_id",
+        "micro_grid_ladder_layer",
+        "trend_entry_ladder_group_id",
+        "trend_entry_ladder_layer",
+    ):
+        value = metadata.get(key, reason_values.get(key))
+        if value is not None and str(value).strip():
+            extracted[key] = str(value).strip()
+    return extracted
 
 
 def _live_entry_capacity_blockers(config: AppConfig, risk_state: RiskState | None) -> list[str]:

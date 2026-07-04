@@ -159,6 +159,11 @@ class TradeSetupProfile:
     limit_entry_min_offset_percent: float = 0.04
     limit_entry_max_offset_percent: float = 0.45
     limit_entry_max_wait_seconds: int = 0
+    trend_entry_ladder_enabled: bool = False
+    trend_entry_ladder_closer_fraction: float = 0.35
+    trend_entry_ladder_mid_fraction: float = 0.65
+    trend_entry_ladder_notional_fractions: tuple[float, ...] = (0.4, 0.35, 0.25)
+    trend_entry_ladder_min_primary_offset_percent: float = 0.08
     trend_near_structure_entry_enabled: bool = False
     trend_near_structure_zone_percent: float = 18.0
     trend_near_structure_rebound_zone_percent: float = 42.0
@@ -342,10 +347,26 @@ def build_trade_setup(
         risk_limits=risk_limits,
         sizing_diagnostics=sizing_diagnostics,
     )
+    trend_ladder = _trend_entry_ladder(
+        symbol=symbol,
+        reference=reference,
+        primary_entry=entry,
+        side=side,
+        volatility=volatility,
+        features=features,
+        profile=setup_profile,
+        edge=edge,
+        entry_basis=entry_basis,
+        notional_usdt=notional,
+    )
+    if trend_ladder:
+        price_basis["trend_entry_ladder"] = trend_ladder
     warnings.extend(sizing_warnings)
     warnings.extend(_geometry_missing_input_warnings(entry_basis, stop_basis))
     reasons = _setup_reasons(side, factor_scores, regime, warnings)
     reasons = _dedupe([*reasons, f"signal_mode:{signal_diagnostics['mode']}", *_entry_order_reason_codes(entry_basis)])
+    if trend_ladder:
+        reasons = _dedupe([*reasons, "trend_entry_ladder_enabled"])
     decision = "trade"
     if notional is None:
         decision = "pass"
@@ -1239,6 +1260,154 @@ def _stop_target(entry: float, side: str, stop_distance: float, target_distance:
     if side == "long":
         return entry * (1.0 - stop_fraction), entry * (1.0 + target_fraction)
     return entry * (1.0 + stop_fraction), entry * (1.0 - target_fraction)
+
+
+def _trend_entry_ladder(
+    *,
+    symbol: str,
+    reference: float,
+    primary_entry: float,
+    side: str,
+    volatility: float | None,
+    features: Mapping[str, Any],
+    profile: TradeSetupProfile,
+    edge: float,
+    entry_basis: Mapping[str, Any],
+    notional_usdt: float | None,
+) -> list[dict[str, Any]]:
+    if not profile.trend_entry_ladder_enabled:
+        return []
+    if str(entry_basis.get("order_type") or "").lower() != "limit":
+        return []
+    if str(features.get("setup_signal_mode") or "trend_follow") != "trend_follow":
+        return []
+    if side not in {"long", "short"} or reference <= 0 or primary_entry <= 0:
+        return []
+    primary_offset = abs(reference - primary_entry) / reference * 100.0
+    if primary_offset < max(profile.trend_entry_ladder_min_primary_offset_percent, 0.0):
+        return []
+
+    fractions = _trend_ladder_notional_fractions(profile)
+    entries = _trend_ladder_entry_prices(
+        reference=reference,
+        primary_entry=primary_entry,
+        side=side,
+        entry_basis=entry_basis,
+        profile=profile,
+    )
+    if len(entries) != 3:
+        return []
+
+    group_id = f"{symbol.upper()}:{side}:{round(reference, 8)}:{round(primary_entry, 8)}"
+    layers: list[dict[str, Any]] = []
+    for layer_name, layer_entry, notional_fraction in zip(("closer", "mid", "anchor"), entries, fractions, strict=True):
+        stop_distance, stop_basis = _stop_distance_percent(layer_entry, volatility, features, side, profile)
+        target_distance, target_basis = _target_distance_percent(
+            layer_entry,
+            stop_distance,
+            edge,
+            volatility,
+            features,
+            side,
+            profile,
+        )
+        stop, target = _stop_target(layer_entry, side, stop_distance, target_distance)
+        risk_reward = target_distance / stop_distance if stop_distance > 0 else 0.0
+        reason_codes = [
+            "trend_entry_ladder_enabled",
+            f"trend_entry_ladder_group_id:{group_id}",
+            f"trend_entry_ladder_layer:{layer_name}",
+            f"trend_entry_ladder_notional_fraction:{round(notional_fraction, 6)}",
+            "trend_entry_ladder_protection_source:layer_projected",
+        ]
+        layers.append(
+            {
+                "layer": layer_name,
+                "entry_price": round(layer_entry, 8),
+                "stop_price": round(stop, 8),
+                "target_price": round(target, 8),
+                "notional_fraction": round(notional_fraction, 8),
+                "notional_usdt": round(notional_usdt * notional_fraction, 8) if notional_usdt is not None else None,
+                "risk_reward_ratio": round(risk_reward, 4),
+                "stop_distance_percent": round(stop_distance, 4),
+                "target_distance_percent": round(target_distance, 4),
+                "entry_offset_percent": round(abs(reference - layer_entry) / reference * 100.0, 6),
+                "trend_entry_ladder_group_id": group_id,
+                "trend_entry_ladder_layer": layer_name,
+                "reason_codes": reason_codes,
+                "stop_basis": _rounded_mapping(stop_basis),
+                "target_basis": _rounded_mapping(target_basis),
+            }
+        )
+    return layers
+
+
+def _trend_ladder_entry_prices(
+    *,
+    reference: float,
+    primary_entry: float,
+    side: str,
+    entry_basis: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> list[float]:
+    closer = _trend_ladder_volatility_retrace_price(
+        reference=reference,
+        primary_entry=primary_entry,
+        side=side,
+        entry_basis=entry_basis,
+    )
+    if closer is None:
+        closer = reference + (primary_entry - reference) * _clip(profile.trend_entry_ladder_closer_fraction, 0.05, 0.95)
+    mid = reference + (primary_entry - reference) * _clip(profile.trend_entry_ladder_mid_fraction, 0.05, 0.95)
+    entries = [closer, mid, primary_entry]
+    if side == "long":
+        entries = sorted(entries, reverse=True)
+        entries = [price for price in entries if primary_entry <= price < reference]
+    else:
+        entries = sorted(entries)
+        entries = [price for price in entries if reference < price <= primary_entry]
+    deduped: list[float] = []
+    for price in entries:
+        if all(abs(price - existing) / reference * 100.0 >= 0.005 for existing in deduped):
+            deduped.append(price)
+    return deduped[:3]
+
+
+def _trend_ladder_volatility_retrace_price(
+    *,
+    reference: float,
+    primary_entry: float,
+    side: str,
+    entry_basis: Mapping[str, Any],
+) -> float | None:
+    candidates = entry_basis.get("candidate_prices")
+    if not isinstance(candidates, list):
+        return None
+    for item in candidates:
+        if not isinstance(item, Mapping) or str(item.get("anchor") or "") != "volatility_retrace":
+            continue
+        price = _positive_float(item.get("price"))
+        if price is None:
+            continue
+        if side == "long" and primary_entry <= price < reference:
+            return price
+        if side == "short" and reference < price <= primary_entry:
+            return price
+    return None
+
+
+def _trend_ladder_notional_fractions(profile: TradeSetupProfile) -> list[float]:
+    values: list[float] = []
+    for item in _sequence(profile.trend_entry_ladder_notional_fractions):
+        parsed = _float(item)
+        if parsed is not None and parsed > 0:
+            values.append(parsed)
+    if len(values) != 3:
+        values = [0.4, 0.35, 0.25]
+    total = sum(values)
+    if total <= 0:
+        return [0.4, 0.35, 0.25]
+    return [value / total for value in values]
 
 
 def _setup_notional(

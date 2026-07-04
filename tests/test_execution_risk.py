@@ -473,6 +473,121 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertFalse(risk.accepted)
         self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
 
+    def test_trend_ladder_allows_same_symbol_same_direction_different_layer(self):
+        validation = self.validation(
+            reasons=[
+                "strategy_leg:trend",
+                "regime_label:TREND",
+                "entry_order_type:limit",
+                "trend_entry_ladder_group_id:BTCUSDT:short:100:100.4",
+                "trend_entry_ladder_layer:mid",
+            ],
+            side="short",
+            stop_price=104.0,
+            target_price=92.0,
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                active_positions=1,
+                active_exposures=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "direction": "SHORT",
+                        "strategy_leg": "trend",
+                        "trend_entry_ladder_group_id": "BTCUSDT:short:100:100.4",
+                        "trend_entry_ladder_layer": "closer",
+                    }
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+        self.assertEqual(intent.metadata["trend_entry_ladder_group_id"], "BTCUSDT:short:100:100.4")
+        self.assertEqual(intent.metadata["trend_entry_ladder_layer"], "mid")
+
+    def test_micro_grid_opposite_is_allowed_when_existing_position_is_trend(self):
+        validation = self.validation(
+            reasons=[
+                "strategy_leg:micro_grid",
+                "regime_label:RANGE",
+                "entry_order_type:limit",
+            ],
+            side="short",
+            stop_price=104.0,
+            target_price=92.0,
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                active_positions=1,
+                active_exposures=[
+                    {"symbol": "BTCUSDT", "direction": "LONG", "strategy_leg": "trend"}
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+
+    def test_trend_opposite_is_blocked_when_existing_position_is_micro_grid(self):
+        validation = self.validation(
+            reasons=["strategy_leg:trend", "regime_label:TREND"],
+            side="short",
+            stop_price=104.0,
+            target_price=92.0,
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                active_positions=1,
+                active_exposures=[
+                    {"symbol": "BTCUSDT", "direction": "LONG", "strategy_leg": "micro_grid"}
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("same_symbol_opposite_exposure_blocked", risk.reason_codes)
+
     def test_multi_position_blocks_same_symbol_opposite_direction_by_default(self):
         validation = self.validation(side="short", stop_price=104.0, target_price=92.0)
         intent, _risk = intent_from_ai_decision(

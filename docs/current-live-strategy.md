@@ -47,6 +47,11 @@ checking the newer sources above.
     same-direction breakout; the pending-limit watchdog no longer reconciles a
     `NEW`/zero-fill entry against an unrelated same-side position; sentinel
     profit-lock replacement keeps the new stop buffered from current mark.
+  - 2026-07-04 trend fill-rate follow-up: `quant_setup_live_action_flow`
+    now projects a three-layer trend limit ladder (`closer`, `mid`, `anchor`)
+    when a trend entry would otherwise wait for a deep support/resistance
+    rebound/pullback. Each layer has its own entry, stop, target, notional
+    fraction, and client order suffix.
   Use the latest Git commit on this branch as the code reference.
 - Live app path: `/opt/binance-futures-agent/app`.
 - The live app path is a deployed copy, not a git checkout.
@@ -61,12 +66,18 @@ checking the newer sources above.
   - `src/bfa/ops/exposure_status.py`
   - `src/bfa/ops/pending_limit_watchdog.py`
   - `src/bfa/ops/position_adjustment.py`
+  - `src/bfa/execution/executor.py`
+  - `src/bfa/execution/risk.py`
+  - `src/bfa/strategy/setup.py`
   - `src/bfa/strategy/micro_grid_live.py`
   - `tests/test_agent_runner.py`
+  - `tests/test_execution_executor.py`
+  - `tests/test_execution_risk.py`
   - `tests/test_market_collector.py`
   - `tests/test_ops_exposure_status.py`
   - `tests/test_ops_pending_limit_watchdog.py`
   - `tests/test_ops_position_adjustment.py`
+  - `tests/test_strategy_setup.py`
   - `tests/test_strategy_micro_grid_live.py`
 
 If a future agent changes local code, deploy the changed files or run the
@@ -273,6 +284,39 @@ volume has faded sharply, the near-structure guard no longer uses the hard
 `1.65%` ceiling just because realized volatility once allowed it. The
 diagnostic is persisted under
 `price_basis.entry_basis.trend_near_structure_guard.fillability_cap`.
+
+The 2026-07-04 trend ladder follow-up addresses the opposite failure mode:
+valid trend entries sometimes became too deep to fill inside the live wait
+window. When `quant_setup_live_action_flow` produces a sufficiently distant
+passive trend entry, setup now persists `price_basis.trend_entry_ladder` with
+three layers:
+
+- `closer`: near the volatility-retrace price, improving fill probability;
+- `mid`: between the closer layer and the structural anchor;
+- `anchor`: the original support/rebound or resistance/pullback entry.
+
+The layers use notional fractions `0.40 / 0.35 / 0.25`, so the ladder does not
+triple the intended exposure. Each layer recalculates stop and target from its
+own entry and emits `trend_entry_ladder_group_id`,
+`trend_entry_ladder_layer`, and
+`trend_entry_ladder_protection_source:layer_projected`. Live client order IDs
+use `trc`, `trm`, and `tra` suffixes. Trend ladder GTX entries are submitted as
+pending limits and resolved by the pending-limit watchdog instead of serially
+waiting up to the full trend wait window for each layer.
+
+Same-symbol leg isolation is now position-aware:
+
+- if a trend position already exists, micro-grid may open the opposite side to
+  scalp the oscillation as a separate leg;
+- if a micro-grid position already exists and trend wants the same symbol in
+  the opposite direction, trend is blocked for that cycle;
+- same-direction duplicates remain blocked except for recognized ladder layers
+  in the same ladder group.
+
+Because Binance position risk does not carry strategy metadata, live risk state
+also backfills active exposure metadata from recent persisted `order_intents`.
+If this lookup is unavailable, unknown same-symbol opposite exposure falls back
+to the conservative existing block.
 
 Live also sets `BFA_LIVE_TREND_MAX_SIGNAL_AGE_SECONDS=120` so a delayed trend
 candidate is still usable at the larger trend-leg time granularity, while very

@@ -154,6 +154,17 @@ The current system is a fused live strategy with a regime router:
   post-only limit entry, short pending wait, and fast protection management.
 - `CHOP`: no new entry.
 
+2026-07-04 trend/micro integration update: the live
+`quant_setup_live_action_flow` trend leg now expands deep passive trend entries
+into a three-layer limit ladder (`closer`, `mid`, `anchor`) with independent
+entry/stop/target geometry and `0.40 / 0.35 / 0.25` notional fractions. The
+trend ladder uses client-order suffixes `trc`, `trm`, and `tra`, and pending
+GTX entries are resolved by the pending-limit watchdog. Same-symbol coexistence
+is position-aware: an existing trend position may be scalped by micro-grid on
+the opposite side, but an existing micro-grid position blocks a new opposite
+trend entry until the micro-grid position is gone. Same-direction duplicates
+remain blocked except for recognized layers in the same ladder group.
+
 A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
 implemented on 2026-06-26 but is **dormant**: flag defaults off, the
 `quant_setup_ldc` variant is not the live variant, and live behavior is

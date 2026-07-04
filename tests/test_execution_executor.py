@@ -347,6 +347,31 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(_client_order_id(anchor), "bfa-btcusdt-20260620100000-mga")
         self.assertEqual(_client_order_id(closer, suffix="r1"), "bfa-btcusdt-20260620100000-mgc-r1")
 
+    def test_trend_ladder_client_order_ids_are_unique_per_layer(self):
+        base = OrderIntent(
+            symbol="BTCUSDT",
+            side="SELL",
+            quantity=0.2,
+            notional_usdt=20.0,
+            entry_price=100.0,
+            stop_price=104.0,
+            target_price=92.0,
+            leverage=3,
+            mode="live",
+            decided_at="2026-06-20T10:00:00Z",
+            order_type="LIMIT",
+            time_in_force="GTX",
+            reason_codes=["strategy_leg:trend"],
+            metadata={"strategy_leg": "trend"},
+        )
+        closer = replace(base, metadata={**base.metadata, "trend_entry_ladder_layer": "closer"})
+        mid = replace(base, metadata={**base.metadata, "trend_entry_ladder_layer": "mid"})
+        anchor = replace(base, metadata={**base.metadata, "trend_entry_ladder_layer": "anchor"})
+
+        self.assertEqual(_client_order_id(closer), "bfa-btcusdt-20260620100000-trc")
+        self.assertEqual(_client_order_id(mid), "bfa-btcusdt-20260620100000-trm")
+        self.assertEqual(_client_order_id(anchor), "bfa-btcusdt-20260620100000-tra")
+
     def validation(self, risk_limits=None, **overrides):
         payload = {
             "decision": "trade",

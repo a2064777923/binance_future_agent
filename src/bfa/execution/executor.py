@@ -1040,7 +1040,7 @@ def _client_order_id(intent: OrderIntent, *, suffix: str | None = None) -> str:
 
 
 def _client_order_suffix(intent: OrderIntent, *, explicit_suffix: str | None = None) -> str | None:
-    ladder_suffix = _micro_grid_ladder_client_suffix(intent)
+    ladder_suffix = _micro_grid_ladder_client_suffix(intent) or _trend_ladder_client_suffix(intent)
     if explicit_suffix and ladder_suffix:
         return f"{ladder_suffix}-{explicit_suffix}"
     return explicit_suffix or ladder_suffix
@@ -1059,6 +1059,24 @@ def _micro_grid_ladder_client_suffix(intent: OrderIntent) -> str | None:
         return "mgc"
     if layer == "anchor":
         return "mga"
+    return None
+
+
+def _trend_ladder_client_suffix(intent: OrderIntent) -> str | None:
+    metadata = intent.metadata if isinstance(intent.metadata, dict) else {}
+    layer = str(metadata.get("trend_entry_ladder_layer") or "").strip().lower()
+    if not layer:
+        for reason in intent.reason_codes:
+            text = str(reason)
+            if text.startswith("trend_entry_ladder_layer:"):
+                layer = text.split(":", 1)[1].strip().lower()
+                break
+    if layer == "closer":
+        return "trc"
+    if layer == "mid":
+        return "trm"
+    if layer == "anchor":
+        return "tra"
     return None
 
 
@@ -1083,9 +1101,16 @@ def _is_limit_order(intent: OrderIntent) -> bool:
 
 
 def _async_pending_limit_entry_enabled(config: AppConfig, intent: OrderIntent) -> bool:
-    if not _is_micro_grid_intent(intent):
-        return False
     if not _is_limit_order(intent) or _entry_time_in_force(intent) != "GTX":
+        return False
+    if _is_trend_ladder_intent(intent):
+        return config.get("BFA_LIVE_TREND_LADDER_ASYNC_PENDING_ENABLED", "true").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    if not _is_micro_grid_intent(intent):
         return False
     return config.get("BFA_LIVE_MICRO_GRID_ASYNC_PENDING_ENABLED", "false").strip().lower() in {
         "1",
@@ -1096,11 +1121,13 @@ def _async_pending_limit_entry_enabled(config: AppConfig, intent: OrderIntent) -
 
 
 def _intent_with_pending_client_order_id(intent: OrderIntent, client_order_id: str) -> OrderIntent:
+    pending_reason = "micro_grid_async_pending_entry" if _is_micro_grid_intent(intent) else "trend_ladder_async_pending_entry"
     return replace(
         intent,
         reason_codes=[
             *intent.reason_codes,
-            "micro_grid_async_pending_entry",
+            "async_pending_limit_entry",
+            pending_reason,
         ],
         metadata={
             **intent.metadata,
@@ -1284,6 +1311,15 @@ def _is_micro_grid_intent(intent: OrderIntent) -> bool:
     if str(metadata.get("strategy_leg") or "").strip().lower() == "micro_grid":
         return True
     return any(str(reason).strip().lower() == "strategy_leg:micro_grid" for reason in intent.reason_codes)
+
+
+def _is_trend_ladder_intent(intent: OrderIntent) -> bool:
+    metadata = intent.metadata if isinstance(intent.metadata, Mapping) else {}
+    if str(metadata.get("strategy_leg") or "").strip().lower() != "trend":
+        return False
+    if str(metadata.get("trend_entry_ladder_layer") or "").strip():
+        return True
+    return any(str(reason).strip().lower().startswith("trend_entry_ladder_layer:") for reason in intent.reason_codes)
 
 
 def _micro_grid_fill_reanchored_protective_prices(intent: OrderIntent, fill_price: float) -> tuple[float, float, dict[str, Any] | None]:
