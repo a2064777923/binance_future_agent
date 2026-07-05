@@ -5,8 +5,9 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
-Snapshot checked from the server at `2026-06-27T05:03:45Z`
-(`2026-06-27 13:03:45` Asia/Hong_Kong) after the protection-layer deploy.
+Snapshot checked from the server at `2026-07-05T12:07:56Z`
+(`2026-07-05 20:07:56` Asia/Hong_Kong) before the USDC execution-preference
+deploy.
 
 ## Source Of Truth Order
 
@@ -68,20 +69,20 @@ Selected non-secret server env values observed at the snapshot:
 
 - `BFA_MODE=live`
 - `BINANCE_USE_TESTNET=false`
-- `BFA_ACCOUNT_CAPITAL_USDT=200`
+- `BFA_ACCOUNT_CAPITAL_USDT=400`
 - `BFA_MAX_LEVERAGE=30`
 - `BFA_MAX_OPEN_POSITIONS=5`
 - `BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`
-- `BFA_MAX_MARGIN_PER_POSITION_USDT=20`
-- `BFA_MAX_RISK_PER_TRADE_USDT=6`
-- `BFA_MAX_DAILY_LOSS_USDT=25`
-- `BFA_MAX_PORTFOLIO_MARGIN_USDT=160`
-- `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=0.80`
-- `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=2400`
-- `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=1600`
-- `BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT=1000`
-- `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=600`
-- `BFA_MAX_POSITION_NOTIONAL_USDT=600`
+- `BFA_MAX_MARGIN_PER_POSITION_USDT=80`
+- `BFA_MAX_RISK_PER_TRADE_USDT=40`
+- `BFA_MAX_DAILY_LOSS_USDT=120`
+- `BFA_MAX_PORTFOLIO_MARGIN_USDT=400`
+- `BFA_MAX_PORTFOLIO_MARGIN_FRACTION=1.00`
+- `BFA_MAX_PORTFOLIO_NOTIONAL_USDT=4800`
+- `BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT=3200`
+- `BFA_MICRO_GRID_EXTRA_SAME_DIRECTION_NOTIONAL_USDT=2000`
+- `BFA_MAX_EFFECTIVE_NOTIONAL_USDT=2400`
+- `BFA_MAX_POSITION_NOTIONAL_USDT=2400`
 - `BFA_DYNAMIC_POSITION_SIZING_ENABLED=true`
 - `BFA_ADAPTIVE_SIZING_GOVERNOR_ENABLED=true`
 
@@ -96,14 +97,19 @@ The live env currently excludes these manual symbols from bot position slots
 and bot margin capacity:
 
 - `BTWUSDT`
+- `BTCUSDT`
+- `CAPUSDT`
 - `DRAMUSDT`
 - `BABAUSDT`
+- `KORUUSDT`
+- `MUUSDT`
+- `SAMSUNGUSDT`
+- `USUSDT`
+- `VELVETUSDT`
 
 Do not let those symbols block bot capacity analysis, and do not let automated
 ops close or trail them unless the operator explicitly reclassifies them.
 
-At the snapshot, Binance showed manual `BABAUSDT` and `DRAMUSDT` positions and
-bot-managed crypto shorts including `PUMPUSDT`, `SUIUSDT`, and `XRPUSDT`.
 This can change quickly; always re-query signed position risk before acting.
 
 ## Strategy Architecture
@@ -133,6 +139,38 @@ snapshots:
 
 Use those fields when analyzing a trade. Do not guess the leg from the symbol
 or side.
+
+## USDC Execution Preference
+
+After a candidate has passed regime routing, setup, AI/quant approval, and
+sizing, the live runner now checks whether the same base asset has a tradable
+USDC perpetual contract. If `BFA_PREFER_USDC_EXECUTION=true`, a `BTCUSDT`
+signal may execute as `BTCUSDC` when all of these checks pass:
+
+- the source symbol ends in `USDT`;
+- the matching `...USDC` symbol exists in Binance `exchangeInfo`;
+- the USDC symbol is `TRADING`, `PERPETUAL`, `quoteAsset=USDC`, and
+  `marginAsset=USDC`;
+- both USDT and USDC 24h tickers return positive `lastPrice`;
+- the observed USDC/USDT price difference is within
+  `BFA_PREFER_USDC_MAX_PRICE_DIFF_PERCENT` (default `0.35`).
+
+When the switch is accepted, entry, stop, and target prices are scaled by the
+USDC/USDT last-price ratio and then quantized through the USDC symbol filters.
+If any check fails, execution falls back to the original USDT symbol. The
+strategy signal remains attributable to the source symbol, while
+`order_intents.intent.symbol` records the actual execution symbol.
+
+Fields to inspect during review:
+
+- `candidate_evaluations[].execution_symbol_preference`
+- `trade_setups.setup.price_basis.execution_symbol_preference`
+- `order_intents.intent.metadata.source_symbol`
+- `order_intents.intent.metadata.execution_symbol`
+- `order_intents.intent.metadata.execution_quote_asset`
+
+USDT and USDC contracts for the same base asset share the duplicate-exposure
+risk key, so switching quote asset cannot bypass same-symbol exposure guards.
 
 ## Data Provenance And Bias Notes
 

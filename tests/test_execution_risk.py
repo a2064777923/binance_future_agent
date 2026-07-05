@@ -188,6 +188,57 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertTrue(risk.accepted)
         self.assertEqual(risk.reason_codes, ["risk_accepted"])
 
+    def test_usdt_and_usdc_pairs_share_duplicate_exposure_key(self):
+        validation = self.validation(reasons=["execution_symbol_preference:usdc", "source_symbol:BTCUSDT"])
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDC",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
+
+    def test_usdt_and_usdc_pairs_share_opposite_exposure_key(self):
+        validation = self.validation(
+            side="short",
+            stop_price=104.0,
+            target_price=92.0,
+            reasons=["execution_symbol_preference:usdc", "source_symbol:BTCUSDT"],
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDC",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("same_symbol_opposite_exposure_blocked", risk.reason_codes)
+
     def test_micro_grid_intent_can_use_extra_open_position_slots(self):
         validation = self.validation(
             reasons=[

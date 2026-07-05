@@ -212,17 +212,27 @@ def _route_metadata_from_reasons(reasons: list[str]) -> dict[str, str]:
     values = _reason_values(reasons)
     return {
         key: str(values[key]).strip()
-        for key in ("strategy_leg", "regime_label", "route_decision")
+        for key in (
+            "strategy_leg",
+            "regime_label",
+            "route_decision",
+            "execution_symbol_preference",
+            "source_symbol",
+            "execution_symbol",
+            "execution_quote_asset",
+            "execution_price_ratio",
+        )
         if key in values and str(values[key]).strip()
     }
 
 
 def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+    intent_key = _stable_quote_equivalence_key(intent.symbol)
     for exposure in risk_state.active_exposures:
         symbol = str(exposure.get("symbol", "")).upper()
         direction = str(exposure.get("direction", "")).upper()
-        if symbol == intent.symbol.upper() and direction == intended_direction:
+        if direction == intended_direction and _same_quote_equivalent_symbol(symbol, intent.symbol, intent_key=intent_key):
             return True
     return False
 
@@ -230,12 +240,30 @@ def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
 def _same_symbol_opposite_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
     opposite_direction = "SHORT" if intended_direction == "LONG" else "LONG"
+    intent_key = _stable_quote_equivalence_key(intent.symbol)
     for exposure in risk_state.active_exposures:
         symbol = str(exposure.get("symbol", "")).upper()
         direction = str(exposure.get("direction", "")).upper()
-        if symbol == intent.symbol.upper() and direction == opposite_direction:
+        if direction == opposite_direction and _same_quote_equivalent_symbol(symbol, intent.symbol, intent_key=intent_key):
             return True
     return False
+
+
+def _same_quote_equivalent_symbol(symbol: str, intent_symbol: str, *, intent_key: str | None) -> bool:
+    normalized = str(symbol or "").upper()
+    target = str(intent_symbol or "").upper()
+    if normalized == target:
+        return True
+    symbol_key = _stable_quote_equivalence_key(normalized)
+    return bool(symbol_key and intent_key and symbol_key == intent_key)
+
+
+def _stable_quote_equivalence_key(symbol: str) -> str | None:
+    value = str(symbol or "").upper()
+    for suffix in ("USDT", "USDC"):
+        if value.endswith(suffix) and len(value) > len(suffix):
+            return value[: -len(suffix)]
+    return None
 
 
 def _same_symbol_opposite_positions_enabled(config: AppConfig) -> bool:

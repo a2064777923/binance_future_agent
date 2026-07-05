@@ -211,8 +211,37 @@ def exchange_info_payload(*symbols):
         item = dict(existing.get(symbol, template))
         item["symbol"] = symbol
         item["pair"] = symbol
+        if symbol.endswith("USDC"):
+            item["baseAsset"] = symbol[:-4]
+            item["quoteAsset"] = "USDC"
+            item["marginAsset"] = "USDC"
         result.append(item)
     return {**payload, "symbols": result}
+
+
+class UsdcPreferenceMarketClient(FakeMarketClient):
+    def __init__(self, *, usdt_price="100", usdc_price="100.02"):
+        self.usdt_price = usdt_price
+        self.usdc_price = usdc_price
+
+    def exchange_info(self):
+        return MarketDataResponse(
+            endpoint="/fapi/v1/exchangeInfo",
+            params={},
+            payload=exchange_info_payload("BTCUSDT", "BTCUSDC"),
+        )
+
+    def ticker_24hr(self, symbol=None):
+        symbol = str(symbol or "").upper()
+        prices = {
+            "BTCUSDT": self.usdt_price,
+            "BTCUSDC": self.usdc_price,
+        }
+        return MarketDataResponse(
+            endpoint="/fapi/v1/ticker/24hr",
+            params={"symbol": symbol} if symbol else {},
+            payload={"symbol": symbol, "lastPrice": prices.get(symbol, self.usdt_price)},
+        )
 
 
 class FakeCollector:
@@ -799,6 +828,85 @@ class AgentRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.status, "dry_run")
         self.assertEqual(ai_client.contexts[0]["candidate"]["features"]["reference_price"], 100.0)
+
+    def test_run_once_prefers_usdc_execution_symbol_when_pair_is_available(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=UsdcPreferenceMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                row = connection.execute("SELECT symbol, payload_json FROM order_intents").fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.status, "dry_run")
+        self.assertEqual(result.selected_symbol, "BTCUSDT")
+        self.assertTrue(result.candidate_evaluations[0]["execution_symbol_preference"]["switched"])
+        self.assertEqual(result.candidate_evaluations[0]["execution_symbol_preference"]["execution_symbol"], "BTCUSDC")
+        self.assertEqual(row["symbol"], "BTCUSDC")
+        intent = json.loads(row["payload_json"])["intent"]
+        self.assertEqual(intent["symbol"], "BTCUSDC")
+        self.assertEqual(intent["metadata"]["source_symbol"], "BTCUSDT")
+        self.assertEqual(intent["metadata"]["execution_quote_asset"], "USDC")
+
+    def test_run_once_falls_back_to_usdt_when_usdc_price_diff_is_too_large(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_PREFER_USDC_MAX_PRICE_DIFF_PERCENT": "0.1",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=UsdcPreferenceMarketClient(usdt_price="100", usdc_price="101"),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+            )
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                row = connection.execute("SELECT symbol, payload_json FROM order_intents").fetchone()
+            finally:
+                connection.close()
+
+        self.assertEqual(result.status, "dry_run")
+        preference = result.candidate_evaluations[0]["execution_symbol_preference"]
+        self.assertFalse(preference["switched"])
+        self.assertEqual(preference["diagnostics"]["reason"], "price_diff_too_large")
+        self.assertEqual(row["symbol"], "BTCUSDT")
 
     def test_run_once_skips_ai_when_candidate_cannot_fit_notional_cap(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -26,6 +26,7 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
+from bfa.market.models import parse_exchange_symbols
 from bfa.execution.sizing import (
     apply_adaptive_sizing_governor,
     compute_position_sizing,
@@ -475,6 +476,7 @@ def run_agent_once(
             mode=mode,
             candidates=evaluation_candidates,
             exchange_info=exchange_info,
+            market_client=market,
             ai_client=ai_client,
             ai_enabled=ai_enabled and not backoff.active,
             journal_path=journal_path,
@@ -1607,6 +1609,7 @@ def _evaluate_candidate_queue(
     mode: RuntimeMode,
     candidates,
     exchange_info,
+    market_client,
     ai_client,
     ai_enabled: bool,
     journal_path: str | None,
@@ -1704,6 +1707,15 @@ def _evaluate_candidate_queue(
             paper_guard=paper_guard,
         )
         setup = _setup_with_sizing_governor(setup, governor)
+        execution_symbol = _select_execution_symbol(
+            config,
+            exchange_info=exchange_info,
+            market_client=market_client,
+            candidate=candidate,
+            setup=setup,
+        )
+        setup = execution_symbol.setup
+        candidate_evaluation["execution_symbol_preference"] = execution_symbol.to_dict()
         persist_trade_setup(
             store,
             setup=setup,
@@ -1930,15 +1942,15 @@ def _evaluate_candidate_queue(
             )
             continue
 
-        filters = _filters_for_candidate(exchange_info, candidate.symbol)
+        filters = execution_symbol.filters
         if filters is None:
             last_status = "rejected"
-            last_risk_reasons = ["symbol_filters_missing"]
-            skipped_risk_reasons.append(f"{candidate.symbol}:symbol_filters_missing")
+            last_risk_reasons = [execution_symbol.missing_filters_reason]
+            skipped_risk_reasons.append(f"{candidate.symbol}:{execution_symbol.missing_filters_reason}")
             _finish_candidate_evaluation(
                 candidate_evaluation,
                 execution_status="rejected",
-                risk_reasons=["symbol_filters_missing"],
+                risk_reasons=[execution_symbol.missing_filters_reason],
                 continued=True,
                 end_reason="symbol_filters_missing",
             )
@@ -1952,7 +1964,7 @@ def _evaluate_candidate_queue(
             store=store,
             risk_limits=risk_limits,
         ).run(
-            symbol=candidate.symbol,
+            symbol=execution_symbol.symbol,
             validation=ai_run.validation,
             decided_at=started_at,
             risk_state=risk_state,
@@ -2065,6 +2077,326 @@ def _filters_for_candidate(exchange_info, symbol: str) -> SymbolExecutionFilters
         return SymbolExecutionFilters.from_exchange_info(exchange_info, symbol)
     except ValueError:
         return None
+
+
+@dataclass(frozen=True)
+class ExecutionSymbolSelection:
+    source_symbol: str
+    symbol: str
+    preferred_quote_asset: str
+    switched: bool
+    filters: SymbolExecutionFilters | None
+    setup: Any
+    reason_codes: list[str]
+    diagnostics: dict[str, Any]
+
+    @property
+    def missing_filters_reason(self) -> str:
+        if self.switched:
+            return f"symbol_filters_missing:{self.symbol}"
+        return "symbol_filters_missing"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_symbol": self.source_symbol,
+            "execution_symbol": self.symbol,
+            "preferred_quote_asset": self.preferred_quote_asset,
+            "switched": self.switched,
+            "filters_available": self.filters is not None,
+            "reason_codes": list(self.reason_codes),
+            "diagnostics": dict(self.diagnostics),
+        }
+
+
+def _select_execution_symbol(
+    config: AppConfig,
+    *,
+    exchange_info,
+    market_client,
+    candidate,
+    setup,
+) -> ExecutionSymbolSelection:
+    source_symbol = str(getattr(candidate, "symbol", "") or getattr(setup, "symbol", "")).upper()
+    original_filters = _filters_for_candidate(exchange_info, source_symbol) if source_symbol else None
+    base_diagnostics: dict[str, Any] = {
+        "enabled": _truthy(config.get("BFA_PREFER_USDC_EXECUTION", "true")),
+        "source_symbol": source_symbol,
+        "source_quote_asset": _quote_asset_suffix(source_symbol),
+        "preferred_quote_asset": "USDC",
+    }
+    if getattr(setup, "decision", None) != "trade":
+        return ExecutionSymbolSelection(
+            source_symbol=source_symbol,
+            symbol=source_symbol,
+            preferred_quote_asset="USDT",
+            switched=False,
+            filters=original_filters,
+            setup=setup,
+            reason_codes=["usdc_preference_not_evaluated:setup_not_trade"],
+            diagnostics={**base_diagnostics, "status": "not_evaluated", "reason": "setup_not_trade"},
+        )
+    if not base_diagnostics["enabled"]:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            base_diagnostics,
+            reason="disabled",
+        )
+    if not source_symbol.endswith("USDT"):
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            base_diagnostics,
+            reason="source_not_usdt",
+        )
+    preferred_symbol = f"{source_symbol[:-4]}USDC"
+    row = _exchange_symbol_row(exchange_info, preferred_symbol)
+    if row is None:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol},
+            reason="preferred_symbol_missing",
+        )
+    rejections = _preferred_usdc_symbol_rejections(row)
+    if rejections:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol, "preferred_symbol_rejections": rejections},
+            reason="preferred_symbol_not_eligible",
+        )
+    preferred_filters = _filters_for_candidate(exchange_info, preferred_symbol)
+    if preferred_filters is None:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol},
+            reason="preferred_filters_missing",
+        )
+    ratio_result = _usdc_execution_price_ratio(
+        market_client,
+        source_symbol=source_symbol,
+        preferred_symbol=preferred_symbol,
+    )
+    if not ratio_result.get("ok"):
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol, **ratio_result},
+            reason=str(ratio_result.get("reason") or "price_ratio_unavailable"),
+        )
+    max_diff_percent = max(_float_or_none(config.get("BFA_PREFER_USDC_MAX_PRICE_DIFF_PERCENT")) or 0.0, 0.0)
+    diff_percent = abs(float(ratio_result["price_ratio"]) - 1.0) * 100.0
+    if diff_percent > max_diff_percent:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {
+                **base_diagnostics,
+                "preferred_symbol": preferred_symbol,
+                **ratio_result,
+                "max_price_diff_percent": max_diff_percent,
+                "observed_price_diff_percent": round(diff_percent, 8),
+            },
+            reason="price_diff_too_large",
+        )
+    diagnostics = {
+        **base_diagnostics,
+        "status": "switched",
+        "preferred_symbol": preferred_symbol,
+        **ratio_result,
+        "max_price_diff_percent": max_diff_percent,
+        "observed_price_diff_percent": round(diff_percent, 8),
+    }
+    adjusted_setup = _setup_with_execution_symbol(
+        setup,
+        source_symbol=source_symbol,
+        execution_symbol=preferred_symbol,
+        quote_asset="USDC",
+        price_ratio=float(ratio_result["price_ratio"]),
+        diagnostics=diagnostics,
+    )
+    return ExecutionSymbolSelection(
+        source_symbol=source_symbol,
+        symbol=preferred_symbol,
+        preferred_quote_asset="USDC",
+        switched=True,
+        filters=preferred_filters,
+        setup=adjusted_setup,
+        reason_codes=["usdc_preference:switched"],
+        diagnostics=diagnostics,
+    )
+
+
+def _execution_symbol_fallback(
+    source_symbol: str,
+    setup,
+    filters: SymbolExecutionFilters | None,
+    diagnostics: Mapping[str, Any],
+    *,
+    reason: str,
+) -> ExecutionSymbolSelection:
+    return ExecutionSymbolSelection(
+        source_symbol=source_symbol,
+        symbol=source_symbol,
+        preferred_quote_asset=_quote_asset_suffix(source_symbol) or "USDT",
+        switched=False,
+        filters=filters,
+        setup=_setup_with_execution_symbol_preference_diagnostics(setup, {**dict(diagnostics), "status": "fallback", "reason": reason}),
+        reason_codes=[f"usdc_preference_fallback:{reason}"],
+        diagnostics={**dict(diagnostics), "status": "fallback", "reason": reason},
+    )
+
+
+def _setup_with_execution_symbol_preference_diagnostics(setup, diagnostics: Mapping[str, Any]):
+    if not hasattr(setup, "price_basis"):
+        return setup
+    price_basis = dict(setup.price_basis)
+    price_basis["execution_symbol_preference"] = dict(diagnostics)
+    return replace(setup, price_basis=price_basis)
+
+
+def _setup_with_execution_symbol(
+    setup,
+    *,
+    source_symbol: str,
+    execution_symbol: str,
+    quote_asset: str,
+    price_ratio: float,
+    diagnostics: Mapping[str, Any],
+):
+    price_basis = dict(setup.price_basis)
+    price_basis["execution_symbol_preference"] = dict(diagnostics)
+    reasons = _dedupe(
+        [
+            *setup.reasons,
+            "execution_symbol_preference:usdc",
+            f"source_symbol:{source_symbol}",
+            f"execution_symbol:{execution_symbol}",
+            f"execution_quote_asset:{quote_asset}",
+            f"execution_price_ratio:{price_ratio:.8f}",
+        ]
+    )
+    warnings = _dedupe([*setup.warnings, "execution_symbol_switched_to_usdc"])
+    return replace(
+        setup,
+        symbol=execution_symbol,
+        entry_price=_scale_price(setup.entry_price, price_ratio),
+        stop_price=_scale_price(setup.stop_price, price_ratio),
+        target_price=_scale_price(setup.target_price, price_ratio),
+        price_basis=price_basis,
+        reasons=reasons,
+        warnings=warnings,
+    )
+
+
+def _scale_price(value: float | None, ratio: float) -> float | None:
+    if value is None:
+        return None
+    return float(value) * float(ratio)
+
+
+def _exchange_symbol_row(exchange_info, symbol: str) -> dict[str, Any] | None:
+    target = str(symbol or "").upper()
+    if not target:
+        return None
+    try:
+        symbols = parse_exchange_symbols(exchange_info)
+    except Exception:
+        symbols = []
+    for item in symbols:
+        if item.symbol.upper() == target:
+            return {
+                "symbol": item.symbol,
+                "status": item.status,
+                "contractType": item.contract_type,
+                "baseAsset": item.base_asset,
+                "quoteAsset": item.quote_asset,
+                "marginAsset": item.margin_asset,
+            }
+    return None
+
+
+def _preferred_usdc_symbol_rejections(row: Mapping[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    status = str(row.get("status") or "").upper()
+    contract_type = str(row.get("contractType") or "").upper()
+    quote_asset = str(row.get("quoteAsset") or "").upper()
+    margin_asset = str(row.get("marginAsset") or "").upper()
+    if status != "TRADING":
+        reasons.append("status_not_trading")
+    if contract_type != "PERPETUAL":
+        reasons.append("contract_type_not_perpetual")
+    if quote_asset != "USDC":
+        reasons.append("quote_asset_not_usdc")
+    if margin_asset and margin_asset != "USDC":
+        reasons.append("margin_asset_not_usdc")
+    return reasons
+
+
+def _usdc_execution_price_ratio(market_client, *, source_symbol: str, preferred_symbol: str) -> dict[str, Any]:
+    source_price = _ticker_last_price(market_client, source_symbol)
+    preferred_price = _ticker_last_price(market_client, preferred_symbol)
+    if source_price is None:
+        return {"ok": False, "reason": "source_ticker_price_missing"}
+    if preferred_price is None:
+        return {"ok": False, "reason": "preferred_ticker_price_missing", "source_last_price": source_price}
+    if source_price <= 0 or preferred_price <= 0:
+        return {
+            "ok": False,
+            "reason": "ticker_price_not_positive",
+            "source_last_price": source_price,
+            "preferred_last_price": preferred_price,
+        }
+    return {
+        "ok": True,
+        "source_last_price": source_price,
+        "preferred_last_price": preferred_price,
+        "price_ratio": preferred_price / source_price,
+    }
+
+
+def _ticker_last_price(market_client, symbol: str) -> float | None:
+    if market_client is None:
+        return None
+    try:
+        response = market_client.ticker_24hr(symbol)
+    except Exception:
+        return None
+    payload = getattr(response, "payload", None)
+    if isinstance(payload, list):
+        target = str(symbol or "").upper()
+        for item in payload:
+            if isinstance(item, Mapping) and str(item.get("symbol") or "").upper() == target:
+                return _ticker_payload_last_price(item)
+        return None
+    if isinstance(payload, Mapping):
+        return _ticker_payload_last_price(payload)
+    return None
+
+
+def _ticker_payload_last_price(payload: Mapping[str, Any]) -> float | None:
+    for key in ("lastPrice", "last_price", "weightedAvgPrice", "weighted_avg_price"):
+        value = _float_or_none(payload.get(key))
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _quote_asset_suffix(symbol: str) -> str:
+    value = str(symbol or "").upper()
+    for suffix in ("USDT", "USDC"):
+        if value.endswith(suffix):
+            return suffix
+    return ""
 
 
 def _fuse_live_candidates(normal_candidates, micro_candidates, *, top_n: int, enforce_regime: bool = False) -> list:
@@ -2533,6 +2865,11 @@ def _ai_run_with_quant_execution_reasons(ai_run: AiDecisionRun, setup) -> AiDeci
                 "regime_label:",
                 "route_decision:",
                 "regime_confidence:",
+                "execution_symbol_preference:",
+                "source_symbol:",
+                "execution_symbol:",
+                "execution_quote_asset:",
+                "execution_price_ratio:",
             )
         )
     ]
