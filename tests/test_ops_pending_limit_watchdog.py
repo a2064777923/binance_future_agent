@@ -180,6 +180,24 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertEqual(client.algo_orders, [])
         self.assertGreaterEqual(self.exchange_response_count(), 1)
 
+    def test_new_unfilled_order_is_not_reconciled_from_sibling_position(self):
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=True)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:05Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.status, "pending_limit_watchdog_checked")
+        self.assertEqual(report.items[0].status, "still_pending")
+        self.assertEqual(report.items[0].action, "watch")
+        self.assertIn("pending_limit_not_filled", report.items[0].reasons)
+        self.assertEqual(client.algo_orders, [])
+        self.assertEqual(self.exchange_response_count(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

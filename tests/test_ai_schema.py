@@ -51,6 +51,10 @@ class AiSchemaTests(unittest.TestCase):
                     "mention_count": 2,
                     "quote_volume": 5_000_000,
                     "open_interest_change_percent": 7.5,
+                    "macd_histogram_percent": 0.18,
+                    "regime_label": "TREND",
+                    "route_decision": "allow",
+                    "regime_diagnostics": {"path_efficiency": 0.62},
                     "spike_reversal_signal": "short",
                     "spike_wick_percent": 3.3,
                     "spike_reversal_entry_price": 100.2,
@@ -68,6 +72,12 @@ class AiSchemaTests(unittest.TestCase):
         self.assertEqual(payload["candidate"]["symbol"], "BTCUSDT")
         self.assertEqual(payload["risk_limits"]["max_position_notional_usdt"], 20)
         self.assertEqual(payload["candidate"]["features"]["open_interest_change_percent"], 7.5)
+        self.assertEqual(payload["candidate"]["features"]["macd_histogram_percent"], 0.18)
+        self.assertEqual(payload["candidate"]["features"]["regime_label"], "TREND")
+        self.assertEqual(payload["candidate"]["features"]["route_decision"], "allow")
+        self.assertEqual(payload["candidate"]["features"]["regime_diagnostics"]["path_efficiency"], 0.62)
+        self.assertFalse(payload["data_capabilities"]["order_book_l2"])
+        self.assertFalse(payload["ai_role"]["can_modify_live_entry_stop_target"])
         self.assertEqual(payload["candidate"]["features"]["spike_reversal_signal"], "short")
         self.assertEqual(payload["candidate"]["features"]["spike_reversal_stop_price"], 103.65)
         self.assertAlmostEqual(payload["risk_limits"]["max_position_margin_usdt"], 20 / 3)
@@ -115,7 +125,9 @@ class AiSchemaTests(unittest.TestCase):
 
         payload = context.to_dict()
 
-        self.assertEqual(payload["prompt_version"], "bfa-ai-decision-v2")
+        self.assertEqual(payload["prompt_version"], "bfa-ai-decision-v3")
+        self.assertEqual(payload["ai_role"]["mode"], "trend_veto_overlay")
+        self.assertTrue(payload["data_capabilities"]["macd"])
         self.assertEqual(payload["candidate"]["features"]["atr_percent"], 1.2)
         self.assertEqual(payload["candidate"]["features"]["rsi"], 62.0)
         self.assertEqual(payload["quant_setup"]["entry_price"], 100.0)

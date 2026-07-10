@@ -194,7 +194,7 @@ class ExposureStatusTests(unittest.TestCase):
         self.assertEqual(payload["entry_capacity"]["active_exposures"], [])
         self.assertEqual(payload["entry_capacity"]["manual_exposures"][0]["symbol"], "BTWUSDT")
 
-    def test_manual_margin_pressure_can_block_without_counting_manual_position_slot(self):
+    def test_manual_margin_pressure_does_not_block_when_guard_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "runtime").mkdir()
@@ -220,6 +220,47 @@ class ExposureStatusTests(unittest.TestCase):
                     BFA_MULTI_POSITION_ENABLED="false",
                     BFA_MAX_PORTFOLIO_MARGIN_USDT="6",
                     BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+                    BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED="false",
+                ),
+                db_path=str(db_path),
+                signed_client=client,
+                target_profile="",
+            )
+
+        payload = report.to_dict()
+        self.assertEqual(payload["entry_capacity"]["active_position_count"], 0)
+        self.assertEqual(payload["entry_capacity"]["manual_position_count"], 1)
+        self.assertTrue(payload["entry_capacity"]["can_open_new_position"])
+        self.assertNotIn("portfolio_margin_cap_reached", payload["entry_capacity"]["reasons"])
+        self.assertNotIn("manual_margin_pressure_included", payload["entry_capacity"]["reasons"])
+
+    def test_manual_margin_pressure_can_block_when_guard_enabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            db_path = root / "agent.sqlite"
+            client = FakeSignedClient(
+                positions=[
+                    {
+                        "symbol": "BTWUSDT",
+                        "positionAmt": "-556",
+                        "positionSide": "SHORT",
+                        "notional": "-73.2",
+                        "initialMargin": "7.32",
+                        "leverage": "10",
+                    }
+                ]
+            )
+
+            report = build_exposure_status_report(
+                self.config(
+                    root,
+                    BFA_MANUAL_POSITION_SYMBOLS="BTWUSDT",
+                    BFA_MAX_OPEN_POSITIONS="1",
+                    BFA_MULTI_POSITION_ENABLED="false",
+                    BFA_MAX_PORTFOLIO_MARGIN_USDT="6",
+                    BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+                    BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED="true",
                 ),
                 db_path=str(db_path),
                 signed_client=client,

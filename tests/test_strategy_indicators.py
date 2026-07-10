@@ -27,6 +27,10 @@ class StrategyIndicatorTests(unittest.TestCase):
         self.assertIsNotNone(snapshot.vwap)
         self.assertIsNotNone(snapshot.rsi)
         self.assertIsNotNone(snapshot.ema_spread_percent)
+        self.assertIsNotNone(snapshot.macd_line)
+        self.assertIsNotNone(snapshot.macd_signal)
+        self.assertIsNotNone(snapshot.macd_histogram)
+        self.assertIsNotNone(snapshot.macd_histogram_percent)
         self.assertGreater(snapshot.resistance_price, snapshot.support_price)
         self.assertGreater(snapshot.momentum_percent, 0)
 

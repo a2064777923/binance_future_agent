@@ -50,6 +50,10 @@ class SymbolFeatures:
     ema_fast: float | None = None
     ema_slow: float | None = None
     ema_spread_percent: float | None = None
+    macd_line: float | None = None
+    macd_signal: float | None = None
+    macd_histogram: float | None = None
+    macd_histogram_percent: float | None = None
     rsi: float | None = None
     indicator_sample_size: int = 0
     reference_price: float | None = None
@@ -99,6 +103,10 @@ class SymbolFeatures:
             "ema_fast": self.ema_fast,
             "ema_slow": self.ema_slow,
             "ema_spread_percent": self.ema_spread_percent,
+            "macd_line": self.macd_line,
+            "macd_signal": self.macd_signal,
+            "macd_histogram": self.macd_histogram,
+            "macd_histogram_percent": self.macd_histogram_percent,
             "rsi": self.rsi,
             "indicator_sample_size": self.indicator_sample_size,
             "reference_price": self.reference_price,
@@ -369,6 +377,10 @@ def _apply_indicator_snapshot(item: SymbolFeatures, points: list[KlinePoint]) ->
     item.ema_fast = snapshot.ema_fast
     item.ema_slow = snapshot.ema_slow
     item.ema_spread_percent = snapshot.ema_spread_percent
+    item.macd_line = snapshot.macd_line
+    item.macd_signal = snapshot.macd_signal
+    item.macd_histogram = snapshot.macd_histogram
+    item.macd_histogram_percent = snapshot.macd_histogram_percent
     item.rsi = snapshot.rsi
     item.kline_close_position_percent = snapshot.close_position_percent
     item.kline_quote_volume_change_percent = snapshot.volume_change_percent

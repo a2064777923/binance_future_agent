@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time as dt_time, timedelta
 from pathlib import Path
 import time
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from bfa.ai.client import OpenAIAPIError
 from bfa.ai.decision import AiDecisionRun
@@ -25,6 +26,7 @@ from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import RiskState
+from bfa.market.models import parse_exchange_symbols
 from bfa.execution.sizing import (
     apply_adaptive_sizing_governor,
     compute_position_sizing,
@@ -39,7 +41,8 @@ from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.pending_limit_watchdog import execute_pending_limit_watchdog
 from bfa.ops.position_adjustment import build_position_adjustment_plan_report, execute_position_adjustment_plan_report
-from bfa.strategy.candidates import StrategyConfig, generate_candidates
+from bfa.strategy.candidates import CandidateSignal, StrategyConfig, generate_candidates
+from bfa.strategy.features import extract_features
 from bfa.strategy.micro_grid_live import (
     MicroGridLiveConfig,
     build_micro_grid_live_candidates,
@@ -100,6 +103,10 @@ class AgentRunResult:
             "entry_order_expired_canceled",
             "entry_order_pending",
             "entry_order_partial_filled_protected",
+            "entry_order_reconciled_from_position",
+            "entry_order_unknown_canceled",
+            "protective_order_failed_no_position",
+            "protective_order_failed_open",
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -332,6 +339,10 @@ def run_agent_once(
                 *_narrative_records(narrative_event_ids, narrative_records),
             ],
         }
+        micro_market_context = _market_context_by_symbol_for_micro_grid(
+            replay_packet,
+            config=config,
+        )
         base_sizing = compute_position_sizing(
             sizing_input_from_config(config),
             enabled=dynamic_sizing_enabled(config),
@@ -358,6 +369,7 @@ def run_agent_once(
             scan_symbols=scan_symbols,
             generated_at=started_at,
             max_position_notional_usdt=base_sizing.max_position_notional_usdt,
+            market_context_by_symbol=micro_market_context,
         )
         source_health["micro_grid"] = micro_health
         normal_candidates = candidates.candidates
@@ -378,11 +390,24 @@ def run_agent_once(
             "micro": regime_route_summary(micro_candidates),
             "combined": regime_route_summary([*normal_candidates, *micro_candidates]),
         }
+        micro_fast_lane_enabled = _truthy(config.get("BFA_LIVE_MICRO_GRID_FAST_LANE_ENABLED"))
         fused_candidates = _fuse_live_candidates(
             normal_candidates,
             micro_candidates,
             top_n=top_n,
             enforce_regime=regime_router_enforced,
+        )
+        evaluation_candidates = _live_execution_queue(
+            normal_candidates,
+            micro_candidates,
+            top_n=top_n,
+            enforce_regime=regime_router_enforced,
+            micro_fast_lane=micro_fast_lane_enabled,
+        )
+        source_health["execution_queue"] = _execution_queue_source_health(
+            fused_candidates=fused_candidates,
+            evaluation_candidates=evaluation_candidates,
+            micro_fast_lane=micro_fast_lane_enabled,
         )
         decision_snapshot_event_id = _persist_decision_snapshot(
             store,
@@ -396,11 +421,11 @@ def run_agent_once(
             source_health=source_health,
             normal_candidates=normal_candidates,
             micro_candidates=micro_candidates,
-            fused_candidates=fused_candidates,
+            fused_candidates=evaluation_candidates,
             rejected_candidates=candidates.rejected,
         )
-        persisted_candidate_count = len(persist_candidates(store, fused_candidates))
-        if not fused_candidates:
+        persisted_candidate_count = len(persist_candidates(store, evaluation_candidates))
+        if not evaluation_candidates:
             return AgentRunResult(
                 status="no_candidate",
                 mode=mode.value,
@@ -430,7 +455,7 @@ def run_agent_once(
                 started_at=started_at,
                 market_snapshot_count=len(market_snapshots),
                 narrative_record_count=len(narrative_records),
-                candidate_count=len(fused_candidates),
+                candidate_count=len(evaluation_candidates),
                 rejected_count=len(candidates.rejected),
                 scan_symbols=scan_symbols,
                 ai_accepted=True,
@@ -449,8 +474,9 @@ def run_agent_once(
         return _evaluate_candidate_queue(
             config=config,
             mode=mode,
-            candidates=fused_candidates,
+            candidates=evaluation_candidates,
             exchange_info=exchange_info,
+            market_client=market,
             ai_client=ai_client,
             ai_enabled=ai_enabled and not backoff.active,
             journal_path=journal_path,
@@ -460,7 +486,7 @@ def run_agent_once(
             started_at=started_at,
             market_snapshot_count=len(market_snapshots),
             narrative_record_count=len(narrative_records),
-            candidate_count=len(fused_candidates),
+            candidate_count=len(evaluation_candidates),
             rejected_count=len(candidates.rejected),
             scan_symbols=scan_symbols,
             persisted_candidate_count=persisted_candidate_count,
@@ -505,9 +531,15 @@ def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[l
         crypto_only = _truthy(config.get("BFA_LIVE_AUTO_HOT_CRYPTO_ONLY", "true"))
         crypto_symbols: set[str] | None = None
         crypto_filter: dict[str, Any] = {"enabled": crypto_only}
+        tradfi_symbols: set[str] = set()
+        tradfi_window: dict[str, Any] | None = None
+        exchange_info_payload: dict[str, Any] | None = None
         if crypto_only:
             exchange_info_payload = market_client.exchange_info().payload
             crypto_symbols, crypto_filter = _crypto_perpetual_symbol_filter(exchange_info_payload)
+        elif _truthy(config.get("BFA_LIVE_TRADFI_WINDOW_ENABLED", "true")):
+            exchange_info_payload = market_client.exchange_info().payload
+            tradfi_symbols, tradfi_window = _tradfi_window_symbol_filter(config, exchange_info_payload)
         ticker_response = market_client.ticker_24hr()
         ticker_payload = ticker_response.payload if isinstance(ticker_response.payload, list) else []
         eligible_ticker_payload = [
@@ -516,6 +548,11 @@ def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[l
             if isinstance(item, dict)
             and str(item.get("symbol", "")).upper() not in excluded
             and (crypto_symbols is None or str(item.get("symbol", "")).upper() in crypto_symbols)
+            and (
+                not tradfi_symbols
+                or str(item.get("symbol", "")).upper() not in tradfi_symbols
+                or bool(tradfi_window.get("window_open"))
+            )
         ]
         hot_rows = select_hot_usdt_symbols(
             eligible_ticker_payload,
@@ -551,6 +588,7 @@ def _agent_scan_symbols_with_health(config: AppConfig, market_client) -> tuple[l
         ticker_eligible_payload_count=len(eligible_ticker_payload),
         selected_rows=hot_rows,
         crypto_filter=crypto_filter,
+        tradfi_window=tradfi_window,
         filters=filters,
         fallback_symbols=fallback if not auto_selected else [],
         manual_excluded_symbols=_manual_excluded_symbols(
@@ -605,6 +643,127 @@ def _crypto_perpetual_symbol_filter(exchange_info_payload: dict[str, Any]) -> tu
         "excluded_tradfi_symbols": [item["symbol"] for item in excluded[:50]],
         "excluded_tradfi_sample": excluded[:12],
     }
+
+
+def _tradfi_window_symbol_filter(
+    config: AppConfig,
+    exchange_info_payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> tuple[set[str], dict[str, Any]]:
+    tradfi_symbols = _tradfi_like_symbols(exchange_info_payload)
+    return tradfi_symbols, _tradfi_window_health(config, tradfi_symbols, now=now)
+
+
+def _tradfi_like_symbols(exchange_info_payload: dict[str, Any]) -> set[str]:
+    symbols: set[str] = set()
+    for row in exchange_info_payload.get("symbols", []) if isinstance(exchange_info_payload, dict) else []:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol and _tradfi_like(row):
+            symbols.add(symbol)
+    return symbols
+
+
+def _tradfi_window_health(
+    config: AppConfig,
+    tradfi_symbols: set[str] | None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    enabled = _truthy(config.get("BFA_LIVE_TRADFI_WINDOW_ENABLED", "true"))
+    timezone_name = config.get("BFA_LIVE_TRADFI_TIMEZONE", "America/New_York").strip() or "America/New_York"
+    open_text = config.get("BFA_LIVE_TRADFI_OPEN_TIME", "09:30").strip() or "09:30"
+    close_text = config.get("BFA_LIVE_TRADFI_CLOSE_TIME", "16:00").strip() or "16:00"
+    pre_open_minutes = max(0, _int_or_none(config.get("BFA_LIVE_TRADFI_PRE_OPEN_MINUTES")) or 0)
+    post_close_minutes = max(0, _int_or_none(config.get("BFA_LIVE_TRADFI_POST_CLOSE_MINUTES")) or 0)
+    weekdays_only = _truthy(config.get("BFA_LIVE_TRADFI_WEEKDAYS_ONLY", "true"))
+    symbols = sorted(tradfi_symbols or [])
+    payload: dict[str, Any] = {
+        "enabled": enabled,
+        "timezone": timezone_name,
+        "open_time": open_text,
+        "close_time": close_text,
+        "pre_open_minutes": pre_open_minutes,
+        "post_close_minutes": post_close_minutes,
+        "weekdays_only": weekdays_only,
+        "tradfi_symbol_count": len(symbols),
+        "tradfi_symbols_sample": symbols[:50],
+    }
+    if not enabled:
+        payload.update(
+            {
+                "window_open": True,
+                "status": "disabled",
+                "excluded_outside_window_count": 0,
+                "excluded_outside_window_symbols": [],
+            }
+        )
+        return payload
+    tz = _resolve_timezone(timezone_name)
+    if tz is None:
+        payload.update(
+            {
+                "window_open": False,
+                "status": "invalid_timezone",
+                "error": f"unknown timezone: {timezone_name}",
+                "excluded_outside_window_count": len(symbols),
+                "excluded_outside_window_symbols": symbols[:50],
+            }
+        )
+        return payload
+    open_time = _parse_hhmm(open_text)
+    close_time = _parse_hhmm(close_text)
+    if open_time is None or close_time is None:
+        payload.update(
+            {
+                "window_open": False,
+                "status": "invalid_time_config",
+                "excluded_outside_window_count": len(symbols),
+                "excluded_outside_window_symbols": symbols[:50],
+            }
+        )
+        return payload
+    current = (now or datetime.now(UTC)).astimezone(tz)
+    market_open = datetime.combine(current.date(), open_time, tzinfo=tz)
+    market_close = datetime.combine(current.date(), close_time, tzinfo=tz)
+    window_start = market_open - timedelta(minutes=pre_open_minutes)
+    window_end = market_close + timedelta(minutes=post_close_minutes)
+    is_weekday = current.weekday() < 5
+    window_open = window_start <= current <= window_end and (is_weekday or not weekdays_only)
+    excluded = [] if window_open else symbols[:50]
+    payload.update(
+        {
+            "window_open": window_open,
+            "status": "open" if window_open else "closed",
+            "now": current.replace(microsecond=0).isoformat(),
+            "window_start": window_start.replace(microsecond=0).isoformat(),
+            "window_end": window_end.replace(microsecond=0).isoformat(),
+            "weekday": current.weekday(),
+            "is_weekday": is_weekday,
+            "excluded_outside_window_count": 0 if window_open else len(symbols),
+            "excluded_outside_window_symbols": excluded,
+        }
+    )
+    return payload
+
+
+def _resolve_timezone(value: str):
+    if value.strip().upper() in {"UTC", "Z"}:
+        return UTC
+    try:
+        return ZoneInfo(value)
+    except ZoneInfoNotFoundError:
+        return None
+
+
+def _parse_hhmm(value: str) -> dt_time | None:
+    try:
+        parsed = datetime.strptime(value, "%H:%M")
+    except ValueError:
+        return None
+    return dt_time(hour=parsed.hour, minute=parsed.minute)
 
 
 def _non_crypto_perpetual_reasons(row: dict[str, Any]) -> list[str]:
@@ -678,6 +837,7 @@ def _live_source_health_base(
     ticker_eligible_payload_count: int | None = None,
     selected_rows: list[dict[str, Any]] | None = None,
     crypto_filter: dict[str, Any] | None = None,
+    tradfi_window: dict[str, Any] | None = None,
     fallback_reason: str | None = None,
     ticker_error_type: str | None = None,
     ticker_selected_count: int | None = None,
@@ -701,6 +861,8 @@ def _live_source_health_base(
     }
     if crypto_filter is not None:
         ticker["crypto_filter"] = dict(crypto_filter)
+    if tradfi_window is not None:
+        ticker["tradfi_window"] = dict(tradfi_window)
     if ticker_error_type:
         ticker["error_type"] = ticker_error_type
     return {
@@ -968,6 +1130,8 @@ def _ticker_source_health_summary(health) -> dict[str, Any]:
         payload["selected_rows"] = selected_rows[:80]
     if isinstance(health.get("crypto_filter"), dict):
         payload["crypto_filter"] = dict(health["crypto_filter"])
+    if isinstance(health.get("tradfi_window"), dict):
+        payload["tradfi_window"] = dict(health["tradfi_window"])
     return payload
 
 
@@ -1014,6 +1178,27 @@ def _micro_grid_source_health_summary(health) -> dict[str, Any]:
             if isinstance(item, dict)
         ]
     return payload
+
+
+def _market_context_by_symbol_for_micro_grid(
+    replay_packet: Mapping[str, Any],
+    *,
+    config: AppConfig,
+) -> dict[str, dict[str, Any]]:
+    features = extract_features(
+        replay_packet,
+        spike_reversal_enabled=_truthy(config.get("BFA_SPIKE_REVERSAL_SIGNAL_ENABLED")),
+        spike_min_wick_percent=float(config.get("BFA_SPIKE_REVERSAL_MIN_WICK_PERCENT")),
+        spike_min_wick_to_body_ratio=float(config.get("BFA_SPIKE_REVERSAL_MIN_WICK_TO_BODY_RATIO")),
+    )
+    result: dict[str, dict[str, Any]] = {}
+    for symbol, item in features.items():
+        payload = item.to_dict()
+        payload["market_context_source"] = "market_snapshots"
+        if item.min_executable_notional is not None:
+            payload["min_executable_notional_source"] = "exchange_symbol"
+        result[symbol.upper()] = payload
+    return result
 
 
 def _market_snapshot_context_summary(market_snapshots) -> dict[str, Any]:
@@ -1197,12 +1382,24 @@ def _candidate_feature_summary(features: dict[str, Any]) -> dict[str, Any]:
                 "width_percent",
                 "stable_width_percent",
                 "wick_tail_range_percent",
+                "wick_opportunity",
                 "close_position_percent",
                 "turn_count",
                 "edge_alternation_count",
                 "reversal_response_rate",
                 "path_efficiency",
                 "drift_to_width",
+                "recent_path_efficiency",
+                "recent_drift_to_width",
+                "long_reversal_ready",
+                "short_reversal_ready",
+                "long_reversal_reason",
+                "short_reversal_reason",
+                "long_entry_reversal_fraction",
+                "short_entry_reversal_fraction",
+                "long_entry_continuation_fraction",
+                "short_entry_continuation_fraction",
+                "entry_taker_buy_ratio",
                 "long_pullback_quality",
                 "short_pullback_quality",
             )
@@ -1223,6 +1420,20 @@ def _candidate_feature_summary(features: dict[str, Any]) -> dict[str, Any]:
                 "kline_momentum_percent",
                 "kline_micro_momentum_percent",
                 "realized_volatility_percent",
+                "kline_close_position_percent",
+                "micro_grid_side",
+                "wick_opportunity",
+                "long_reversal_ready",
+                "short_reversal_ready",
+                "long_reversal_reason",
+                "short_reversal_reason",
+                "long_entry_reversal_fraction",
+                "short_entry_reversal_fraction",
+                "long_entry_continuation_fraction",
+                "short_entry_continuation_fraction",
+                "long_pullback_quality",
+                "short_pullback_quality",
+                "entry_taker_buy_ratio",
             )
             if key in diagnostics
         }
@@ -1305,7 +1516,7 @@ def _build_live_outcome_guard(config: AppConfig, *, db_path: str | None) -> Forw
     groups = report.groups or {}
     symbol_blocks = _live_guard_blocks(
         groups.get("symbols", []),
-        min_outcomes=_positive_int_or_default(config.get("BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES"), 1),
+        min_outcomes=_positive_int_or_default(config.get("BFA_LIVE_OUTCOME_GUARD_MIN_SYMBOL_OUTCOMES"), 5),
         min_loss_usdt=_float_or_none(config.get("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MIN_LOSS_USDT")) or 0.25,
         max_win_rate=_float_or_none(config.get("BFA_LIVE_OUTCOME_GUARD_SYMBOL_MAX_WIN_RATE")) or 0.34,
         normalize_name=str.upper,
@@ -1398,6 +1609,7 @@ def _evaluate_candidate_queue(
     mode: RuntimeMode,
     candidates,
     exchange_info,
+    market_client,
     ai_client,
     ai_enabled: bool,
     journal_path: str | None,
@@ -1450,6 +1662,20 @@ def _evaluate_candidate_queue(
         )
         risk_limits = RiskLimits.from_config(config, sizing_result=candidate_sizing)
         micro_grid = is_micro_grid_candidate(candidate)
+        if micro_grid:
+            stale_reason = _micro_grid_execution_stale_reason(config, candidate_evaluation)
+            if stale_reason:
+                last_status = "quant_pass"
+                last_validation_errors = [stale_reason]
+                skipped_risk_reasons.append(f"{candidate.symbol}:{stale_reason}")
+                _finish_candidate_evaluation(
+                    candidate_evaluation,
+                    execution_status="quant_pass",
+                    risk_reasons=[stale_reason],
+                    continued=True,
+                    end_reason="micro_grid_stale_before_setup",
+                )
+                continue
         setup_started_at_ms = _epoch_ms()
         setup = (
             micro_grid_setup_from_candidate(
@@ -1481,6 +1707,15 @@ def _evaluate_candidate_queue(
             paper_guard=paper_guard,
         )
         setup = _setup_with_sizing_governor(setup, governor)
+        execution_symbol = _select_execution_symbol(
+            config,
+            exchange_info=exchange_info,
+            market_client=market_client,
+            candidate=candidate,
+            setup=setup,
+        )
+        setup = execution_symbol.setup
+        candidate_evaluation["execution_symbol_preference"] = execution_symbol.to_dict()
         persist_trade_setup(
             store,
             setup=setup,
@@ -1707,15 +1942,15 @@ def _evaluate_candidate_queue(
             )
             continue
 
-        filters = _filters_for_candidate(exchange_info, candidate.symbol)
+        filters = execution_symbol.filters
         if filters is None:
             last_status = "rejected"
-            last_risk_reasons = ["symbol_filters_missing"]
-            skipped_risk_reasons.append(f"{candidate.symbol}:symbol_filters_missing")
+            last_risk_reasons = [execution_symbol.missing_filters_reason]
+            skipped_risk_reasons.append(f"{candidate.symbol}:{execution_symbol.missing_filters_reason}")
             _finish_candidate_evaluation(
                 candidate_evaluation,
                 execution_status="rejected",
-                risk_reasons=["symbol_filters_missing"],
+                risk_reasons=[execution_symbol.missing_filters_reason],
                 continued=True,
                 end_reason="symbol_filters_missing",
             )
@@ -1729,7 +1964,7 @@ def _evaluate_candidate_queue(
             store=store,
             risk_limits=risk_limits,
         ).run(
-            symbol=candidate.symbol,
+            symbol=execution_symbol.symbol,
             validation=ai_run.validation,
             decided_at=started_at,
             risk_state=risk_state,
@@ -1844,6 +2079,326 @@ def _filters_for_candidate(exchange_info, symbol: str) -> SymbolExecutionFilters
         return None
 
 
+@dataclass(frozen=True)
+class ExecutionSymbolSelection:
+    source_symbol: str
+    symbol: str
+    preferred_quote_asset: str
+    switched: bool
+    filters: SymbolExecutionFilters | None
+    setup: Any
+    reason_codes: list[str]
+    diagnostics: dict[str, Any]
+
+    @property
+    def missing_filters_reason(self) -> str:
+        if self.switched:
+            return f"symbol_filters_missing:{self.symbol}"
+        return "symbol_filters_missing"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_symbol": self.source_symbol,
+            "execution_symbol": self.symbol,
+            "preferred_quote_asset": self.preferred_quote_asset,
+            "switched": self.switched,
+            "filters_available": self.filters is not None,
+            "reason_codes": list(self.reason_codes),
+            "diagnostics": dict(self.diagnostics),
+        }
+
+
+def _select_execution_symbol(
+    config: AppConfig,
+    *,
+    exchange_info,
+    market_client,
+    candidate,
+    setup,
+) -> ExecutionSymbolSelection:
+    source_symbol = str(getattr(candidate, "symbol", "") or getattr(setup, "symbol", "")).upper()
+    original_filters = _filters_for_candidate(exchange_info, source_symbol) if source_symbol else None
+    base_diagnostics: dict[str, Any] = {
+        "enabled": _truthy(config.get("BFA_PREFER_USDC_EXECUTION", "true")),
+        "source_symbol": source_symbol,
+        "source_quote_asset": _quote_asset_suffix(source_symbol),
+        "preferred_quote_asset": "USDC",
+    }
+    if getattr(setup, "decision", None) != "trade":
+        return ExecutionSymbolSelection(
+            source_symbol=source_symbol,
+            symbol=source_symbol,
+            preferred_quote_asset="USDT",
+            switched=False,
+            filters=original_filters,
+            setup=setup,
+            reason_codes=["usdc_preference_not_evaluated:setup_not_trade"],
+            diagnostics={**base_diagnostics, "status": "not_evaluated", "reason": "setup_not_trade"},
+        )
+    if not base_diagnostics["enabled"]:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            base_diagnostics,
+            reason="disabled",
+        )
+    if not source_symbol.endswith("USDT"):
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            base_diagnostics,
+            reason="source_not_usdt",
+        )
+    preferred_symbol = f"{source_symbol[:-4]}USDC"
+    row = _exchange_symbol_row(exchange_info, preferred_symbol)
+    if row is None:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol},
+            reason="preferred_symbol_missing",
+        )
+    rejections = _preferred_usdc_symbol_rejections(row)
+    if rejections:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol, "preferred_symbol_rejections": rejections},
+            reason="preferred_symbol_not_eligible",
+        )
+    preferred_filters = _filters_for_candidate(exchange_info, preferred_symbol)
+    if preferred_filters is None:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol},
+            reason="preferred_filters_missing",
+        )
+    ratio_result = _usdc_execution_price_ratio(
+        market_client,
+        source_symbol=source_symbol,
+        preferred_symbol=preferred_symbol,
+    )
+    if not ratio_result.get("ok"):
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {**base_diagnostics, "preferred_symbol": preferred_symbol, **ratio_result},
+            reason=str(ratio_result.get("reason") or "price_ratio_unavailable"),
+        )
+    max_diff_percent = max(_float_or_none(config.get("BFA_PREFER_USDC_MAX_PRICE_DIFF_PERCENT")) or 0.0, 0.0)
+    diff_percent = abs(float(ratio_result["price_ratio"]) - 1.0) * 100.0
+    if diff_percent > max_diff_percent:
+        return _execution_symbol_fallback(
+            source_symbol,
+            setup,
+            original_filters,
+            {
+                **base_diagnostics,
+                "preferred_symbol": preferred_symbol,
+                **ratio_result,
+                "max_price_diff_percent": max_diff_percent,
+                "observed_price_diff_percent": round(diff_percent, 8),
+            },
+            reason="price_diff_too_large",
+        )
+    diagnostics = {
+        **base_diagnostics,
+        "status": "switched",
+        "preferred_symbol": preferred_symbol,
+        **ratio_result,
+        "max_price_diff_percent": max_diff_percent,
+        "observed_price_diff_percent": round(diff_percent, 8),
+    }
+    adjusted_setup = _setup_with_execution_symbol(
+        setup,
+        source_symbol=source_symbol,
+        execution_symbol=preferred_symbol,
+        quote_asset="USDC",
+        price_ratio=float(ratio_result["price_ratio"]),
+        diagnostics=diagnostics,
+    )
+    return ExecutionSymbolSelection(
+        source_symbol=source_symbol,
+        symbol=preferred_symbol,
+        preferred_quote_asset="USDC",
+        switched=True,
+        filters=preferred_filters,
+        setup=adjusted_setup,
+        reason_codes=["usdc_preference:switched"],
+        diagnostics=diagnostics,
+    )
+
+
+def _execution_symbol_fallback(
+    source_symbol: str,
+    setup,
+    filters: SymbolExecutionFilters | None,
+    diagnostics: Mapping[str, Any],
+    *,
+    reason: str,
+) -> ExecutionSymbolSelection:
+    return ExecutionSymbolSelection(
+        source_symbol=source_symbol,
+        symbol=source_symbol,
+        preferred_quote_asset=_quote_asset_suffix(source_symbol) or "USDT",
+        switched=False,
+        filters=filters,
+        setup=_setup_with_execution_symbol_preference_diagnostics(setup, {**dict(diagnostics), "status": "fallback", "reason": reason}),
+        reason_codes=[f"usdc_preference_fallback:{reason}"],
+        diagnostics={**dict(diagnostics), "status": "fallback", "reason": reason},
+    )
+
+
+def _setup_with_execution_symbol_preference_diagnostics(setup, diagnostics: Mapping[str, Any]):
+    if not hasattr(setup, "price_basis"):
+        return setup
+    price_basis = dict(setup.price_basis)
+    price_basis["execution_symbol_preference"] = dict(diagnostics)
+    return replace(setup, price_basis=price_basis)
+
+
+def _setup_with_execution_symbol(
+    setup,
+    *,
+    source_symbol: str,
+    execution_symbol: str,
+    quote_asset: str,
+    price_ratio: float,
+    diagnostics: Mapping[str, Any],
+):
+    price_basis = dict(setup.price_basis)
+    price_basis["execution_symbol_preference"] = dict(diagnostics)
+    reasons = _dedupe(
+        [
+            *setup.reasons,
+            "execution_symbol_preference:usdc",
+            f"source_symbol:{source_symbol}",
+            f"execution_symbol:{execution_symbol}",
+            f"execution_quote_asset:{quote_asset}",
+            f"execution_price_ratio:{price_ratio:.8f}",
+        ]
+    )
+    warnings = _dedupe([*setup.warnings, "execution_symbol_switched_to_usdc"])
+    return replace(
+        setup,
+        symbol=execution_symbol,
+        entry_price=_scale_price(setup.entry_price, price_ratio),
+        stop_price=_scale_price(setup.stop_price, price_ratio),
+        target_price=_scale_price(setup.target_price, price_ratio),
+        price_basis=price_basis,
+        reasons=reasons,
+        warnings=warnings,
+    )
+
+
+def _scale_price(value: float | None, ratio: float) -> float | None:
+    if value is None:
+        return None
+    return float(value) * float(ratio)
+
+
+def _exchange_symbol_row(exchange_info, symbol: str) -> dict[str, Any] | None:
+    target = str(symbol or "").upper()
+    if not target:
+        return None
+    try:
+        symbols = parse_exchange_symbols(exchange_info)
+    except Exception:
+        symbols = []
+    for item in symbols:
+        if item.symbol.upper() == target:
+            return {
+                "symbol": item.symbol,
+                "status": item.status,
+                "contractType": item.contract_type,
+                "baseAsset": item.base_asset,
+                "quoteAsset": item.quote_asset,
+                "marginAsset": item.margin_asset,
+            }
+    return None
+
+
+def _preferred_usdc_symbol_rejections(row: Mapping[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    status = str(row.get("status") or "").upper()
+    contract_type = str(row.get("contractType") or "").upper()
+    quote_asset = str(row.get("quoteAsset") or "").upper()
+    margin_asset = str(row.get("marginAsset") or "").upper()
+    if status != "TRADING":
+        reasons.append("status_not_trading")
+    if contract_type != "PERPETUAL":
+        reasons.append("contract_type_not_perpetual")
+    if quote_asset != "USDC":
+        reasons.append("quote_asset_not_usdc")
+    if margin_asset and margin_asset != "USDC":
+        reasons.append("margin_asset_not_usdc")
+    return reasons
+
+
+def _usdc_execution_price_ratio(market_client, *, source_symbol: str, preferred_symbol: str) -> dict[str, Any]:
+    source_price = _ticker_last_price(market_client, source_symbol)
+    preferred_price = _ticker_last_price(market_client, preferred_symbol)
+    if source_price is None:
+        return {"ok": False, "reason": "source_ticker_price_missing"}
+    if preferred_price is None:
+        return {"ok": False, "reason": "preferred_ticker_price_missing", "source_last_price": source_price}
+    if source_price <= 0 or preferred_price <= 0:
+        return {
+            "ok": False,
+            "reason": "ticker_price_not_positive",
+            "source_last_price": source_price,
+            "preferred_last_price": preferred_price,
+        }
+    return {
+        "ok": True,
+        "source_last_price": source_price,
+        "preferred_last_price": preferred_price,
+        "price_ratio": preferred_price / source_price,
+    }
+
+
+def _ticker_last_price(market_client, symbol: str) -> float | None:
+    if market_client is None:
+        return None
+    try:
+        response = market_client.ticker_24hr(symbol)
+    except Exception:
+        return None
+    payload = getattr(response, "payload", None)
+    if isinstance(payload, list):
+        target = str(symbol or "").upper()
+        for item in payload:
+            if isinstance(item, Mapping) and str(item.get("symbol") or "").upper() == target:
+                return _ticker_payload_last_price(item)
+        return None
+    if isinstance(payload, Mapping):
+        return _ticker_payload_last_price(payload)
+    return None
+
+
+def _ticker_payload_last_price(payload: Mapping[str, Any]) -> float | None:
+    for key in ("lastPrice", "last_price", "weightedAvgPrice", "weighted_avg_price"):
+        value = _float_or_none(payload.get(key))
+        if value is not None and value > 0:
+            return value
+    return None
+
+
+def _quote_asset_suffix(symbol: str) -> str:
+    value = str(symbol or "").upper()
+    for suffix in ("USDT", "USDC"):
+        if value.endswith(suffix):
+            return suffix
+    return ""
+
+
 def _fuse_live_candidates(normal_candidates, micro_candidates, *, top_n: int, enforce_regime: bool = False) -> list:
     by_symbol: dict[str, Any] = {}
     for candidate in [*normal_candidates, *micro_candidates]:
@@ -1855,6 +2410,124 @@ def _fuse_live_candidates(normal_candidates, micro_candidates, *, top_n: int, en
             by_symbol[symbol] = candidate
     ranked = sorted(by_symbol.values(), key=lambda item: _live_candidate_rank(item), reverse=True)
     return ranked[: max(int(top_n or 0), 1)]
+
+
+def _live_execution_queue(
+    normal_candidates,
+    micro_candidates,
+    *,
+    top_n: int,
+    enforce_regime: bool = False,
+    micro_fast_lane: bool = True,
+) -> list:
+    if not micro_fast_lane:
+        return _fuse_live_candidates(
+            normal_candidates,
+            micro_candidates,
+            top_n=top_n,
+            enforce_regime=enforce_regime,
+        )
+
+    allowed_micro = [
+        _with_candidate_routing_reason(candidate, "micro_grid_fast_lane")
+        for candidate in micro_candidates
+        if not enforce_regime or route_allows_candidate(candidate)
+    ]
+    if not allowed_micro:
+        return _fuse_live_candidates(
+            normal_candidates,
+            [],
+            top_n=top_n,
+            enforce_regime=enforce_regime,
+        )
+
+    allowed_micro = sorted(allowed_micro, key=lambda item: _live_candidate_rank(item), reverse=True)
+    micro_by_symbol = {str(candidate.symbol).upper(): candidate for candidate in allowed_micro}
+    immediate_normal: list[Any] = []
+    delayed_normal: list[Any] = []
+    for candidate in normal_candidates:
+        if enforce_regime and not route_allows_candidate(candidate):
+            continue
+        symbol = str(candidate.symbol).upper()
+        micro = micro_by_symbol.get(symbol)
+        if micro is None:
+            immediate_normal.append(candidate)
+            continue
+        delayed_normal.append(_trend_candidate_delayed_by_micro(candidate, micro))
+
+    normal_limit = max(int(top_n or 0), 1)
+    immediate_normal = sorted(immediate_normal, key=lambda item: _live_candidate_rank(item), reverse=True)
+    delayed_normal = sorted(delayed_normal, key=lambda item: _live_candidate_rank(item), reverse=True)
+    # Micro-grid uses short-lived passive entries; keep all current micro
+    # candidates ahead of the normal queue, then let normal candidates continue
+    # if the fast-lane orders reject or expire.
+    return [*allowed_micro, *immediate_normal[:normal_limit], *delayed_normal[:normal_limit]]
+
+
+def _execution_queue_source_health(*, fused_candidates, evaluation_candidates, micro_fast_lane: bool) -> dict[str, Any]:
+    return {
+        "micro_fast_lane_enabled": bool(micro_fast_lane),
+        "fused_order": [_queue_candidate_summary(candidate) for candidate in fused_candidates],
+        "evaluation_order": [_queue_candidate_summary(candidate) for candidate in evaluation_candidates],
+    }
+
+
+def _queue_candidate_summary(candidate) -> dict[str, Any]:
+    features = getattr(candidate, "features", {}) or {}
+    if not isinstance(features, dict):
+        features = {}
+    return {
+        "symbol": getattr(candidate, "symbol", None),
+        "strategy_leg": features.get("strategy_leg"),
+        "side": _candidate_declared_side(candidate),
+        "score": getattr(candidate, "score", None),
+        "routing": list(features.get("execution_queue_routing") or []),
+    }
+
+
+def _trend_candidate_delayed_by_micro(candidate, micro_candidate) -> CandidateSignal:
+    reasons = ["micro_grid_same_symbol_fast_lane_preempts_trend"]
+    trend_side = _candidate_declared_side(candidate)
+    micro_side = _candidate_declared_side(micro_candidate)
+    if trend_side in {"long", "short"} and micro_side in {"long", "short"} and trend_side != micro_side:
+        reasons.append("micro_grid_opposite_side_requires_trend_recheck")
+    return _with_candidate_routing_reason(candidate, *reasons, delayed_by_symbol=str(micro_candidate.symbol).upper())
+
+
+def _with_candidate_routing_reason(candidate, *reasons: str, delayed_by_symbol: str | None = None) -> CandidateSignal:
+    features = dict(getattr(candidate, "features", {}) or {})
+    existing_routing = [str(item) for item in features.get("execution_queue_routing") or []]
+    routing = _dedupe([*existing_routing, *[reason for reason in reasons if reason]])
+    features["execution_queue_routing"] = routing
+    if delayed_by_symbol:
+        features["execution_queue_delayed_by_symbol"] = delayed_by_symbol
+    reason_codes = _dedupe([*list(getattr(candidate, "reason_codes", []) or []), *routing])
+    return replace(candidate, reason_codes=reason_codes, features=features)
+
+
+def _candidate_declared_side(candidate) -> str:
+    features = getattr(candidate, "features", {}) or {}
+    if not isinstance(features, dict):
+        features = {}
+    side = str(features.get("micro_grid_side") or features.get("selected_side") or "").strip().lower()
+    if side in {"long", "buy"}:
+        return "long"
+    if side in {"short", "sell"}:
+        return "short"
+    reasons = [str(reason).lower() for reason in getattr(candidate, "reason_codes", []) or []]
+    if any("directional_bias_long" in reason or "supports_long" in reason or "quant_long_setup" in reason for reason in reasons):
+        return "long"
+    if any("directional_bias_short" in reason or "supports_short" in reason or "quant_short_setup" in reason for reason in reasons):
+        return "short"
+    momentum = _float_or_none(features.get("kline_micro_momentum_percent"))
+    if momentum is None:
+        momentum = _float_or_none(features.get("kline_momentum_percent"))
+    if momentum is not None:
+        if momentum > 0:
+            return "long"
+        if momentum < 0:
+            return "short"
+    return "unknown"
 
 
 def _live_candidate_rank(candidate) -> tuple[float, float, str]:
@@ -1871,13 +2544,12 @@ def _live_candidate_rank(candidate) -> tuple[float, float, str]:
         )
         if features.get("route_decision") == "allow":
             regime_confidence = _float_or_zero(features.get("regime_confidence"))
-        # Micro candidates carry an artificial 80-point base offset (see
-        # _candidate_from_order: 80.0 + score*10.0) which dwarfs the trend
-        # candidate scores (~10-50) and made the fuser prefer micro legs almost
-        # unconditionally. Strip the base offset so regime routing, not a
-        # magnitude bias, decides which leg ranks first.
+        # Older micro-grid candidates carried an artificial 80-point base
+        # offset. Strip only that legacy shape; current candidates keep their
+        # raw quality score so paper/live/backtest do not rank them by a hidden
+        # magnitude bias.
         if str(features.get("strategy_leg") or "").lower() == "micro_grid":
-            raw_score = max(raw_score - 80.0, 0.0) / 10.0
+            raw_score = max(raw_score - 80.0, 0.0) / 10.0 if raw_score >= 80.0 else raw_score
     return (raw_score, regime_confidence, quality, str(getattr(candidate, "symbol", "")))
 
 
@@ -1946,6 +2618,22 @@ def _candidate_latency_summary(candidate) -> dict[str, Any]:
         if generated_at_ms is not None:
             payload["signal_to_candidate_ms"] = max(generated_at_ms - latest_market_at_ms, 0)
     return payload
+
+
+def _micro_grid_execution_stale_reason(config: AppConfig, candidate_evaluation: dict[str, Any]) -> str | None:
+    latency = candidate_evaluation.get("latency")
+    if not isinstance(latency, dict):
+        return "micro_grid_signal_age_missing"
+    signal_time_ms = _int_or_none(latency.get("signal_time_ms"))
+    if signal_time_ms is None:
+        return "micro_grid_signal_age_missing"
+    max_age_seconds = max(_float_or_none(config.get("BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS")) or 12.0, 1.0)
+    age_ms = max(_epoch_ms() - signal_time_ms, 0)
+    latency["signal_to_execution_gate_ms"] = age_ms
+    latency["micro_grid_max_signal_age_ms"] = int(max_age_seconds * 1000)
+    if age_ms > max_age_seconds * 1000:
+        return f"micro_grid_signal_too_stale:{round(age_ms / 1000.0, 3)}s>{round(max_age_seconds, 3)}s"
+    return None
 
 
 def _record_latency_stage(
@@ -2177,6 +2865,11 @@ def _ai_run_with_quant_execution_reasons(ai_run: AiDecisionRun, setup) -> AiDeci
                 "regime_label:",
                 "route_decision:",
                 "regime_confidence:",
+                "execution_symbol_preference:",
+                "source_symbol:",
+                "execution_symbol:",
+                "execution_quote_asset:",
+                "execution_price_ratio:",
             )
         )
     ]
@@ -2538,9 +3231,15 @@ def _live_entry_capacity_blockers(config: AppConfig, risk_state: RiskState | Non
     if risk_state.active_positions > 0 and risk_state.active_positions >= max_open_positions:
         reasons.append("max_open_positions_reached")
     portfolio_margin_cap = _portfolio_margin_cap(config)
-    if portfolio_margin_cap > 0 and risk_state.total_initial_margin_usdt >= portfolio_margin_cap:
+    include_manual_margin = _truthy(config.get("BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED"))
+    measured_margin = (
+        risk_state.total_initial_margin_usdt
+        if include_manual_margin
+        else risk_state.active_initial_margin_usdt
+    )
+    if portfolio_margin_cap > 0 and measured_margin >= portfolio_margin_cap:
         reasons.append("portfolio_margin_cap_reached")
-        if risk_state.manual_initial_margin_usdt > 0:
+        if include_manual_margin and risk_state.manual_initial_margin_usdt > 0:
             reasons.append("manual_margin_pressure_included")
     return _dedupe(reasons)
 

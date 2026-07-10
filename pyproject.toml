@@ -12,6 +12,7 @@ authors = [
   { name = "KingHong" }
 ]
 dependencies = [
+  "numpy>=1.26",
   "websockets>=12",
 ]
 

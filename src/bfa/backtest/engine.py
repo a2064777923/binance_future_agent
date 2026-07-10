@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 from bfa.ai.schema import RiskLimits
@@ -19,6 +19,28 @@ class _Signal:
     entry_time_ms: int
     reason_codes: list[str]
     setup: TradeSetup | None = None
+
+
+@dataclass
+class _SignalGenerationDiagnostics:
+    rejected: int = 0
+    rejection_counts: dict[str, int] = field(default_factory=dict)
+
+    def reject(self, *reasons: str) -> None:
+        self.rejected += 1
+        if not reasons:
+            reasons = ("unknown_rejection",)
+        for reason in reasons:
+            key = str(reason or "unknown_rejection")
+            self.rejection_counts[key] = self.rejection_counts.get(key, 0) + 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rejected": self.rejected,
+            "rejection_counts": dict(
+                sorted(self.rejection_counts.items(), key=lambda item: (-item[1], item[0]))
+            ),
+        }
 
 
 @dataclass(frozen=True)
@@ -172,12 +194,21 @@ def _generate_signals(
     bars: list[BacktestBar],
     config: BacktestConfig,
 ) -> tuple[list[_Signal], int]:
+    signals, diagnostics = _generate_signals_with_diagnostics(symbol, bars, config)
+    return signals, diagnostics.rejected
+
+
+def _generate_signals_with_diagnostics(
+    symbol: str,
+    bars: list[BacktestBar],
+    config: BacktestConfig,
+) -> tuple[list[_Signal], _SignalGenerationDiagnostics]:
     if config.strategy_type == "quant_setup":
         return _generate_quant_setup_signals(symbol, bars, config)
     if config.strategy_type != "hot_momentum":
         raise ValueError(f"unknown backtest strategy_type: {config.strategy_type}")
     signals: list[_Signal] = []
-    rejected = 0
+    diagnostics = _SignalGenerationDiagnostics()
     next_allowed_index = config.lookback_bars
     last_entry_index = len(bars) - 1
     for entry_index in range(config.lookback_bars, last_entry_index + 1):
@@ -208,7 +239,16 @@ def _generate_signals(
             rejection = True
 
         if rejection:
-            rejected += 1
+            missing = []
+            if "lookback_momentum" not in reasons:
+                missing.append("hot_momentum:missing_lookback_momentum")
+            if "liquidity_ok" not in reasons:
+                missing.append("hot_momentum:missing_liquidity")
+            if "taker_buy_bias" not in reasons:
+                missing.append("hot_momentum:missing_taker_buy_bias")
+            if "range_controlled" not in reasons:
+                missing.append("hot_momentum:range_too_wide")
+            diagnostics.reject(*missing)
             continue
         signals.append(
             _Signal(
@@ -219,7 +259,7 @@ def _generate_signals(
             )
         )
         next_allowed_index = entry_index + config.cooldown_bars + 1
-    return signals, rejected
+    return signals, diagnostics
 
 
 def _simulate_trade(
@@ -295,9 +335,9 @@ def _generate_quant_setup_signals(
     symbol: str,
     bars: list[BacktestBar],
     config: BacktestConfig,
-) -> tuple[list[_Signal], int]:
+) -> tuple[list[_Signal], _SignalGenerationDiagnostics]:
     signals: list[_Signal] = []
-    rejected = 0
+    diagnostics = _SignalGenerationDiagnostics()
     next_allowed_index = config.lookback_bars
     last_entry_index = len(bars) - 1
     for entry_index in range(config.lookback_bars, last_entry_index + 1):
@@ -310,7 +350,10 @@ def _generate_quant_setup_signals(
             route_decision = classify_regime(candidate["features"], strategy_leg=TREND_LEG, shadow_only=False)
             candidate["features"].update(route_decision.to_feature_payload())
             if route_decision.route_decision != ALLOW:
-                rejected += 1
+                diagnostics.reject(
+                    f"router:{route_decision.route_decision}:{route_decision.label}",
+                    *[f"router_reason:{reason}" for reason in route_decision.reason_codes],
+                )
                 continue
         setup = build_trade_setup(
             candidate,
@@ -318,7 +361,10 @@ def _generate_quant_setup_signals(
             profile=config.setup_profile,
         )
         if setup.decision != "trade":
-            rejected += 1
+            diagnostics.reject(
+                f"setup:{setup.decision}",
+                *[f"setup_reason:{reason}" for reason in setup.reasons],
+            )
             continue
         reason_codes = list(setup.reasons)
         if route_decision is not None:
@@ -339,7 +385,7 @@ def _generate_quant_setup_signals(
             )
         )
         next_allowed_index = entry_index + config.cooldown_bars + 1
-    return signals, rejected
+    return signals, diagnostics
 
 
 def _quant_regime_router_enforced(config: BacktestConfig) -> bool:
@@ -515,7 +561,8 @@ def _candidate_from_bars(symbol: str, bars: list[BacktestBar], config: BacktestC
         "kline_close_position_percent": _close_position_percent(last),
         "kline_quote_volume_change_percent": _momentum_percent(previous.quote_volume, last.quote_volume),
         "reference_price": last.close,
-        "min_executable_notional": 5.0,
+        "min_executable_notional": config.simulation_min_executable_notional_usdt,
+        "min_executable_notional_source": "simulation_default",
     }
     features.update({key: value for key, value in indicators.to_features().items() if value is not None})
     features.update(_orderly_range_features_from_bars(bars))

@@ -1,5 +1,9 @@
 # Position Profit Protection
 
+Read `docs/current-live-strategy.md` first for the server-verified current live
+profile. This document describes the protection design; env values below are
+defaults or recently used tuning and may differ from `/etc/binance-futures-agent/env`.
+
 This note records the live position-monitoring layer used to reduce profit giveback after an entry has filled.
 
 ## Intent Metadata
@@ -37,15 +41,15 @@ It does not market-close positions for this protection path. It only asks `posit
 
 ## Profiles
 
-Micro-grid/range positions use earlier and tighter protection:
+Micro-grid/range positions use fast protection, but loss-control trailing is only allowed after post-entry evidence. MFE is scoped to bars after the matched entry intent, so pre-entry spikes are not counted as profit for the active position.
 
-- `BFA_POSITION_SENTINEL_MICRO_MIN_PROFIT_R=0.08`
+- `BFA_POSITION_SENTINEL_MICRO_MIN_PROFIT_R=0.05`
 - `BFA_POSITION_SENTINEL_MICRO_MIN_TARGET_PROGRESS=0.22`
 - `BFA_POSITION_SENTINEL_MICRO_REVERSAL_THRESHOLD=0.46`
 - `BFA_POSITION_SENTINEL_MICRO_VOLUME_FADE_RATIO=0.82`
 - `BFA_POSITION_SENTINEL_MICRO_ADVERSE_RETURN_PERCENT=0.04`
-- `BFA_POSITION_SENTINEL_MICRO_LOCK_R=0.10`
-- `BFA_POSITION_SENTINEL_MICRO_GIVEBACK_R=0.22`
+- `BFA_POSITION_SENTINEL_MICRO_LOCK_R=0.18`
+- `BFA_POSITION_SENTINEL_MICRO_GIVEBACK_R=0.25`
 - `BFA_POSITION_SENTINEL_MICRO_TARGET_EXTENSION_R=0.20`
 - `BFA_POSITION_SENTINEL_MICRO_GIVEBACK_RATIO=0.35`
 - `BFA_POSITION_SENTINEL_MICRO_STAGNATION_SECONDS=150`
@@ -54,20 +58,63 @@ Micro-grid/range positions use earlier and tighter protection:
 - `BFA_POSITION_SENTINEL_MICRO_INVALIDATION_ADVERSE_R=0.18`
 - `BFA_POSITION_SENTINEL_MICRO_INVALIDATION_DIRECTION_ALIGNMENT=0.25`
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_LOCK_R=0.0`
-- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_GIVEBACK_R=0.08`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_GIVEBACK_R=0.18`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_SECONDS=90`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_MIN_GIVEBACK_R=0.35`
+- `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_HARD_ADVERSE_R=0.55`
 - `BFA_POSITION_SENTINEL_MICRO_LOSS_CONTROL_TARGET_EXTENSION_R=0.08`
+- `BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_SECONDS=45`
+- `BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_PROGRESS=0.35`
+- `BFA_POSITION_SENTINEL_MICRO_PROFIT_PROTECTION_MIN_R=0.45`
+- `BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_SECONDS=20`
+- `BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_PROGRESS=0.55`
+- `BFA_POSITION_SENTINEL_MICRO_FIRST_WAVE_MIN_R=0.65`
+
+The first-wave gate lets micro-grid protect a meaningful fast scalp before the
+old 45-second wait, but only after at least 20 seconds and only when current or
+recent MFE is already close enough to the planned target. Tiny positive noise
+still observes.
+
+Note: `lock_r` is floored to cover at least one round-trip transaction cost
+(~0.08% of entry / risk_distance) so a "break-even" lock never becomes a
+guaranteed small loss after fees. This floor is applied in code, not config.
 
 Trend positions use wider protection to avoid closing too often:
 
-- `BFA_POSITION_SENTINEL_TREND_MIN_PROFIT_R=0.25`
+- `BFA_POSITION_SENTINEL_TREND_MIN_PROFIT_R=0.35`
 - `BFA_POSITION_SENTINEL_TREND_MIN_TARGET_PROGRESS=0.35`
 - `BFA_POSITION_SENTINEL_TREND_REVERSAL_THRESHOLD=0.62`
 - `BFA_POSITION_SENTINEL_TREND_VOLUME_FADE_RATIO=0.68`
 - `BFA_POSITION_SENTINEL_TREND_ADVERSE_RETURN_PERCENT=0.10`
-- `BFA_POSITION_SENTINEL_TREND_LOCK_R=0.25`
+- `BFA_POSITION_SENTINEL_TREND_LOCK_R=0.15`
 - `BFA_POSITION_SENTINEL_TREND_GIVEBACK_R=0.65`
 - `BFA_POSITION_SENTINEL_TREND_TARGET_EXTENSION_R=0.75`
 - `BFA_POSITION_SENTINEL_TREND_GIVEBACK_RATIO=0.55`
+- `BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS=180`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_MIN_PROFIT_R=0.60`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_MIN_TARGET_PROGRESS=0.30`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_LOCK_R=0.12`
+- `BFA_POSITION_SENTINEL_TREND_DEFENSIVE_GIVEBACK_R=0.75`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_MIN_PROFIT_R=1.00`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS=0.55`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R=0.35`
+- `BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R=0.65`
+
+The trend profile deliberately does not behave like the micro-grid scalping
+profile. After a trend position emits a `trail_or_backfill` protection decision,
+the same symbol/position side is put on a three-minute trend-protection
+cooldown. During that window the sentinel records
+`trend_protection_cooldown_active` and does not rerun the full trend
+profit-protection decision for that position. Missing-protection backfill is
+still allowed immediately; the cooldown only applies to normal trend trailing
+judgement/stop movement.
+
+Trend protection is now layered. Below the defensive thresholds it records
+`trend_profit_layer:observe` and refuses to trail even if the reversal score is
+high. The defensive layer can protect meaningful profit with a light lock and
+wide giveback. The strong layer locks more profit after a larger favorable move.
+The chosen layer is written into sentinel metrics and order-plan reason codes
+(`sentinel_trend_profit_layer:*`, `sentinel_lock_r:*`, `sentinel_giveback_r:*`).
 
 ## Verification
 
@@ -87,15 +134,22 @@ The live micro-grid leg exposes these speed controls:
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS`: maximum micro-grid hold window; set `0` to disable time-based position exit for micro-grid live orders.
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS`: internal micro-grid path horizon used to estimate entry/TP/SL when max hold is disabled; `0` follows the max hold value, or falls back to 180 seconds when max hold is disabled.
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS`: maximum raw-feed cache age before the micro-grid leg skips trading.
+- `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS`: maximum age from the second-level signal timestamp to setup/execution. This is separate from cache age; it prevents old micro-grid candidates from being submitted after queue or management delays.
 
-Current live tuning after 2026-06-24 risk expansion:
+Current server tuning checked on 2026-06-26:
 
-- `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS=30`
+- `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS=20`
 - `BFA_LIVE_MICRO_GRID_MAX_HOLD_SECONDS=0`
 - `BFA_LIVE_MICRO_GRID_MODEL_HORIZON_SECONDS=180`
 - `BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS=12`
+- `BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS=12`
 - `BFA_LIVE_MICRO_GRID_MIN_SCORE=1.05`
 - `BFA_LIVE_MICRO_GRID_TOP_N=12`
+- `BFA_MAX_RISK_PER_TRADE_USDT=6`
+- `BFA_MAX_DAILY_LOSS_USDT=25`
+- `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true`
+- `BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS=180`
+- `BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`
 
 This keeps micro-grid entries passive and entry-time-limited: if the limit price is not hit quickly enough, the watchdog should let it expire instead of chasing. Filled positions are no longer closed only because a fixed micro-grid hold window expired; stop-loss, take-profit, and sentinel protection remain responsible for exits.
 
@@ -108,6 +162,39 @@ The micro-grid leg separates exits into three states:
 - Setup invalidation: if adverse R, short return, direction alignment, and volume show that the entry thesis is failing, sentinel can tighten the stop even before the position is profitable.
 
 Loss-control does not market-close by default. It replaces protective orders with a closer stop, keeping exits exchange-side while avoiding a fixed max-hold exit.
+
+The current live safety posture is profit-gated. `sentinel_loss_control` cannot
+move stops just because a position is negative or noisy; it still needs the
+configured post-entry evidence and profile gates. This prevents the earlier
+failure mode where stops were tightened immediately after entry and got swept
+by normal volatility. With `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`, the
+sentinel only records plans and diagnostics. With
+`BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false`, live-cycle full-close or backfill
+plans are not executed automatically.
+
+## 2026-06-26 Observe-Only Regression
+
+A live review found that trend protection was being calculated but not executed.
+After reconciling closed exchange fills from `2026-06-25T16:00:00Z`, the ledger
+showed 37 trend-leg closed outcomes with 11 wins, 26 losses, and net
+`-20.9909U`. The position sentinel logged 13,930 `trail_or_backfill` signals in
+the same window, including trend positions with profit thresholds, target
+progress, flow fade, adverse reversal, and reversal-score triggers. It executed
+zero protective replacements because the server env had
+`BFA_POSITION_SENTINEL_EXECUTE_ENABLED=false`.
+
+Root cause: the high-frequency sentinel service was running and recording
+diagnostics every few seconds, but the execution gate made every plan
+observe-only. This is easy to misread because `binance-futures-agent-position-
+sentinel.timer` is still active and healthy while no stop replacement is ever
+submitted.
+
+Fix: live must run with `BFA_POSITION_SENTINEL_EXECUTE_ENABLED=true` when active
+positions are expected to receive profit protection. `config-check` now warns
+when live mode leaves the sentinel observe-only. Keep
+`BFA_POSITION_AUTO_MANAGEMENT_ENABLED=false` if full-close/partial-reduce
+automation should remain disabled; the sentinel execution gate only permits
+protective backfill and `trail_protective_orders`.
 
 ## Latency Telemetry
 

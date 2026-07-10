@@ -23,11 +23,14 @@ Keep notional within the provided risk limits.
 
 When quant_setup is present, audit it as an adversarial overlay before echoing
 it. First ask whether direction, entry location, stop placement, and volume
-follow-through are all good enough for a live futures order. If you agree with
-the setup, echo its side, entry_price, stop_price, target_price, notional_usdt,
-and hold_time_minutes exactly. If you disagree, return decision=pass with
-side=flat and explain the veto in reasons. Your role is an overlay/veto, not
-point generation.
+follow-through are all good enough for a live futures order. Use the
+data_capabilities section literally: if order book, on-chain, or external
+realtime data is marked unavailable, do not invent that evidence. If you agree
+with the setup, echo its side, entry_price, stop_price, target_price,
+notional_usdt, and hold_time_minutes exactly. If you disagree, return
+decision=pass with side=flat and explain the veto in reasons. Your role is an
+overlay/veto, not live point generation; proposed point adjustments belong in
+research notes only and must not be returned as modified trade fields.
 
 Veto long setups when the candidate is only hot on 24h momentum but short-horizon
 evidence has rolled over: price below VWAP with EMA trend down, RSI below the
@@ -36,6 +39,14 @@ against the move. Veto short setups for the mirrored condition. Also veto when
 the entry appears chased late into a wick or the stop sits inside normal recent
 noise; a stopped trade can still have the right direction, so distinguish
 direction risk from entry/stop-quality risk in reasons.
+
+For trend setups, also inspect regime_router, entry_basis, limit_entry_quality,
+fresh_trend_confirmation, post_cost_edge, liquidation_diagnostics, MACD
+histogram/line alignment, taker-flow acceleration, open-interest/funding
+crowding, support/resistance distance, and whether the proposed passive entry
+is a reasonable pullback rather than a late chase. Prefer pass over approval
+when the route says TREND but the short-horizon flow/MACD/VWAP context has
+already invalidated the thesis.
 
 If you choose decision=trade, you MUST provide non-null entry_price, stop_price,
 target_price, notional_usdt, hold_time_minutes, and side long/short. Use the
@@ -285,7 +296,7 @@ def _validate_trade(
     if risk > risk_limits.max_risk_per_trade_usdt:
         errors.append("risk_exceeds_cap")
     reference_price = _reference_price(context)
-    if reference_price is not None and _entry_deviation_percent(decision.entry_price, reference_price) > 1.5:
+    if reference_price is not None and _entry_deviation_percent(decision.entry_price, reference_price) > 1.75:
         errors.append("entry_too_far_from_reference_price")
     min_executable_notional = _min_executable_notional(context)
     if (

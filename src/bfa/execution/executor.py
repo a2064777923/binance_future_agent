@@ -229,6 +229,25 @@ class ExecutionEngine:
         status = "submitted"
         active_intent = intent
         if _is_limit_order(intent):
+            if _defer_limit_entry_resolution(self.config, intent):
+                active_intent = _pending_limit_intent(intent, client_order_id=client_order_id)
+                response["limit_entry_deferred"] = {
+                    "status": "entry_order_pending",
+                    "client_order_id": client_order_id,
+                    "limit_wait_seconds": _limit_wait_seconds(intent),
+                    "reason": "pending_limit_watchdog_will_resolve",
+                }
+                return self._finish(
+                    status="entry_order_pending",
+                    submitted=True,
+                    intent=active_intent,
+                    risk=RiskDecision(
+                        True,
+                        _dedupe([*risk.reason_codes, "entry_order_pending", "pending_limit_watchdog_required"]),
+                        risk.warnings,
+                    ),
+                    exchange_response=response,
+                )
             try:
                 resolution = self._resolve_limit_entry(intent, client_order_id=client_order_id)
             except BinanceSignedError as exc:
@@ -240,11 +259,17 @@ class ExecutionEngine:
                 reconciled_intent, reconcile_response = self._reconcile_unknown_limit_entry_from_position(intent)
                 response["limit_entry_position_reconcile"] = reconcile_response
                 if reconciled_intent is None:
+                    cancel_resolution = self._cancel_unknown_limit_entry(
+                        intent,
+                        client_order_id=client_order_id,
+                        error=exc,
+                    )
+                    response.update(cancel_resolution.response)
                     return self._finish(
-                        status="entry_order_pending",
-                        submitted=True,
-                        intent=intent,
-                        risk=RiskDecision(True, [*risk.reason_codes, "limit_entry_state_unknown"], risk.warnings),
+                        status=cancel_resolution.status,
+                        submitted=False,
+                        intent=cancel_resolution.intent,
+                        risk=RiskDecision(True, [*risk.reason_codes, cancel_resolution.status], risk.warnings),
                         exchange_response=response,
                     )
                 status = "entry_order_reconciled_from_position"
@@ -288,24 +313,36 @@ class ExecutionEngine:
                             risk=risk,
                             exchange_response=response,
                         )
-                response["kill_switch_activated"] = _activate_kill_switch(self.config)
-                try:
-                    response["emergency_close_order"] = self.signed_client.new_order(
-                        symbol=active_intent.symbol,
-                        side=_opposite_side(active_intent.side),
-                        order_type="MARKET",
-                        quantity=active_intent.quantity,
-                        reduce_only=_reduce_only_supported(self.config),
-                        position_side=position_side,
-                        new_client_order_id=_client_order_id(active_intent, suffix="close"),
+                failure_resolution = self._resolve_protective_order_failure(
+                    active_intent,
+                    position_side=position_side,
+                )
+                response["protective_failure_resolution"] = failure_resolution
+                resolution_status = str(failure_resolution.get("status") or "")
+                if resolution_status in {
+                    "no_matching_position",
+                    "existing_protective_orders_present",
+                    "fallback_protective_orders_submitted",
+                    "fallback_stop_submitted",
+                }:
+                    return self._finish(
+                        status=_status_for_protective_resolution(resolution_status, current_status=status),
+                        submitted=True,
+                        intent=active_intent,
+                        risk=risk,
+                        exchange_response=response,
                     )
+                if resolution_status == "emergency_closed":
+                    response["emergency_close_order"] = failure_resolution.get("emergency_close", {}).get("order")
                     status = "protective_order_failed_closed"
-                except BinanceSignedError as close_exc:
-                    response["emergency_close_error"] = {
-                        "endpoint": close_exc.endpoint,
-                        "code": close_exc.binance_code,
-                        "message": close_exc.binance_message,
-                    }
+                else:
+                    emergency_close = failure_resolution.get("emergency_close")
+                    if isinstance(emergency_close, Mapping) and emergency_close.get("status") == "failed":
+                        response["emergency_close_error"] = {
+                            "endpoint": emergency_close.get("endpoint"),
+                            "code": emergency_close.get("code"),
+                            "message": emergency_close.get("message"),
+                        }
                     status = "protective_order_failed_open"
                 return self._finish(
                     status=status,
@@ -616,14 +653,182 @@ class ExecutionEngine:
                 continue
             algo_id = order.get("algoId")
             client_algo_id = order.get("clientAlgoId")
-            cancelled.append(
-                self.signed_client.cancel_algo_order(
-                    symbol=intent.symbol,
-                    algo_id=algo_id,
-                    client_algo_id=client_algo_id if algo_id is None else None,
+            try:
+                cancelled.append(
+                    self.signed_client.cancel_algo_order(
+                        symbol=intent.symbol,
+                        algo_id=algo_id,
+                        client_algo_id=client_algo_id if algo_id is None else None,
+                    )
                 )
-            )
+            except BinanceSignedError as exc:
+                if not _is_stale_unknown_order_error(exc):
+                    raise
+                cancelled.append(
+                    {
+                        "status": "stale_missing",
+                        "symbol": intent.symbol,
+                        "algoId": algo_id,
+                        "clientAlgoId": client_algo_id,
+                        "warning": _signed_error_payload(exc),
+                    }
+                )
         return cancelled
+
+    def _resolve_protective_order_failure(
+        self,
+        intent: OrderIntent,
+        *,
+        position_side: str | None,
+    ) -> dict[str, Any]:
+        assert self.signed_client is not None
+        position = self._matching_position_snapshot(intent, position_side=position_side)
+        response: dict[str, Any] = {"position": position}
+        if position.get("status") == "no_matching_position":
+            response["status"] = "no_matching_position"
+            return response
+
+        existing = self._existing_protective_snapshot(intent, position_side=position_side)
+        response["existing_protective_orders"] = existing
+        existing_types = set(existing.get("types") or [])
+        if {"STOP", "TAKE_PROFIT"}.issubset(existing_types):
+            response["status"] = "existing_protective_orders_present"
+            return response
+
+        fallback = self._place_fallback_protective_orders(
+            intent,
+            position=position,
+            position_side=position_side,
+            existing_types=existing_types,
+        )
+        response["fallback_protective_orders"] = fallback
+        fallback_types = existing_types | set(fallback.get("submitted_types") or [])
+        if {"STOP", "TAKE_PROFIT"}.issubset(fallback_types):
+            response["status"] = "fallback_protective_orders_submitted"
+            return response
+        if "STOP" in fallback_types:
+            response["status"] = "fallback_stop_submitted"
+            return response
+
+        close = self._emergency_close_position(intent, position_side=position_side)
+        response["emergency_close"] = close
+        response["status"] = "emergency_closed" if close.get("status") == "submitted" else "emergency_close_failed"
+        return response
+
+    def _matching_position_snapshot(self, intent: OrderIntent, *, position_side: str | None) -> dict[str, Any]:
+        assert self.signed_client is not None
+        intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
+        try:
+            positions = self.signed_client.position_risk(intent.symbol)
+        except BinanceSignedError as exc:
+            return {"status": "position_check_failed", **_signed_error_payload(exc)}
+        for position in positions:
+            if str(position.get("symbol", "")).upper() != intent.symbol.upper():
+                continue
+            side = str(position.get("positionSide") or "").upper()
+            if position_side and side and side != position_side.upper():
+                continue
+            amount = _float(position.get("positionAmt")) or 0.0
+            if amount == 0:
+                continue
+            actual_direction = "LONG" if amount > 0 else "SHORT"
+            if actual_direction != intended_direction:
+                continue
+            return {
+                "status": "open_position",
+                "symbol": intent.symbol,
+                "position_side": side or position_side,
+                "position_amt": amount,
+                "quantity": abs(amount),
+                "entry_price": _float(position.get("entryPrice")) or intent.entry_price,
+                "mark_price": _float(position.get("markPrice")) or intent.entry_price,
+            }
+        return {"status": "no_matching_position", "symbol": intent.symbol, "position_side": position_side}
+
+    def _existing_protective_snapshot(self, intent: OrderIntent, *, position_side: str | None) -> dict[str, Any]:
+        assert self.signed_client is not None
+        close_side = _opposite_side(intent.side)
+        try:
+            orders = self.signed_client.open_algo_orders(intent.symbol)
+        except BinanceSignedError as exc:
+            return {"status": "open_algo_orders_failed", "types": [], **_signed_error_payload(exc)}
+        matching = [
+            dict(order)
+            for order in orders
+            if _matching_close_position_algo_order(
+                order,
+                symbol=intent.symbol,
+                side=close_side,
+                position_side=position_side,
+            )
+        ]
+        types = sorted({_protective_order_kind(order) for order in matching if _protective_order_kind(order)})
+        return {"status": "checked", "types": types, "orders": matching}
+
+    def _place_fallback_protective_orders(
+        self,
+        intent: OrderIntent,
+        *,
+        position: Mapping[str, Any],
+        position_side: str | None,
+        existing_types: set[str],
+    ) -> dict[str, Any]:
+        assert self.signed_client is not None
+        close_side = _opposite_side(intent.side)
+        stop_price = _fallback_stop_price(intent, position)
+        target_price = _fallback_target_price(intent, position)
+        response: dict[str, Any] = {
+            "submitted_types": [],
+            "stop_price": stop_price,
+            "target_price": target_price,
+        }
+        if "STOP" not in existing_types:
+            try:
+                response["stop_loss_order"] = self.signed_client.new_algo_order(
+                    symbol=intent.symbol,
+                    side=close_side,
+                    order_type="STOP_MARKET",
+                    stop_price=stop_price,
+                    close_position=True,
+                    position_side=position_side,
+                    client_algo_id=_client_order_id(intent, suffix="fbsl"),
+                )
+                response["submitted_types"].append("STOP")
+            except BinanceSignedError as exc:
+                response["stop_loss_error"] = _signed_error_payload(exc)
+        if "TAKE_PROFIT" not in existing_types:
+            try:
+                response["take_profit_order"] = self.signed_client.new_algo_order(
+                    symbol=intent.symbol,
+                    side=close_side,
+                    order_type="TAKE_PROFIT_MARKET",
+                    stop_price=target_price,
+                    close_position=True,
+                    position_side=position_side,
+                    client_algo_id=_client_order_id(intent, suffix="fbtp"),
+                )
+                response["submitted_types"].append("TAKE_PROFIT")
+            except BinanceSignedError as exc:
+                response["take_profit_error"] = _signed_error_payload(exc)
+        return response
+
+    def _emergency_close_position(self, intent: OrderIntent, *, position_side: str | None) -> dict[str, Any]:
+        assert self.signed_client is not None
+        try:
+            return {
+                "status": "submitted",
+                "order": self.signed_client.new_order(
+                    symbol=intent.symbol,
+                    side=_opposite_side(intent.side),
+                    order_type="MARKET",
+                    quantity=intent.quantity,
+                    reduce_only=_reduce_only_supported(self.config),
+                    position_side=position_side,
+                    new_client_order_id=_client_order_id(intent, suffix="close"),
+                ),
+            }
+        except BinanceSignedError as exc:
+            return {"status": "failed", **_signed_error_payload(exc)}
 
     def _resolve_limit_entry(self, intent: OrderIntent, *, client_order_id: str) -> LimitEntryResolution:
         assert self.signed_client is not None
@@ -681,6 +886,36 @@ class ExecutionEngine:
             )
         return LimitEntryResolution(
             status="entry_order_expired_canceled",
+            submitted=False,
+            intent=intent,
+            response=response,
+        )
+
+    def _cancel_unknown_limit_entry(
+        self,
+        intent: OrderIntent,
+        *,
+        client_order_id: str,
+        error: BinanceSignedError,
+    ) -> LimitEntryResolution:
+        assert self.signed_client is not None
+        response: dict[str, Any] = {
+            "entry_order_query_error": _signed_error_payload(error),
+            "entry_order_final": {"status": "UNKNOWN"},
+            "limit_entry_unknown_resolution": "cancel_attempted_after_query_not_found",
+        }
+        status = "entry_order_unknown_canceled"
+        try:
+            response["entry_order_cancel"] = self.signed_client.cancel_order(
+                symbol=intent.symbol,
+                orig_client_order_id=client_order_id,
+            )
+        except BinanceSignedError as exc:
+            response["entry_order_cancel_error"] = _signed_error_payload(exc)
+            response["limit_entry_unknown_resolution"] = "cancel_failed_after_query_not_found"
+            status = "entry_order_unknown_cancel_failed"
+        return LimitEntryResolution(
+            status=status,
             submitted=False,
             intent=intent,
             response=response,
@@ -889,10 +1124,26 @@ def _repriced_post_only_intent(
         adjusted = _round_decimal(price + offset, tick_size, up=True)
     if adjusted <= 0:
         return intent
+    stop_price = intent.stop_price
+    target_price = intent.target_price
+    reason_codes = list(intent.reason_codes)
+    metadata = dict(intent.metadata)
+    if _is_micro_grid_intent(intent):
+        stop_price, target_price, reanchor = _micro_grid_fill_reanchored_protective_prices(intent, float(adjusted))
+        if reanchor:
+            reason_codes.append("micro_grid_reprice_reanchored_protective_prices")
+            metadata["micro_grid_reprice_reanchor"] = {
+                **reanchor,
+                "model": "micro_grid_reprice_reanchor_v1",
+            }
     return replace(
         intent,
         entry_price=float(adjusted),
         notional_usdt=float(Decimal(str(intent.quantity)) * adjusted),
+        stop_price=stop_price,
+        target_price=target_price,
+        reason_codes=reason_codes,
+        metadata=metadata,
     )
 
 
@@ -909,7 +1160,48 @@ def _limit_wait_seconds(intent: OrderIntent) -> float:
         parsed = float(intent.limit_wait_seconds or 45)
     except (TypeError, ValueError):
         parsed = 45.0
-    return max(1.0, min(parsed, 90.0))
+    return max(1.0, min(parsed, 1800.0))
+
+
+def _defer_limit_entry_resolution(config: AppConfig, intent: OrderIntent) -> bool:
+    if not _truthy(config.get("BFA_LIMIT_ENTRY_DEFER_ENABLED", "false")):
+        return False
+    try:
+        minimum = float(config.get("BFA_LIMIT_ENTRY_DEFER_MIN_WAIT_SECONDS", "60") or 60)
+    except (TypeError, ValueError):
+        minimum = 60.0
+    return _limit_wait_seconds(intent) >= max(1.0, minimum)
+
+
+def _pending_limit_intent(intent: OrderIntent, *, client_order_id: str) -> OrderIntent:
+    return replace(
+        intent,
+        reason_codes=_dedupe([*intent.reason_codes, "entry_order_pending", "pending_limit_watchdog_required"]),
+        metadata={
+            **intent.metadata,
+            "client_order_id": client_order_id,
+            "pending_limit_watchdog": {
+                "status": "waiting_for_fill",
+                "client_order_id": client_order_id,
+                "limit_wait_seconds": _limit_wait_seconds(intent),
+            },
+        },
+    )
+
+
+def _truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
 
 
 def _leverage_fallback_sequence(requested: int) -> list[int]:
@@ -954,12 +1246,67 @@ def _intent_with_fill(intent: OrderIntent, payload: dict) -> OrderIntent:
     if quantity <= 0:
         return intent
     fill_price = _average_fill_price(payload, intent.entry_price)
+    stop_price = intent.stop_price
+    target_price = intent.target_price
+    reason_codes = list(intent.reason_codes)
+    metadata = dict(intent.metadata)
+    if _is_micro_grid_intent(intent):
+        stop_price, target_price, reanchor = _micro_grid_fill_reanchored_protective_prices(intent, fill_price)
+        if reanchor:
+            reason_codes.append("micro_grid_fill_reanchored_protective_prices")
+            metadata["micro_grid_fill_reanchor"] = reanchor
     return replace(
         intent,
         quantity=quantity,
         notional_usdt=quantity * fill_price,
         entry_price=fill_price,
+        stop_price=stop_price,
+        target_price=target_price,
+        reason_codes=reason_codes,
+        metadata=metadata,
     )
+
+
+def _is_micro_grid_intent(intent: OrderIntent) -> bool:
+    metadata = intent.metadata if isinstance(intent.metadata, Mapping) else {}
+    if str(metadata.get("strategy_leg") or "").strip().lower() == "micro_grid":
+        return True
+    return any(str(reason).strip().lower() == "strategy_leg:micro_grid" for reason in intent.reason_codes)
+
+
+def _micro_grid_fill_reanchored_protective_prices(intent: OrderIntent, fill_price: float) -> tuple[float, float, dict[str, Any] | None]:
+    old_entry = intent.entry_price
+    if old_entry <= 0 or fill_price <= 0:
+        return intent.stop_price, intent.target_price, None
+    risk_fraction = abs(old_entry - intent.stop_price) / old_entry
+    reward_fraction = abs(intent.target_price - old_entry) / old_entry
+    if risk_fraction <= 0 or reward_fraction <= 0:
+        return intent.stop_price, intent.target_price, None
+
+    if intent.side.upper() == "BUY":
+        reanchored_stop = fill_price * (1.0 - risk_fraction)
+        reanchored_target = fill_price * (1.0 + reward_fraction)
+        stop_price = min(intent.stop_price, reanchored_stop)
+        target_price = intent.target_price if fill_price <= old_entry else max(intent.target_price, reanchored_target)
+        fill_quality = "better_or_equal" if fill_price <= old_entry else "worse"
+    else:
+        reanchored_stop = fill_price * (1.0 + risk_fraction)
+        reanchored_target = fill_price * (1.0 - reward_fraction)
+        stop_price = max(intent.stop_price, reanchored_stop)
+        target_price = intent.target_price if fill_price >= old_entry else min(intent.target_price, reanchored_target)
+        fill_quality = "better_or_equal" if fill_price >= old_entry else "worse"
+    return stop_price, target_price, {
+        "model": "micro_grid_fill_reanchor_v1",
+        "fill_quality": fill_quality,
+        "original_entry_price": old_entry,
+        "fill_price": fill_price,
+        "original_stop_price": intent.stop_price,
+        "original_target_price": intent.target_price,
+        "reanchored_stop_price": stop_price,
+        "reanchored_target_price": target_price,
+        "risk_fraction": risk_fraction,
+        "reward_fraction": reward_fraction,
+    }
 
 
 def _opposite_side(side: str) -> str:
@@ -978,6 +1325,23 @@ def _protective_orders_required(config: AppConfig) -> bool:
 def _is_existing_close_position_algo_error(exc: BinanceSignedError) -> bool:
     message = exc.binance_message.lower()
     return exc.binance_code == -4130 and "closeposition" in message and "existing" in message
+
+
+def _is_stale_unknown_order_error(exc: BinanceSignedError) -> bool:
+    message = (exc.binance_message or "").lower()
+    return exc.binance_code == -2011 and (
+        "unknown order" in message
+        or "does not exist" in message
+        or "not found" in message
+    )
+
+
+def _signed_error_payload(exc: BinanceSignedError) -> dict[str, Any]:
+    return {
+        "endpoint": exc.endpoint,
+        "code": exc.binance_code,
+        "message": exc.binance_message,
+    }
 
 
 def _matching_close_position_algo_order(
@@ -1000,6 +1364,45 @@ def _matching_close_position_algo_order(
     if isinstance(raw_close_position, bool):
         return raw_close_position
     return str(raw_close_position).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _protective_order_kind(order: Mapping[str, Any]) -> str | None:
+    order_type = str(order.get("orderType") or order.get("type") or "").upper()
+    if order_type == "STOP_MARKET" or order_type.startswith("STOP"):
+        return "STOP"
+    if order_type == "TAKE_PROFIT_MARKET" or order_type.startswith("TAKE_PROFIT"):
+        return "TAKE_PROFIT"
+    return None
+
+
+def _fallback_stop_price(intent: OrderIntent, position: Mapping[str, Any]) -> float:
+    entry = _float(position.get("entry_price")) or intent.entry_price
+    mark = _float(position.get("mark_price")) or entry
+    planned_stop = intent.stop_price
+    planned_risk = abs(entry - planned_stop)
+    emergency_risk = max(planned_risk * 1.35, abs(entry) * 0.006, abs(mark) * 0.004)
+    if intent.side.upper() == "BUY":
+        return min(planned_stop, mark - emergency_risk)
+    return max(planned_stop, mark + emergency_risk)
+
+
+def _fallback_target_price(intent: OrderIntent, position: Mapping[str, Any]) -> float:
+    entry = _float(position.get("entry_price")) or intent.entry_price
+    mark = _float(position.get("mark_price")) or entry
+    planned_target = intent.target_price
+    planned_reward = abs(planned_target - entry)
+    fallback_reward = max(planned_reward * 0.75, abs(entry) * 0.006, abs(mark) * 0.004)
+    if intent.side.upper() == "BUY":
+        return max(planned_target, mark + fallback_reward)
+    return min(planned_target, mark - fallback_reward)
+
+
+def _status_for_protective_resolution(resolution_status: str, *, current_status: str) -> str:
+    if resolution_status == "no_matching_position":
+        return "protective_order_failed_no_position"
+    if resolution_status == "fallback_stop_submitted":
+        return "protective_order_degraded_stop_only"
+    return current_status
 
 
 def _binance_margin_type(config: AppConfig) -> str:

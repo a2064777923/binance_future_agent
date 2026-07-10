@@ -90,6 +90,29 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertAlmostEqual(intent.quantity, 0.2)
         self.assertAlmostEqual(intent.estimated_initial_margin_usdt, 20 / 3)
 
+    def test_trend_limit_wait_allows_half_hour_intent(self):
+        validation = self.validation(
+            reasons=[
+                "strategy_leg:trend",
+                "regime_label:TREND",
+                "entry_order_type:limit",
+                "entry_time_in_force:GTX",
+                "limit_entry_max_wait_seconds:1800",
+            ],
+        )
+
+        intent, risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.limit_wait_seconds, 1800)
+
     def test_ai_pass_creates_no_intent(self):
         validation = self.validation(
             decision="pass",
@@ -187,6 +210,57 @@ class ExecutionRiskTests(unittest.TestCase):
 
         self.assertTrue(risk.accepted)
         self.assertEqual(risk.reason_codes, ["risk_accepted"])
+
+    def test_usdt_and_usdc_pairs_share_duplicate_exposure_key(self):
+        validation = self.validation(reasons=["execution_symbol_preference:usdc", "source_symbol:BTCUSDT"])
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDC",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
+
+    def test_usdt_and_usdc_pairs_share_opposite_exposure_key(self):
+        validation = self.validation(
+            side="short",
+            stop_price=104.0,
+            target_price=92.0,
+            reasons=["execution_symbol_preference:usdc", "source_symbol:BTCUSDT"],
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDC",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(active_positions=1, active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("same_symbol_opposite_exposure_blocked", risk.reason_codes)
 
     def test_micro_grid_intent_can_use_extra_open_position_slots(self):
         validation = self.validation(
@@ -472,6 +546,49 @@ class ExecutionRiskTests(unittest.TestCase):
 
         self.assertFalse(risk.accepted)
         self.assertIn("portfolio_margin_cap_reached", risk.reason_codes)
+
+    def test_manual_positions_do_not_consume_bot_portfolio_margin_cap(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                manual_exposures=[
+                    {
+                        "symbol": "DRAMUSDT",
+                        "direction": "LONG",
+                        "notional_usdt": 1200,
+                        "initial_margin_usdt": 80,
+                    },
+                    {
+                        "symbol": "BABAUSDT",
+                        "direction": "LONG",
+                        "notional_usdt": 900,
+                        "initial_margin_usdt": 45,
+                    },
+                ],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MAX_PORTFOLIO_MARGIN_USDT="8",
+                BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+        self.assertEqual(risk.reason_codes, ["risk_accepted"])
+        self.assertIn("manual_margin_pressure_included", risk.warnings)
 
     def test_multi_position_rejects_same_direction_notional_cap(self):
         validation = self.validation()

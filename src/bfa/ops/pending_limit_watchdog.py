@@ -278,7 +278,7 @@ def _check_pending_intent(
                 execute_protective_orders=execute_protective_orders,
                 position_payload=position_payload,
             )
-    else:
+    elif query is None:
         active_intent, position_payload = _active_intent_from_position(config, client, pending.intent)
         response["position_reconcile"] = position_payload
 

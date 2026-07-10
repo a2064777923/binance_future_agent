@@ -1322,7 +1322,7 @@ class CliTests(unittest.TestCase):
 
     def test_ops_trade_outcome_persists_latest_submitted_trade(self):
         class FakeSignedClient:
-            def user_trades(self, symbol, *, start_time=None, limit=500):
+            def user_trades(self, symbol, *, start_time=None, end_time=None, limit=500):
                 return [
                     {
                         "id": 10,

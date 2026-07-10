@@ -626,7 +626,8 @@ def _candidate_from_bars(symbol: str, bars: list[BacktestBar], config: BacktestC
         "kline_close_position_percent": _close_position_percent(last),
         "kline_quote_volume_change_percent": _momentum_percent(previous.quote_volume, last.quote_volume),
         "reference_price": last.close,
-        "min_executable_notional": 5.0,
+        "min_executable_notional": config.simulation_min_executable_notional_usdt,
+        "min_executable_notional_source": "simulation_default",
     }
     features.update({key: value for key, value in indicators.to_features().items() if value is not None})
     return {

@@ -1,6 +1,6 @@
 import unittest
 
-from bfa.backtest.engine import _hold_bars_from_setup, run_hot_momentum_backtest, run_staged_sweep
+from bfa.backtest.engine import _generate_signals_with_diagnostics, _hold_bars_from_setup, run_hot_momentum_backtest, run_staged_sweep
 from bfa.backtest.models import BacktestBar, BacktestConfig
 from bfa.strategy.setup import TradeSetup
 
@@ -260,6 +260,81 @@ class BacktestEngineTests(unittest.TestCase):
 
         self.assertEqual(result.trade_count, 0)
         self.assertGreater(result.rejected_signals, 0)
+
+    def test_quant_setup_rejection_diagnostics_split_router_and_setup(self):
+        bars = []
+        price = 100.0
+        for index in range(12):
+            close = price * 1.012
+            bars.append(
+                bar(
+                    index,
+                    open_price=price,
+                    high=close * 1.025,
+                    low=price * 0.997,
+                    close=close,
+                    quote_volume=3_000_000,
+                    taker_ratio=1.35,
+                )
+            )
+            price = close
+
+        _, setup_diagnostics = _generate_signals_with_diagnostics(
+            "BTCUSDT",
+            bars,
+            self.config(
+                name="quant_setup_selective",
+                strategy_type="quant_setup",
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=18,
+                max_risk_per_trade_usdt=0.45,
+                max_daily_loss_usdt=1.5,
+                max_open_positions=1,
+                lookback_bars=6,
+                max_hold_bars=4,
+                setup_profile={"name": "selective", "min_edge": 999, "min_indicator_sample_size": 6},
+            ),
+        )
+
+        self.assertGreater(setup_diagnostics.rejected, 0)
+        self.assertTrue(any(key.startswith("setup_reason:") for key in setup_diagnostics.rejection_counts))
+
+        route_bars = []
+        for index in range(12):
+            close = 100.15 if index % 2 == 0 else 99.85
+            route_bars.append(
+                bar(
+                    index,
+                    open_price=100.0,
+                    high=101.2,
+                    low=98.8,
+                    close=close,
+                    quote_volume=3_000_000,
+                    taker_ratio=1.0,
+                )
+            )
+
+        _, route_diagnostics = _generate_signals_with_diagnostics(
+            "BTCUSDT",
+            route_bars,
+            self.config(
+                name="quant_setup_routed",
+                strategy_type="quant_setup",
+                account_capital_usdt=30,
+                max_leverage=10,
+                max_position_notional_usdt=18,
+                max_risk_per_trade_usdt=0.45,
+                max_daily_loss_usdt=1.5,
+                max_open_positions=1,
+                lookback_bars=6,
+                max_hold_bars=4,
+                setup_profile={"name": "routed", "regime_router_enforced": True},
+            ),
+        )
+
+        self.assertGreater(route_diagnostics.rejected, 0)
+        self.assertTrue(any(key.startswith("router:") for key in route_diagnostics.rejection_counts))
 
     def test_quant_setup_trailing_stop_locks_profit_after_favorable_move(self):
         closes = [100, 102, 101, 103, 102, 104]

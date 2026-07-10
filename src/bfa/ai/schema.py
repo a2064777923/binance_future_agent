@@ -72,12 +72,32 @@ class AiDecisionContext:
     risk_limits: RiskLimits
     decided_at: str
     quant_setup: dict[str, Any] | None = None
-    prompt_version: str = "bfa-ai-decision-v2"
+    prompt_version: str = "bfa-ai-decision-v3"
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
             "prompt_version": self.prompt_version,
             "decided_at": self.decided_at,
+            "ai_role": {
+                "mode": "trend_veto_overlay",
+                "can_approve_quant_setup": True,
+                "can_veto_quant_setup": True,
+                "can_modify_live_entry_stop_target": False,
+                "point_adjustment_mode": "research_shadow_only_not_live",
+            },
+            "data_capabilities": {
+                "market_snapshots": True,
+                "kline_indicators": True,
+                "macd": True,
+                "taker_flow": True,
+                "funding_rate": True,
+                "open_interest": True,
+                "regime_router": True,
+                "order_book_l2": False,
+                "book_ticker_or_depth_summary": False,
+                "onchain_data": False,
+                "external_news_social_realtime": "only_if_narrative_records_present",
+            },
             "candidate": dict(self.candidate),
             "risk_limits": self.risk_limits.to_dict(),
         }
@@ -230,10 +250,32 @@ def _compact_candidate(candidate: Mapping[str, Any]) -> dict[str, Any]:
                 "ema_fast",
                 "ema_slow",
                 "ema_spread_percent",
+                "macd_line",
+                "macd_signal",
+                "macd_histogram",
+                "macd_histogram_percent",
                 "rsi",
                 "indicator_sample_size",
                 "reference_price",
                 "min_executable_notional",
+                "strategy_leg",
+                "regime_label",
+                "regime_confidence",
+                "regime_reason_codes",
+                "allowed_strategy_legs",
+                "route_decision",
+                "route_shadow_only",
+                "regime_diagnostics",
+                "setup_signal_mode",
+                "setup_signal_diagnostics",
+                "range_width_percent",
+                "range_path_efficiency",
+                "range_edge_alternation_count",
+                "range_drift_to_width",
+                "range_close_position_percent",
+                "market_context_source",
+                "min_executable_notional_source",
+                "micro_grid_latency",
                 "quality_notes",
             )
             if key in features

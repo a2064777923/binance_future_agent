@@ -168,6 +168,161 @@ class MicroGridResearchScriptTests(unittest.TestCase):
             trend_direction=None,
         )
 
+    def test_state_rejection_can_block_overheated_edge_response(self):
+        state = self.state()
+
+        relaxed = research.state_rejection_reasons(state, self.profile())
+        strict = research.state_rejection_reasons(state, self.profile(max_reversal_response_rate=0.70))
+
+        self.assertNotIn("overheated_edge_reversal_response", relaxed)
+        self.assertIn("overheated_edge_reversal_response", strict)
+
+    def test_target_progress_trailing_only_locks_after_mean_reversion_progress(self):
+        state = self.state()
+        long_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=state.signal_index,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=104.0,
+            state=state,
+            reason_codes=[],
+            max_hold_seconds=120,
+            size_weight=1.0,
+        )
+
+        disabled_stop = research.update_trailing_stop(
+            long_order,
+            self.profile(target_progress_trailing_enabled=False),
+            best_price=103.0,
+            current_stop=98.0,
+        )
+        enabled_stop = research.update_trailing_stop(
+            long_order,
+            self.profile(
+                target_progress_trailing_enabled=True,
+                target_progress_activate_fraction=0.65,
+                target_progress_lock_fraction=0.22,
+                target_progress_giveback_fraction=0.45,
+            ),
+            best_price=103.0,
+            current_stop=98.0,
+        )
+
+        self.assertEqual(disabled_stop, 98.0)
+        self.assertAlmostEqual(enabled_stop, 101.2)
+
+    def test_target_progress_trailing_handles_short_side_symmetrically(self):
+        state = self.state()
+        short_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="short",
+            signal_index=state.signal_index,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=102.0,
+            target_price=96.0,
+            state=state,
+            reason_codes=[],
+            max_hold_seconds=120,
+            size_weight=1.0,
+        )
+
+        stop = research.update_trailing_stop(
+            short_order,
+            self.profile(
+                target_progress_trailing_enabled=True,
+                target_progress_activate_fraction=0.65,
+                target_progress_lock_fraction=0.22,
+                target_progress_giveback_fraction=0.45,
+            ),
+            best_price=97.0,
+            current_stop=102.0,
+        )
+
+        self.assertAlmostEqual(stop, 98.8)
+
+    def test_adaptive_profit_lock_waits_longer_when_continuation_confidence_is_high(self):
+        state = self.state()
+        base = dict(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=state.signal_index,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=104.0,
+            state=state,
+            max_hold_seconds=120,
+            size_weight=1.0,
+        )
+        low_confidence = research.GridOrder(
+            **base,
+            reason_codes=[
+                "edge_reversal_ready:False",
+                "entry_reversal_fraction:0.05",
+                "entry_continuation_fraction:0.18",
+                "wick_success_rate:0.2",
+                "wick_score:0.2",
+                "net_notional_reward_percent:0.2",
+                "long_pullback_quality:0.1",
+            ],
+        )
+        high_confidence = research.GridOrder(
+            **base,
+            reason_codes=[
+                "edge_reversal_ready:True",
+                "entry_reversal_fraction:0.35",
+                "entry_continuation_fraction:0.0",
+                "wick_success_rate:0.9",
+                "wick_score:0.9",
+                "net_notional_reward_percent:1.0",
+                "long_pullback_quality:0.9",
+            ],
+        )
+        profile = self.profile(adaptive_profit_lock_enabled=True)
+
+        low_stop = research.update_trailing_stop(low_confidence, profile, best_price=103.0, current_stop=98.0)
+        high_stop = research.update_trailing_stop(high_confidence, profile, best_price=103.0, current_stop=98.0)
+
+        self.assertGreater(low_stop, 100.0)
+        self.assertEqual(high_stop, 98.0)
+
+    def test_adaptive_profit_lock_handles_short_side(self):
+        state = self.state()
+        short_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="short",
+            signal_index=state.signal_index,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=102.0,
+            target_price=96.0,
+            state=state,
+            reason_codes=[
+                "edge_reversal_ready:False",
+                "entry_reversal_fraction:0.05",
+                "entry_continuation_fraction:0.18",
+                "wick_success_rate:0.2",
+                "wick_score:0.2",
+                "net_notional_reward_percent:0.2",
+                "short_pullback_quality:0.1",
+            ],
+            max_hold_seconds=120,
+            size_weight=1.0,
+        )
+
+        stop = research.update_trailing_stop(
+            short_order,
+            self.profile(adaptive_profit_lock_enabled=True),
+            best_price=97.0,
+            current_stop=102.0,
+        )
+
+        self.assertLess(stop, 100.0)
+
     def test_micro_oscillation_state_creates_low_buy_and_high_short_orders(self):
         seconds = oscillating_seconds(count=120)
         profile = self.profile(wick_require_positive_ev=False)
@@ -312,6 +467,7 @@ class MicroGridResearchScriptTests(unittest.TestCase):
                     wick_ev_min_fills=2,
                     wick_ev_confidence_z=0.0,
                     wick_ev_walk_forward_enabled=False,
+                    spike_depth_entry_enabled=False,
                     wick_min_samples=2,
                 ),
             )
@@ -827,6 +983,162 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertTrue(all(entry < state.current_price for entry in long_entries))
         self.assertTrue(all(entry > state.current_price for entry in short_entries))
 
+    def test_dynamic_entry_edge_starts_just_outside_band_edge(self):
+        state = research.replace(
+            self.state(),
+            current_price=100.0,
+            long_entry_edge_fraction=0.42,
+            short_entry_edge_fraction=0.42,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_entry_base_edge_fraction=-0.08,
+                dynamic_entry_max_push_fraction=0.24,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        short = next(order for order in orders if order.side == "short")
+        self.assertAlmostEqual(research.edge_fraction_for_order("long", long.entry_price, state), -0.08)
+        self.assertAlmostEqual(research.edge_fraction_for_order("short", short.entry_price, state), -0.08)
+        self.assertIn("dynamic_entry_base_edge_fraction:-0.08", long.reason_codes)
+        self.assertIn("dynamic_entry_applied_edge_fraction:-0.08", short.reason_codes)
+
+    def test_dynamic_entry_edge_pushes_farther_when_flow_and_momentum_are_forceful(self):
+        state = research.replace(
+            self.state(),
+            current_price=100.0,
+            long_entry_edge_fraction=0.42,
+            short_entry_edge_fraction=0.42,
+            recent_drift_percent=-1.4,
+            instantaneous_vol_percent=0.8,
+            recent_spike_depth_percent=2.0,
+            entry_taker_buy_ratio=0.18,
+            long_entry_continuation_fraction=0.18,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_entry_base_edge_fraction=-0.08,
+                dynamic_entry_max_push_fraction=0.24,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        long_edge = research.edge_fraction_for_order("long", long.entry_price, state)
+        self.assertLess(long_edge, -0.08)
+        self.assertGreaterEqual(long_edge + 1e-9, -0.32)
+        self.assertTrue(any(code.startswith("dynamic_entry_total_push_fraction:") for code in long.reason_codes))
+        self.assertIn("dynamic_entry_flow_pressure:1.0", long.reason_codes)
+
+    def test_dynamic_exit_geometry_uses_flow_volatility_and_mean_reversion_target(self):
+        state = research.replace(
+            self.state(),
+            current_price=100.0,
+            long_entry_edge_fraction=0.42,
+            short_entry_edge_fraction=0.42,
+            long_stop_span_fraction=0.12,
+            long_target_span_fraction=0.20,
+            recent_drift_percent=-1.4,
+            instantaneous_vol_percent=0.8,
+            recent_spike_depth_percent=2.0,
+            entry_taker_buy_ratio=0.18,
+            long_entry_continuation_fraction=0.12,
+            long_wick_success_rate=0.75,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_entry_base_edge_fraction=-0.08,
+                dynamic_entry_max_push_fraction=0.24,
+                dynamic_exit_geometry_enabled=True,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=False,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        long = next(order for order in orders if order.side == "long")
+        values = research.reason_code_map(long.reason_codes)
+        stop_fraction = research.code_float(values, "dynamic_exit_stop_span_fraction", 0.0)
+        target_fraction = research.code_float(values, "dynamic_exit_target_span_fraction", 0.0)
+        edge_fraction = research.edge_fraction_for_order("long", long.entry_price, state)
+
+        self.assertGreater(stop_fraction, 0.12)
+        self.assertGreater(target_fraction, 0.50 - edge_fraction - 0.08)
+        self.assertTrue(any(code.startswith("dynamic_exit_quality:") for code in long.reason_codes))
+        self.assertTrue(any(code.startswith("dynamic_exit_stop_pressure:") for code in long.reason_codes))
+
+    def test_spike_depth_entry_can_extend_beyond_legacy_min_edge_for_upper_wick_short(self):
+        state = research.replace(
+            self.state(),
+            current_price=101.2,
+            lower_price=98.0,
+            upper_price=102.0,
+            width_percent=4.0,
+            close_position_percent=92.0,
+            short_entry_edge_fraction=0.42,
+            short_stop_span_fraction=0.18,
+            short_target_span_fraction=0.35,
+            recent_spike_depth_percent=2.4,
+            recent_drift_percent=1.2,
+            instantaneous_vol_percent=0.5,
+            entry_taker_buy_ratio=0.62,
+            short_pullback_quality=0.55,
+            short_entry_continuation_fraction=0.02,
+        )
+
+        orders = research.build_grid_orders(
+            "TESTUSDT",
+            state,
+            self.profile(
+                dynamic_entry_edge_enabled=True,
+                dynamic_exit_geometry_enabled=True,
+                pullback_model_enabled=False,
+                spike_depth_entry_enabled=True,
+                spike_depth_entry_fraction=0.92,
+                spike_depth_tail_buffer_fraction=0.22,
+                spike_depth_stop_fraction=1.45,
+                spike_depth_max_entry_edge_fraction=-1.35,
+                spike_depth_max_stop_fraction=1.25,
+                min_reservation_edge_fraction=-0.36,
+                wick_min_entry_fraction=-1.35,
+                wick_max_stop_fraction=0.72,
+                dynamic_exit_max_stop_fraction=0.78,
+                grid_layer_count=1,
+                wick_require_positive_ev=False,
+            ),
+        )
+
+        short = next(order for order in orders if order.side == "short")
+        values = research.reason_code_map(short.reason_codes)
+        short_edge = research.edge_fraction_for_order("short", short.entry_price, state)
+        stop_fraction = research.code_float(values, "stop_span_fraction", 0.0)
+
+        self.assertLess(short_edge, -0.36)
+        self.assertGreater(stop_fraction, 0.56)
+        self.assertIn("spike_depth_dynamic_min_edge_fraction:-", " ".join(short.reason_codes))
+        self.assertTrue(any(code.startswith("spike_depth_short_tail_pressure:") for code in short.reason_codes))
+
     def test_directional_path_is_rejected_as_trend_pause(self):
         state, reasons = research.build_micro_grid_state(trend_seconds(count=120), 80, self.profile())
 
@@ -894,6 +1206,31 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertEqual(reason, "extended_to_cost_floor")
         self.assertGreater(target, 98.58)
         self.assertGreaterEqual(research.percent_delta(98.5, target), 0.095)
+
+    def test_fresh_edge_reversal_reasons_reduce_quality_but_do_not_block(self):
+        scale, reasons = research.micro_trade_quality_scale_from_reason_codes(
+            [
+                "stable_width_percent:0.6",
+                "edge_reversal_reason:upper_extreme_too_fresh",
+                "basket_size_weight:0.75",
+            ]
+        )
+
+        self.assertGreater(scale, 0.0)
+        self.assertLess(scale, 1.0)
+        self.assertIn("quality_edge_reversal_fresh:upper_extreme_too_fresh", reasons)
+
+    def test_directional_entry_path_still_blocks_micro_grid_quality(self):
+        scale, reasons = research.micro_trade_quality_scale_from_reason_codes(
+            [
+                "stable_width_percent:0.6",
+                "edge_reversal_reason:entry_path_too_directional",
+                "basket_size_weight:0.75",
+            ]
+        )
+
+        self.assertEqual(scale, 0.0)
+        self.assertIn("quality_edge_reversal_blocked:entry_path_too_directional", reasons)
 
     def test_default_cost_aware_target_only_requires_nominal_fee_coverage(self):
         state = self.state()
@@ -1204,6 +1541,79 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertEqual(trade.exit_reason, "same_bar_stop")
         self.assertLess(trade.net_pnl_usdt, 0)
 
+    def test_post_fill_confirmation_exits_when_fill_does_not_revert(self):
+        seconds = [
+            bar("TESTUSDT", 0, open_price=101, high=101, low=99.6, close=100.0),
+            bar("TESTUSDT", 1, open_price=100.0, high=100.0, low=99.3, close=99.5),
+        ]
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=0,
+            signal_time=seconds[0].open_time_iso,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=104.0,
+            state=self.state(),
+            reason_codes=["signal_mode:micro_smart_grid"],
+        )
+        ticks = tick_stream("TESTUSDT", [(100, 100.0), (2_000, 99.8), (4_000, 99.65), (9_000, 99.7)])
+
+        trade, status, fill_index = research.simulate_grid_order(
+            seconds,
+            order,
+            self.profile(
+                max_hold_seconds=20,
+                post_fill_confirmation_enabled=True,
+                post_fill_confirmation_seconds=8,
+                post_fill_confirmation_min_progress=0.08,
+                post_fill_confirmation_max_adverse_progress=0.20,
+                post_fill_confirmation_exit_loss_fraction=0.30,
+            ),
+            notional_usdt=100,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertEqual(fill_index, 0)
+        self.assertIsNotNone(trade)
+        self.assertEqual(trade.exit_reason, "post_fill_confirmation_exit")
+        self.assertIn("post_fill_confirmation_reason:post_fill_confirmation_no_reversal", trade.reason_codes)
+        self.assertLess(trade.net_pnl_usdt, 0)
+        self.assertGreater(trade.net_pnl_usdt, -1.0)
+
+    def test_post_fill_confirmation_does_not_override_original_target(self):
+        seconds = [
+            bar("TESTUSDT", 0, open_price=101, high=104.5, low=99.8, close=104.0),
+            bar("TESTUSDT", 1, open_price=104.0, high=104.0, low=104.0, close=104.0),
+        ]
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=0,
+            signal_time=seconds[0].open_time_iso,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=104.0,
+            state=self.state(),
+            reason_codes=["signal_mode:micro_smart_grid"],
+        )
+        ticks = tick_stream("TESTUSDT", [(100, 100.0), (1_000, 101.0), (2_000, 104.1), (3_000, 103.6)])
+
+        trade, status, fill_index = research.simulate_grid_order(
+            seconds,
+            order,
+            self.profile(max_hold_seconds=20, post_fill_confirmation_enabled=True),
+            notional_usdt=100,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertEqual(fill_index, 0)
+        self.assertIsNotNone(trade)
+        self.assertEqual(trade.exit_reason, "take_profit")
+        self.assertGreater(trade.net_pnl_usdt, 0)
+
     def test_tick_replay_can_hold_across_full_oscillation_wave(self):
         seconds = [
             bar("TESTUSDT", index, open_price=100.0, high=103.0, low=99.8, close=101.0)
@@ -1469,6 +1879,29 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertEqual(scaled["pullback_scale_cap"], 0.35)
         self.assertEqual(scaled["notional_usdt"], 7.0)
         self.assertEqual(scaled["initial_margin_usdt"], 0.7)
+
+    def test_live_like_pullback_scale_mode_does_not_cap_portfolio_scale(self):
+        trade = research.replace(
+            self.trade("AAAUSDT", entry_index=0, exit_index=10, net_pnl=1.0),
+            reason_codes=["pullback_size_multiplier:0.35"],
+        )
+
+        replay = research.replay_portfolio(
+            [trade],
+            profile=self.profile(),
+            initial_capital=30.0,
+            max_open_positions=1,
+            risk_per_trade_fraction=10.0,
+            max_notional_fraction=10.0,
+            max_margin_fraction=0.4,
+            max_leverage=10.0,
+            pullback_scale_mode="none",
+        )
+
+        scaled = replay["trades"][0]
+        self.assertEqual(scaled["pullback_scale_cap"], 0.35)
+        self.assertEqual(scaled["notional_usdt"], 120.0)
+        self.assertEqual(scaled["initial_margin_usdt"], 12.0)
 
     def test_portfolio_replay_cools_symbol_after_daily_loss(self):
         loser = self.trade("AAAUSDT", entry_index=0, exit_index=5, net_pnl=-1.0)

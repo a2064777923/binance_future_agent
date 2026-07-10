@@ -28,6 +28,10 @@ class IndicatorSnapshot:
     ema_fast: float | None
     ema_slow: float | None
     ema_spread_percent: float | None
+    macd_line: float | None
+    macd_signal: float | None
+    macd_histogram: float | None
+    macd_histogram_percent: float | None
     rsi: float | None
     close_position_percent: float | None
     volume_change_percent: float | None
@@ -45,6 +49,10 @@ class IndicatorSnapshot:
             "ema_fast": self.ema_fast,
             "ema_slow": self.ema_slow,
             "ema_spread_percent": self.ema_spread_percent,
+            "macd_line": self.macd_line,
+            "macd_signal": self.macd_signal,
+            "macd_histogram": self.macd_histogram,
+            "macd_histogram_percent": self.macd_histogram_percent,
             "rsi": self.rsi,
             "kline_close_position_percent": self.close_position_percent,
             "kline_quote_volume_change_percent": self.volume_change_percent,
@@ -85,6 +93,10 @@ def compute_indicator_snapshot(points: Iterable[KlinePoint]) -> IndicatorSnapsho
             ema_fast=None,
             ema_slow=None,
             ema_spread_percent=None,
+            macd_line=None,
+            macd_signal=None,
+            macd_histogram=None,
+            macd_histogram_percent=None,
             rsi=None,
             close_position_percent=None,
             volume_change_percent=None,
@@ -101,6 +113,7 @@ def compute_indicator_snapshot(points: Iterable[KlinePoint]) -> IndicatorSnapsho
     ema_fast = _ema(closes, fast_period)
     ema_slow = _ema(closes, slow_period)
     ema_spread = _percent_delta(ema_slow, ema_fast) if ema_fast is not None and ema_slow is not None else None
+    macd = _macd(closes)
 
     return IndicatorSnapshot(
         sample_size=len(series),
@@ -113,6 +126,12 @@ def compute_indicator_snapshot(points: Iterable[KlinePoint]) -> IndicatorSnapsho
         ema_fast=ema_fast,
         ema_slow=ema_slow,
         ema_spread_percent=ema_spread,
+        macd_line=macd["line"],
+        macd_signal=macd["signal"],
+        macd_histogram=macd["histogram"],
+        macd_histogram_percent=_percent_delta(reference, reference + macd["histogram"])
+        if macd["histogram"] is not None and reference > 0
+        else None,
         rsi=_rsi(closes),
         close_position_percent=_close_position_percent(series[-1]),
         volume_change_percent=_volume_change_percent(series),
@@ -129,6 +148,35 @@ def _ema(values: list[float], period: int) -> float | None:
     for value in values[1:]:
         ema = value * alpha + ema * (1.0 - alpha)
     return ema
+
+
+def _ema_series(values: list[float], period: int) -> list[float]:
+    if not values or period <= 0:
+        return []
+    alpha = 2.0 / (period + 1)
+    ema = values[0]
+    series = [ema]
+    for value in values[1:]:
+        ema = value * alpha + ema * (1.0 - alpha)
+        series.append(ema)
+    return series
+
+
+def _macd(closes: list[float]) -> dict[str, float | None]:
+    if len(closes) < 3:
+        return {"line": None, "signal": None, "histogram": None}
+    fast_period = min(12, len(closes))
+    slow_period = min(26, len(closes))
+    signal_period = min(9, len(closes))
+    fast = _ema_series(closes, fast_period)
+    slow = _ema_series(closes, slow_period)
+    if len(fast) != len(slow):
+        return {"line": None, "signal": None, "histogram": None}
+    macd_series = [fast_value - slow_value for fast_value, slow_value in zip(fast, slow)]
+    signal = _ema(macd_series, signal_period)
+    line = macd_series[-1] if macd_series else None
+    histogram = line - signal if line is not None and signal is not None else None
+    return {"line": line, "signal": signal, "histogram": histogram}
 
 
 def _rsi(closes: list[float], period: int = 14) -> float | None:

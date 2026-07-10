@@ -804,6 +804,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="also fetch submitted intents that already have a closed outcome",
     )
     reconcile_outcomes.add_argument("--limit", type=int, default=500, help="maximum userTrades rows per intent")
+    reconcile_outcomes.add_argument(
+        "--max-intents",
+        type=int,
+        help="only check the newest N submitted intents to keep live reconciliation bounded",
+    )
 
     position_hold_check = ops_subparsers.add_parser(
         "position-hold-check",
@@ -1974,6 +1979,7 @@ def _run_ops(
                 persist_closed=args.persist_closed,
                 include_reconciled=args.include_reconciled,
                 limit=args.limit,
+                max_intents=args.max_intents,
             )
         finally:
             connection.close()

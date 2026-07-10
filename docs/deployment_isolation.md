@@ -1,5 +1,10 @@
 # Deployment Isolation Notes
 
+This is a historical Phase 1 isolation contract. The project is now deployed on
+the server; use `docs/current-live-strategy.md` and `docs/deployment.md` for the
+current live state and runbook. Keep this file only for the original isolation
+rules.
+
 Phase 1 does not deploy to the server. These notes define the future isolation
 contract so later deployment work does not affect existing projects.
 

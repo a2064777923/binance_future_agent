@@ -147,6 +147,10 @@ class TradeSetupProfile:
     block_hot_micro_reversal: bool = False
     block_volume_fade: bool = False
     block_spike_reversal_conflict: bool = False
+    block_trend_edge_exhaustion: bool = False
+    trend_edge_exhaustion_zone_percent: float = 68.0
+    trend_edge_exhaustion_volume_fade_percent: float = -50.0
+    trend_edge_exhaustion_micro_adverse_percent: float = 0.0
     max_adverse_micro_momentum_percent: float | None = None
     min_rsi_for_long: float | None = None
     max_rsi_for_short: float | None = None
@@ -155,6 +159,14 @@ class TradeSetupProfile:
     limit_entry_min_offset_percent: float = 0.04
     limit_entry_max_offset_percent: float = 0.45
     limit_entry_max_wait_seconds: int = 0
+    trend_near_structure_entry_enabled: bool = False
+    trend_near_structure_zone_percent: float = 18.0
+    trend_near_structure_rebound_zone_percent: float = 42.0
+    trend_near_structure_min_gap_percent: float = 0.18
+    trend_near_structure_max_offset_percent: float = 1.65
+    trend_near_structure_breakout_min_volume_change_percent: float = 80.0
+    trend_near_structure_breakout_min_momentum_percent: float = 1.2
+    trend_near_structure_breakout_min_taker_edge: float = 0.12
     min_post_cost_edge_ratio: float = 0.0
     fee_bps: float = 4.0
     slippage_bps: float = 5.0
@@ -177,6 +189,10 @@ class TradeSetupProfile:
     min_entry_quality_score: int = 0
     require_limit_entry_quality: bool = False
     min_limit_entry_quality_score: int = 0
+    require_fresh_trend_confirmation: bool = False
+    fresh_trend_micro_momentum_percent: float = 0.08
+    fresh_trend_taker_flow_edge: float = 0.04
+    fresh_trend_taker_acceleration_edge: float = 0.04
     allow_counter_signal: bool = False
     min_counter_signal_score: int = 0
     enable_orderly_range: bool = False
@@ -192,6 +208,33 @@ class TradeSetupProfile:
     orderly_range_min_edge_alternations: int = 0
     orderly_range_min_mid_cross_count: int = 0
     orderly_range_min_width_cost_ratio: float = 0.0
+    # ML-learned trend filter: when enabled, a trained LightGBM booster scores
+    # P(win) from continuous features and a trade is only allowed when the
+    # probability clears ``ml_trend_threshold``. This supersedes the brittle
+    # boolean-gate stack (require_entry_quality / block_* / confluence / mtf)
+    # for the trend leg, which over-rejected and starved the system. The model
+    # path and threshold are calibrated offline from 6 months of 23-symbol
+    # data; the gate is additive and defaults off so existing variants are
+    # unaffected.
+    use_ml_trend_filter: bool = False
+    ml_trend_model_path: str = ""
+    ml_trend_threshold: float = 0.55
+    # Lorenzian Distance Classifier confidence modifier for the trend leg: when
+    # enabled, a kNN-over-Lorentzian-distance model predicts the future price
+    # direction from a small feature subset, and the agreement between that
+    # prediction and the setup side shifts confidence symmetrically (aligned
+    # lifts, opposed depresses). It does NOT short-circuit the decision like
+    # the ML trend filter; it only retunes confidence, so existing
+    # min_confidence gates absorb the effect. The artifact (reference dataset
+    # + scaler) is built offline by scripts/research/train_ldc_classifier.py.
+    # Additive and defaults off; enabled via a built_in_variants entry selected
+    # by BFA_LIVE_QUANT_SETUP_VARIANT (mirrors quant_setup_ml_trend).
+    use_ldc_confidence_modifier: bool = False
+    ldc_artifact_path: str = ""
+    ldc_blend_strength: float = 0.06
+    ldc_blend_mode: str = "linear"          # "linear" | "asymmetric"
+    ldc_min_voters: int = 3
+    ldc_confidence_ceiling: float = 0.95
 
 
 STANDARD_SETUP_PROFILE = TradeSetupProfile()
@@ -297,6 +340,7 @@ def build_trade_setup(
         sizing_diagnostics=sizing_diagnostics,
     )
     warnings.extend(sizing_warnings)
+    warnings.extend(_geometry_missing_input_warnings(entry_basis, stop_basis))
     reasons = _setup_reasons(side, factor_scores, regime, warnings)
     reasons = _dedupe([*reasons, f"signal_mode:{signal_diagnostics['mode']}", *_entry_order_reason_codes(entry_basis)])
     decision = "trade"
@@ -304,6 +348,22 @@ def build_trade_setup(
         decision = "pass"
         reasons = _dedupe([*reasons, "notional_not_executable"])
     confidence = _confidence(edge, factor_scores)
+    # LDC confidence modifier retunes confidence from a Lorentzian kNN direction
+    # prediction. Additive and fail-closed: any failure leaves confidence
+    # untouched. Only the trend leg. Diagnostics are merged into price_basis.
+    # confidence_before/after are recorded so the testnet stage can compare
+    # LDC-on vs LDC-off decisions from a single persisted run.
+    if setup_profile.use_ldc_confidence_modifier:
+        confidence_before_ldc = confidence
+        ldc_delta, ldc_diag = _ldc_confidence_modifier(features, side, setup_profile)
+        confidence = min(
+            max(confidence + ldc_delta, 0.0),
+            setup_profile.ldc_confidence_ceiling,
+        )
+        ldc_diag["ldc_confidence_before"] = round(confidence_before_ldc, 4)
+        ldc_diag["ldc_confidence_after"] = round(confidence, 4)
+        price_basis["ldc_diagnostics"] = ldc_diag
+        reasons = _dedupe([*reasons, *ldc_diag.get("ldc_reason_codes", [])])
     if edge < setup_profile.min_edge:
         decision = "pass"
         reasons = _dedupe([*reasons, "factor_edge_too_small"])
@@ -325,15 +385,34 @@ def build_trade_setup(
     if limit_entry_rejections:
         decision = "pass"
         reasons = _dedupe([*reasons, *limit_entry_rejections])
-    if _high_crowding(features, side):
+    fresh_trend = _fresh_trend_confirmation_diagnostics(features, side, signal_diagnostics, setup_profile)
+    price_basis["fresh_trend_confirmation"] = fresh_trend
+    if fresh_trend["rejections"]:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *fresh_trend["rejections"]])
+    crowding_risk, crowding_warnings = _high_crowding(features, side)
+    warnings.extend(crowding_warnings)
+    reasons = _dedupe([*reasons, *crowding_warnings])
+    if crowding_risk:
         warnings.append("crowding_risk")
         reasons = _dedupe([*reasons, "crowding_risk"])
-    profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
-    profile_rejections.extend(_setup_reason_rejections(reasons, setup_profile))
-    profile_rejections.extend(_factor_guard_rejections(factor_scores, setup_profile))
-    if profile_rejections:
-        decision = "pass"
-        reasons = _dedupe([*reasons, *profile_rejections])
+    # ML-learned trend filter short-circuits the boolean-gate stack when
+    # enabled: a single calibrated probability replaces require_entry_quality /
+    # confluence / block_* / mtf checks, which over-rejected and starved the
+    # system. Existing variants keep their boolean gates (flag defaults off).
+    if setup_profile.use_ml_trend_filter:
+        ml_verdict = _ml_trend_filter_rejection(features, side, setup_profile)
+        if ml_verdict:
+            decision = "pass"
+            reasons = _dedupe([*reasons, *ml_verdict])
+        # skip the boolean-gate stack below when ML governs the trend leg
+    else:
+        profile_rejections = _profile_rejections(symbol, features, side, setup_profile)
+        profile_rejections.extend(_setup_reason_rejections(reasons, setup_profile))
+        profile_rejections.extend(_factor_guard_rejections(factor_scores, setup_profile))
+        if profile_rejections:
+            decision = "pass"
+            reasons = _dedupe([*reasons, *profile_rejections])
     if decision == "pass":
         return TradeSetup(
             symbol=symbol,
@@ -654,7 +733,11 @@ def _entry_price(
     order_type = str(profile.entry_order_type or "market").lower()
     if order_type == "limit":
         return _limit_entry_price(reference, side, volatility, features, profile)
-    slippage_buffer = min(max((volatility or 1.0) * 0.015, 0.0005), 0.0015)
+    volatility_basis = volatility
+    missing_volatility = volatility_basis is None
+    if volatility_basis is None:
+        volatility_basis = 2.0
+    slippage_buffer = min(max(volatility_basis * 0.015, 0.0005), 0.0015)
     if side == "long":
         entry = reference * (1.0 + slippage_buffer)
     else:
@@ -663,6 +746,9 @@ def _entry_price(
         "order_type": "market",
         "anchor": "reference_with_slippage_buffer",
         "slippage_buffer_percent": slippage_buffer * 100.0,
+        "volatility_basis_percent": volatility_basis,
+        "volatility_fallback_used": missing_volatility,
+        **({"missing_input": "missing_volatility_for_slippage_buffer"} if missing_volatility else {}),
         "limit_entry_max_wait_seconds": 0,
     }
 
@@ -709,6 +795,20 @@ def _limit_entry_price(
     vwap = _positive_float(features.get("vwap"))
     support = _positive_float(features.get("support_price"))
     resistance = _positive_float(features.get("resistance_price"))
+    structure_guard = _trend_near_structure_entry(
+        reference=reference,
+        side=side,
+        features=features,
+        profile=profile,
+    )
+    structure_entry: dict[str, float | str] | None = None
+    if structure_guard is not None:
+        guard_offset = _float(structure_guard.get("required_offset_percent"))
+        if guard_offset is not None:
+            max_offset = max(max_offset, min(guard_offset, profile.trend_near_structure_max_offset_percent))
+        if bool(structure_guard.get("applied")):
+            structure_entry = {"anchor": str(structure_guard["anchor"]), "price": float(structure_guard["price"])}
+            candidates.append(structure_entry)
     if range_entry is not None:
         candidates.append(range_entry)
 
@@ -719,7 +819,13 @@ def _limit_entry_price(
             candidates.append({"anchor": "vwap_pullback", "price": vwap})
         if support is not None and lower_bound <= support <= upper_bound:
             candidates.append({"anchor": "support_retest", "price": support})
-        selected = range_entry if range_entry is not None else max(candidates, key=lambda item: float(item["price"]))
+        selected = (
+            range_entry
+            if range_entry is not None
+            else structure_entry
+            if structure_entry is not None
+            else max(candidates, key=lambda item: float(item["price"]))
+        )
         entry = _clip(float(selected["price"]), lower_bound, upper_bound)
     else:
         lower_bound = reference * (1.0 + min_offset / 100.0)
@@ -728,11 +834,17 @@ def _limit_entry_price(
             candidates.append({"anchor": "vwap_retest", "price": vwap})
         if resistance is not None and lower_bound <= resistance <= upper_bound:
             candidates.append({"anchor": "resistance_retest", "price": resistance})
-        selected = range_entry if range_entry is not None else min(candidates, key=lambda item: float(item["price"]))
+        selected = (
+            range_entry
+            if range_entry is not None
+            else structure_entry
+            if structure_entry is not None
+            else min(candidates, key=lambda item: float(item["price"]))
+        )
         entry = _clip(float(selected["price"]), lower_bound, upper_bound)
 
     actual_offset = abs(reference - entry) / reference * 100.0
-    return entry, {
+    basis: dict[str, Any] = {
         "order_type": "limit",
         "anchor": str(selected["anchor"]),
         "raw_offset_percent": raw_offset,
@@ -745,6 +857,115 @@ def _limit_entry_price(
             {"anchor": str(item["anchor"]), "price": round(float(item["price"]), 8)} for item in candidates
         ],
     }
+    if structure_guard is not None:
+        basis["trend_near_structure_guard"] = structure_guard
+    return entry, basis
+
+
+def _trend_near_structure_entry(
+    *,
+    reference: float,
+    side: str,
+    features: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> dict[str, Any] | None:
+    if not profile.trend_near_structure_entry_enabled:
+        return None
+    if str(features.get("setup_signal_mode") or "trend_follow") != "trend_follow":
+        return None
+    support = _positive_float(features.get("support_price"))
+    resistance = _positive_float(features.get("resistance_price"))
+    if support is None or resistance is None or resistance <= support:
+        return None
+    span = resistance - support
+    position = (reference - support) / span * 100.0
+    zone = _clip(_float(profile.trend_near_structure_zone_percent) or 0.0, 1.0, 49.0)
+    if side == "short" and position > zone:
+        return None
+    if side == "long" and position < 100.0 - zone:
+        return None
+
+    breakout = _trend_structure_breakout_diagnostics(features, side, profile)
+    if breakout["passed"]:
+        return {
+            "anchor": "near_structure_breakout_exempt_short" if side == "short" else "near_structure_breakout_exempt_long",
+            "price": reference,
+            "applied": False,
+            "position_percent": round(position, 8),
+            "zone_percent": zone,
+            "breakout": breakout,
+            "reason": "strong_directional_flow",
+        }
+
+    rebound_zone = _clip(_float(profile.trend_near_structure_rebound_zone_percent) or 42.0, zone + 1.0, 92.0)
+    min_gap_percent = max(_float(profile.trend_near_structure_min_gap_percent) or 0.0, 0.0)
+    if side == "short":
+        raw_price = support + span * (rebound_zone / 100.0)
+        min_price = reference * (1.0 + min_gap_percent / 100.0)
+        price = max(raw_price, min_price)
+        anchor = "support_nearby_rebound_short"
+    else:
+        raw_price = resistance - span * (rebound_zone / 100.0)
+        max_price = reference * (1.0 - min_gap_percent / 100.0)
+        price = min(raw_price, max_price)
+        anchor = "resistance_nearby_pullback_long"
+    required_offset = abs(price - reference) / reference * 100.0
+    capped_offset = min(required_offset, max(profile.trend_near_structure_max_offset_percent, min_gap_percent))
+    if side == "short":
+        price = reference * (1.0 + capped_offset / 100.0)
+    else:
+        price = reference * (1.0 - capped_offset / 100.0)
+    return {
+        "anchor": anchor,
+        "price": price,
+        "applied": True,
+        "position_percent": round(position, 8),
+        "zone_percent": zone,
+        "rebound_zone_percent": rebound_zone,
+        "required_offset_percent": required_offset,
+        "capped_offset_percent": capped_offset,
+        "min_gap_percent": min_gap_percent,
+        "support_price": support,
+        "resistance_price": resistance,
+        "breakout": breakout,
+    }
+
+
+def _trend_structure_breakout_diagnostics(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> dict[str, Any]:
+    momentum = _float(features.get("kline_momentum_percent"))
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    taker_edge = None if taker_ratio is None else taker_ratio - 1.0
+    min_momentum = max(_float(profile.trend_near_structure_breakout_min_momentum_percent) or 0.0, 0.0)
+    min_volume = _float(profile.trend_near_structure_breakout_min_volume_change_percent)
+    min_taker_edge = max(_float(profile.trend_near_structure_breakout_min_taker_edge) or 0.0, 0.0)
+    if side == "short":
+        momentum_ok = momentum is not None and momentum <= -min_momentum
+        micro_ok = micro is not None and micro <= -min_momentum * 0.12
+        taker_ok = taker_edge is not None and taker_edge <= -min_taker_edge
+    else:
+        momentum_ok = momentum is not None and momentum >= min_momentum
+        micro_ok = micro is not None and micro >= min_momentum * 0.12
+        taker_ok = taker_edge is not None and taker_edge >= min_taker_edge
+    volume_ok = min_volume is None or (volume_change is not None and volume_change >= min_volume)
+    checks = [
+        {"name": "momentum_breakout", "passed": momentum_ok, "value": momentum},
+        {"name": "micro_momentum_breakout", "passed": micro_ok, "value": micro},
+        {"name": "volume_impulse_breakout", "passed": volume_ok, "value": volume_change},
+        {"name": "taker_flow_breakout", "passed": taker_ok, "value": taker_ratio},
+    ]
+    return {
+        "passed": all(item["passed"] for item in checks),
+        "checks": _normalised_checks(checks),
+        "min_momentum_percent": min_momentum,
+        "min_volume_change_percent": min_volume,
+        "min_taker_edge": min_taker_edge,
+    }
 
 
 def _stop_distance_percent(
@@ -756,7 +977,10 @@ def _stop_distance_percent(
 ) -> tuple[float, dict[str, Any]]:
     atr = _float(features.get("atr_percent"))
     realized_volatility = _float(features.get("realized_volatility_percent"))
-    base_volatility = atr or volatility or 1.0
+    base_volatility = atr or volatility or realized_volatility
+    missing_volatility = base_volatility is None
+    if base_volatility is None:
+        base_volatility = 2.0
     if profile.adaptive_stop_enabled:
         adaptive_candidates = [0.65]
         if atr is not None:
@@ -795,6 +1019,9 @@ def _stop_distance_percent(
         "atr_percent": atr,
         "realized_volatility_percent": realized_volatility,
         "volatility_percent": volatility,
+        "base_volatility_percent": base_volatility,
+        "volatility_fallback_used": missing_volatility,
+        **({"missing_input": "missing_volatility_for_stop_geometry"} if missing_volatility else {}),
         "structure_distance_percent": structure_distance,
         "raw_stop_distance_percent": raw_stop_distance,
         "profile_adjusted_stop_distance_percent": profile_adjusted,
@@ -1059,6 +1286,12 @@ def _price_basis(
         "ema_fast": _float(features.get("ema_fast")),
         "ema_slow": _float(features.get("ema_slow")),
         "ema_spread_percent": _float(features.get("ema_spread_percent")),
+        "macd": {
+            "line": _float(features.get("macd_line")),
+            "signal": _float(features.get("macd_signal")),
+            "histogram": _float(features.get("macd_histogram")),
+            "histogram_percent": _float(features.get("macd_histogram_percent")),
+        },
         "rsi": _float(features.get("rsi")),
         "indicator_sample_size": _float(features.get("indicator_sample_size")),
         "entry_basis": _rounded_mapping(entry_basis),
@@ -1079,6 +1312,7 @@ def _price_basis(
             "step_size": _float(features.get("step_size")),
             "min_notional": _float(features.get("min_notional")),
             "min_executable_notional": _float(features.get("min_executable_notional")),
+            "min_executable_notional_source": features.get("min_executable_notional_source"),
         },
         "spike_reversal_reference": _spike_reversal_reference(features),
         "missing_inputs": _missing_geometry_inputs(features),
@@ -1097,6 +1331,140 @@ def _spike_reversal_reference(features: Mapping[str, Any]) -> dict[str, Any] | N
         "stop_price": _positive_float(features.get("spike_reversal_stop_price")),
         "target_price": _positive_float(features.get("spike_reversal_target_price")),
     }
+
+
+# Cached ML booster so repeated setup calls do not re-read the model file.
+_ML_TREND_MODEL_CACHE: dict[str, Any] = {}
+
+
+# Cached LDC artifact so repeated setup calls do not re-read the .npz file.
+_LDC_ARTIFACT_CACHE: dict[str, Any] = {}
+
+
+def _ldc_confidence_modifier(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> tuple[float, dict[str, Any]]:
+    """Run the LDC confidence modifier; return (delta, diagnostics).
+
+    Only applies to the trend leg. Fail-closed: any failure returns delta=0
+    and a reason code, never raises. The artifact is loaded lazily and cached
+    by path. Diagnostics are merged into price_basis by the caller.
+    """
+    if str(features.get("strategy_leg") or "trend").lower() != "trend":
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": ["ldc_leg_not_trend"]}
+    if not profile.ldc_artifact_path:
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": ["ldc_artifact_path_missing"]}
+    try:
+        from bfa.strategy.ldc_classifier import ldc_confidence_modifier, load_ldc_artifact
+    except Exception as exc:  # pragma: no cover - defensive
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": [f"ldc_unavailable:{exc.__class__.__name__}"]}
+    artifact = _LDC_ARTIFACT_CACHE.get(profile.ldc_artifact_path)
+    if artifact is None:
+        try:
+            artifact = load_ldc_artifact(profile.ldc_artifact_path)
+            _LDC_ARTIFACT_CACHE[profile.ldc_artifact_path] = artifact
+        except Exception as exc:
+            return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                         "ldc_reason_codes": [
+                             f"ldc_artifact_load_failed:{exc.__class__.__name__}"]}
+    # Map live feature field names -> the artifact's short feature names, mirroring
+    # how _ml_trend_filter_rejection builds its feature_snapshot. The inference
+    # module reads by artifact.feature_names, so it stays field-name agnostic.
+    feature_snapshot = {
+        "ema_spread": _float(features.get("ema_spread_percent")),
+        "rsi": _float(features.get("rsi")),
+        "atr_percent": _float(features.get("atr_percent")),
+        "taker_ratio": _float(features.get("taker_buy_sell_ratio")),
+        "mom_6": _float(features.get("kline_momentum_percent")),
+    }
+    try:
+        return ldc_confidence_modifier(
+            feature_snapshot, side=side, artifact=artifact,
+            blend_strength=profile.ldc_blend_strength,
+            blend_mode=profile.ldc_blend_mode,
+            min_voters=profile.ldc_min_voters,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return 0.0, {"ldc_enabled": True, "ldc_confidence_delta": 0.0,
+                     "ldc_reason_codes": [f"ldc_unavailable:{exc.__class__.__name__}"]}
+
+
+def _ml_trend_filter_rejection(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> list[str]:
+    """Run the ML trend filter; return rejection reasons (empty = accepted).
+
+    Features are read from the candidate feature dict; the 14 inputs mirror
+    what the indicator layer already produces so no extra computation is
+    needed in the live path. The model is loaded lazily and cached by path.
+    """
+    if not profile.ml_trend_model_path:
+        return ["ml_trend_model_path_missing"]
+    try:
+        from bfa.strategy.ml_trend_filter import (
+            FEATURE_NAMES,
+            ml_trend_filter_verdict,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return [f"ml_trend_filter_unavailable:{exc.__class__.__name__}"]
+    model = _ML_TREND_MODEL_CACHE.get(profile.ml_trend_model_path)
+    if model is None:
+        try:
+            from bfa.strategy.ml_trend_filter import load_persisted_model
+
+            model = load_persisted_model(profile.ml_trend_model_path)
+            _ML_TREND_MODEL_CACHE[profile.ml_trend_model_path] = model
+        except Exception as exc:  # pragma: no cover - defensive
+            return [f"ml_trend_model_load_failed:{exc.__class__.__name__}"]
+    feature_snapshot = {
+        "ema_spread": _float(features.get("ema_spread_percent")),
+        "rsi": _float(features.get("rsi")),
+        "atr_percent": _float(features.get("atr_percent")),
+        "realized_vol": _float(features.get("realized_volatility_percent")),
+        "mom_6": _float(features.get("kline_momentum_percent")),
+        "mom_12": _float(features.get("kline_momentum_percent")),
+        "micro_mom": _float(features.get("kline_micro_momentum_percent")),
+        "close_position": _float(features.get("kline_close_position_percent")),
+        "vol_change": _float(features.get("kline_quote_volume_change_percent")),
+        "taker_ratio": _float(features.get("taker_buy_sell_ratio")),
+        "rsi_15m": _float(features.get("mtf_15m_rsi")) or _float(features.get("rsi")),
+        "ema_spread_15m": _float(features.get("mtf_15m_ema_spread_percent"))
+        or _float(features.get("ema_spread_percent")),
+        "mom_15m": _float(features.get("mtf_15m_momentum_percent"))
+        or _float(features.get("kline_momentum_percent")),
+        "hour_of_day": _hour_of_day(features),
+    }
+    accept, proba, reasons = ml_trend_filter_verdict(
+        feature_snapshot,
+        model=model,
+        threshold=profile.ml_trend_threshold,
+    )
+    # Stash the probability so downstream diagnostics/price_basis can surface it.
+    features_ref = dict(features) if isinstance(features, Mapping) else {}
+    features_ref.setdefault("ml_trend_probability", round(proba, 4))
+    if accept:
+        return []
+    return reasons or [f"ml_trend_rejected:{proba:.4f}"]
+
+
+def _hour_of_day(features: Mapping[str, Any]) -> float:
+    """Extract hour-of-day from the latest market timestamp, defaulting to 12."""
+    for key in ("latest_market_at", "occurred_at", "generated_at", "reference_time"):
+        value = features.get(key)
+        if isinstance(value, str) and "T" in value:
+            try:
+                hour = int(value[11:13])
+                return float(hour)
+            except (ValueError, IndexError):
+                continue
+    return 12.0
 
 
 def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, profile: TradeSetupProfile) -> list[str]:
@@ -1174,6 +1542,8 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
         rejections.append("hot_move_micro_reversal")
     if profile.block_volume_fade and not is_range_reversion and _volume_fade_against_trade(features, side):
         rejections.append("volume_fade_against_trade")
+    if profile.block_trend_edge_exhaustion and not is_range_reversion:
+        rejections.extend(_trend_edge_exhaustion_rejections(features, side, profile))
     if profile.block_spike_reversal_conflict and not is_range_reversion:
         rejections.extend(_spike_reversal_conflict_rejections(features, side))
     min_confluence = int(_float(profile.min_directional_confluence) or 0)
@@ -1191,6 +1561,28 @@ def _profile_rejections(symbol: str, features: Mapping[str, Any], side: str, pro
         elif int(mtf["score"]) < required:
             rejections.append(f"mtf_alignment_below_profile_min:{mtf['score']}/{required}")
     return _dedupe(rejections)
+
+
+def _trend_edge_exhaustion_rejections(
+    features: Mapping[str, Any],
+    side: str,
+    profile: TradeSetupProfile,
+) -> list[str]:
+    close_position = _float(features.get("kline_close_position_percent"))
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    micro_momentum = _float(features.get("kline_micro_momentum_percent"))
+    momentum = _float(features.get("kline_momentum_percent"))
+    if close_position is None or volume_change is None or micro_momentum is None or momentum is None:
+        return []
+    if volume_change > profile.trend_edge_exhaustion_volume_fade_percent:
+        return []
+    zone = max(50.0, min(95.0, profile.trend_edge_exhaustion_zone_percent))
+    micro_limit = abs(profile.trend_edge_exhaustion_micro_adverse_percent)
+    if side == "long" and momentum > 0 and close_position >= zone and micro_momentum <= -micro_limit:
+        return ["trend_long_edge_exhaustion"]
+    if side == "short" and momentum < 0 and close_position <= 100.0 - zone and micro_momentum >= micro_limit:
+        return ["trend_short_edge_exhaustion"]
+    return []
 
 
 def _post_cost_rejections(target_distance_percent: float, profile: TradeSetupProfile) -> list[str]:
@@ -1252,6 +1644,54 @@ def _limit_entry_quality_rejections(
     if score < required:
         return [f"limit_entry_quality_below_profile_min:{score}/{required}"]
     return []
+
+
+def _fresh_trend_confirmation_diagnostics(
+    features: Mapping[str, Any],
+    side: str,
+    signal_diagnostics: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> dict[str, Any]:
+    mode = str(signal_diagnostics.get("mode") or "trend_follow")
+    if not profile.require_fresh_trend_confirmation or mode != "trend_follow" or side not in {"long", "short"}:
+        return {"enabled": False, "passed": True, "rejections": [], "checks": []}
+    micro = _float(features.get("kline_micro_momentum_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    taker_change = _float(features.get("taker_buy_sell_ratio_change"))
+    micro_limit = abs(_float(profile.fresh_trend_micro_momentum_percent) or 0.0)
+    flow_edge = abs(_float(profile.fresh_trend_taker_flow_edge) or 0.0)
+    acceleration_edge = abs(_float(profile.fresh_trend_taker_acceleration_edge) or 0.0)
+    if side == "long":
+        micro_adverse = micro is not None and micro <= -micro_limit
+        flow_adverse = taker_ratio is not None and taker_ratio <= 1.0 - flow_edge
+        acceleration_adverse = taker_change is not None and taker_change <= -acceleration_edge
+    else:
+        micro_adverse = micro is not None and micro >= micro_limit
+        flow_adverse = taker_ratio is not None and taker_ratio >= 1.0 + flow_edge
+        acceleration_adverse = taker_change is not None and taker_change >= acceleration_edge
+    rejections: list[str] = []
+    if micro_adverse and flow_adverse:
+        rejections.append("fresh_trend_confirmation_failed:micro_and_flow_adverse")
+    elif micro_adverse and acceleration_adverse:
+        rejections.append("fresh_trend_confirmation_failed:micro_and_flow_acceleration_adverse")
+    return {
+        "enabled": True,
+        "side": side,
+        "passed": not rejections,
+        "rejections": rejections,
+        "thresholds": {
+            "micro_momentum_percent": micro_limit,
+            "taker_flow_edge": flow_edge,
+            "taker_acceleration_edge": acceleration_edge,
+        },
+        "checks": _normalised_checks(
+            [
+                {"name": "micro_not_adverse", "passed": not micro_adverse, "value": micro},
+                {"name": "taker_flow_not_adverse", "passed": not flow_adverse, "value": taker_ratio},
+                {"name": "taker_acceleration_not_adverse", "passed": not acceleration_adverse, "value": taker_change},
+            ]
+        ),
+    }
 
 
 def _limit_entry_quality_diagnostics(
@@ -1729,12 +2169,28 @@ def _sequence(value: Any) -> list[Any]:
     return [value]
 
 
-def _high_crowding(features: Mapping[str, Any], side: str) -> bool:
-    funding = _float(features.get("funding_rate")) or 0.0
-    taker = _float(features.get("taker_buy_sell_ratio")) or 1.0
+def _geometry_missing_input_warnings(*basis_items: Mapping[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for basis in basis_items:
+        missing = str(basis.get("missing_input") or "").strip()
+        if missing:
+            warnings.append(missing)
+    return _dedupe(warnings)
+
+
+def _high_crowding(features: Mapping[str, Any], side: str) -> tuple[bool, list[str]]:
+    funding = _float(features.get("funding_rate"))
+    taker = _float(features.get("taker_buy_sell_ratio"))
+    warnings: list[str] = []
+    if funding is None:
+        warnings.append("missing_funding_for_crowding")
+    if taker is None:
+        warnings.append("missing_taker_flow_for_crowding")
+    if funding is None or taker is None:
+        return False, warnings
     if side == "long":
-        return funding > 0.0008 and taker > 1.8
-    return funding < -0.0008 and taker < 0.55
+        return funding > 0.0008 and taker > 1.8, warnings
+    return funding < -0.0008 and taker < 0.55, warnings
 
 
 def _factor_guard_rejections(factors: list[FactorScore], profile: TradeSetupProfile) -> list[str]:

@@ -10,9 +10,9 @@ from bfa.ai.schema import RiskLimits, context_from_candidate
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceSignedError
-from bfa.execution.executor import ExecutionEngine
+from bfa.execution.executor import ExecutionEngine, _limit_wait_seconds
 from bfa.execution.filters import SymbolExecutionFilters
-from bfa.execution.models import RiskState
+from bfa.execution.models import OrderIntent, RiskState
 
 
 EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchange_info.json"
@@ -108,6 +108,31 @@ class LimitUnknownFilledPositionSignedClient(FakeSignedClient):
                 "positionSide": "LONG",
                 "entryPrice": "100",
                 "markPrice": "100.5",
+            }
+        ]
+
+
+class LimitUnknownNoPositionSignedClient(FakeSignedClient):
+    def query_order(self, **kwargs):
+        self.calls.append(("query_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/order",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2013,
+            binance_message="Order does not exist.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return [
+            {
+                "symbol": symbol or "BTCUSDT",
+                "positionAmt": "0",
+                "positionSide": "LONG",
+                "entryPrice": "0",
+                "markPrice": "100",
             }
         ]
 
@@ -217,6 +242,73 @@ class ConflictingProtectiveOrderSignedClient(FakeSignedClient):
         ]
 
 
+class ProtectivePlacementNoPositionSignedClient(FakeSignedClient):
+    def __init__(self, *, available_balance="100"):
+        super().__init__(available_balance=available_balance)
+        self.close_attempts = 0
+
+    def new_algo_order(self, **kwargs):
+        self.calls.append(("new_algo_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/algoOrder",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2021,
+            binance_message="Order would immediately trigger.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return []
+
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return []
+
+
+class ProtectivePlacementCloseFailsSignedClient(FakeSignedClient):
+    def new_algo_order(self, **kwargs):
+        self.calls.append(("new_algo_order", kwargs))
+        raise BinanceSignedError(
+            endpoint="/fapi/v1/algoOrder",
+            params=kwargs,
+            status_code=400,
+            binance_code=-2021,
+            binance_message="Order would immediately trigger.",
+            headers={},
+        )
+
+    def position_risk(self, symbol=None):
+        self.calls.append(("position_risk", symbol))
+        return [
+            {
+                "symbol": symbol or "BTCUSDT",
+                "positionAmt": "0.2",
+                "positionSide": "LONG",
+                "entryPrice": "100",
+                "markPrice": "100",
+            }
+        ]
+
+    def open_algo_orders(self, symbol=None):
+        self.calls.append(("open_algo_orders", symbol))
+        return []
+
+    def new_order(self, **kwargs):
+        self.calls.append(("new_order", kwargs))
+        if kwargs.get("reduce_only"):
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/order",
+                params=kwargs,
+                status_code=400,
+                binance_code=-2019,
+                binance_message="synthetic emergency close failure",
+                headers={},
+            )
+        return {"orderId": 123, "status": "NEW", **kwargs}
+
+
 class AccountFailingSignedClient(FakeSignedClient):
     def account(self):
         self.calls.append(("account",))
@@ -231,6 +323,74 @@ class AccountFailingSignedClient(FakeSignedClient):
 
 
 class ExecutionEngineTests(unittest.TestCase):
+    def test_limit_wait_seconds_allows_half_hour_trend_orders(self):
+        intent = OrderIntent(
+            symbol="BTCUSDT",
+            side="BUY",
+            quantity=0.2,
+            notional_usdt=20.0,
+            entry_price=100.0,
+            stop_price=96.0,
+            target_price=108.0,
+            leverage=3,
+            mode="dry_run",
+            decided_at="2026-06-20T10:00:00Z",
+            order_type="LIMIT",
+            time_in_force="GTX",
+            limit_wait_seconds=1800,
+            reason_codes=["strategy_leg:trend", "limit_entry_max_wait_seconds:1800"],
+        )
+
+        self.assertEqual(_limit_wait_seconds(intent), 1800.0)
+
+    def test_live_limit_entry_can_defer_long_wait_to_pending_watchdog(self):
+        fake_client = FakeSignedClient()
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_LIMIT_ENTRY_DEFER_ENABLED="true",
+                BFA_LIMIT_ENTRY_DEFER_MIN_WAIT_SECONDS="20",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+            store=store,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:trend",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:1800",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "entry_order_pending")
+        self.assertTrue(result.submitted)
+        self.assertIn("pending_limit_watchdog_required", result.risk.reason_codes)
+        self.assertEqual([call[0] for call in fake_client.calls], ["account", "margin", "leverage", "new_order"])
+        self.assertNotIn("query_order", [call[0] for call in fake_client.calls])
+        self.assertNotIn("new_algo_order", [call[0] for call in fake_client.calls])
+        row = connection.execute("SELECT payload_json FROM order_intents ORDER BY id DESC LIMIT 1").fetchone()
+        payload = json.loads(row["payload_json"])
+        self.assertEqual(payload["status"], "entry_order_pending")
+        self.assertEqual(payload["intent"]["limit_wait_seconds"], 1800)
+        self.assertIn("client_order_id", payload["intent"]["metadata"])
+        self.assertEqual(
+            payload["intent"]["metadata"]["pending_limit_watchdog"]["status"],
+            "waiting_for_fill",
+        )
+
     def validation(self, **overrides):
         payload = {
             "decision": "trade",
@@ -768,6 +928,43 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(result.exchange_response["stop_loss_order"]["order_type"], "STOP_MARKET")
         self.assertEqual(result.exchange_response["take_profit_order"]["order_type"], "TAKE_PROFIT_MARKET")
 
+    def test_live_limit_entry_unknown_state_without_position_cancels_instead_of_leaving_pending(self):
+        fake_client = LimitUnknownNoPositionSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_POSITION_MODE="hedge",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:1",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "entry_order_unknown_canceled")
+        self.assertFalse(result.submitted)
+        self.assertIn("entry_order_unknown_canceled", result.risk.reason_codes)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            ["account", "margin", "leverage", "new_order", "query_order", "position_risk", "cancel_order"],
+        )
+        self.assertNotIn("new_algo_order", [call[0] for call in fake_client.calls])
+        self.assertEqual(result.exchange_response["limit_entry_unknown_resolution"], "cancel_attempted_after_query_not_found")
+
     def test_live_post_only_entry_reprices_after_maker_reject(self):
         fake_client = PostOnlyRejectThenAcceptSignedClient()
         engine = ExecutionEngine(
@@ -804,6 +1001,17 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(entry_calls[1]["new_client_order_id"], "bfa-btcusdt-20260620100000-r1")
         self.assertIn("post_only_repriced_attempt:2", result.intent.reason_codes)
         self.assertEqual(result.intent.entry_price, 99.8)
+        self.assertIn("micro_grid_reprice_reanchored_protective_prices", result.intent.reason_codes)
+        self.assertIn("micro_grid_fill_reanchored_protective_prices", result.intent.reason_codes)
+        self.assertAlmostEqual(result.intent.stop_price, 95.808)
+        self.assertEqual(result.intent.target_price, 108.0)
+        self.assertIn("micro_grid_reprice_reanchor", result.intent.metadata)
+        reanchor = result.intent.metadata["micro_grid_fill_reanchor"]
+        self.assertEqual(reanchor["fill_quality"], "better_or_equal")
+        stop_order = [call[1] for call in fake_client.calls if call[0] == "new_algo_order" and call[1]["order_type"] == "STOP_MARKET"][0]
+        target_order = [call[1] for call in fake_client.calls if call[0] == "new_algo_order" and call[1]["order_type"] == "TAKE_PROFIT_MARKET"][0]
+        self.assertAlmostEqual(stop_order["stop_price"], 95.808)
+        self.assertEqual(target_order["stop_price"], 108.0)
         reprice = result.exchange_response["entry_order"]["post_only_reprice"]
         self.assertTrue(reprice["enabled"])
         self.assertEqual([attempt["status"] for attempt in reprice["attempts"]], ["rejected", "accepted"])
@@ -849,6 +1057,82 @@ class ExecutionEngineTests(unittest.TestCase):
                 "cancel_algo_order",
                 "new_algo_order",
                 "new_algo_order",
+            ],
+        )
+
+    def test_live_protective_failure_without_matching_position_does_not_activate_kill_switch(self):
+        fake_client = ProtectivePlacementNoPositionSignedClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            kill_switch = Path(tmp) / "KILL_SWITCH"
+            engine = ExecutionEngine(
+                config=self.config(
+                    BFA_MODE="live",
+                    BFA_KILL_SWITCH_FILE=str(kill_switch),
+                    BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                    BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                ),
+                signed_client=fake_client,
+            )
+
+            result = engine.run(
+                symbol="BTCUSDT",
+                validation=self.validation(),
+                decided_at="2026-06-20T10:00:00Z",
+                risk_state=RiskState(),
+                filters=self.filters(),
+            )
+
+            self.assertFalse(kill_switch.exists())
+
+        self.assertEqual(result.status, "protective_order_failed_no_position")
+        self.assertTrue(result.submitted)
+        self.assertEqual(result.exchange_response["protective_failure_resolution"]["status"], "no_matching_position")
+        self.assertNotIn("kill_switch_activated", result.exchange_response)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            ["account", "margin", "leverage", "new_order", "new_algo_order", "position_risk"],
+        )
+
+    def test_live_protective_failure_does_not_activate_kill_switch_even_when_emergency_close_fails(self):
+        fake_client = ProtectivePlacementCloseFailsSignedClient()
+        with tempfile.TemporaryDirectory() as tmp:
+            kill_switch = Path(tmp) / "KILL_SWITCH"
+            engine = ExecutionEngine(
+                config=self.config(
+                    BFA_MODE="live",
+                    BFA_KILL_SWITCH_FILE=str(kill_switch),
+                    BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                    BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                ),
+                signed_client=fake_client,
+            )
+
+            result = engine.run(
+                symbol="BTCUSDT",
+                validation=self.validation(),
+                decided_at="2026-06-20T10:00:00Z",
+                risk_state=RiskState(),
+                filters=self.filters(),
+            )
+
+            self.assertFalse(kill_switch.exists())
+
+        self.assertEqual(result.status, "protective_order_failed_open")
+        self.assertNotIn("kill_switch_activated", result.exchange_response)
+        self.assertIn("emergency_close_error", result.exchange_response)
+        self.assertEqual(
+            [call[0] for call in fake_client.calls],
+            [
+                "account",
+                "margin",
+                "leverage",
+                "new_order",
+                "new_algo_order",
+                "position_risk",
+                "open_algo_orders",
+                "new_algo_order",
+                "new_algo_order",
+                "new_order",
             ],
         )
 

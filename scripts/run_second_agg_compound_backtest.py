@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
-from bfa.backtest.engine import _generate_signals, _trailing_stop_price
+from bfa.backtest.engine import _generate_signals_with_diagnostics, _trailing_stop_price
 from bfa.backtest.models import BacktestBar, BacktestConfig, BacktestTrade, built_in_variants
 
 
@@ -83,14 +83,19 @@ def main() -> int:
     all_candidates: list[dict[str, Any]] = []
     coverage: dict[str, Any] = {}
     total_rejected = 0
+    rejection_counts: dict[str, int] = {}
+    rejection_counts_by_symbol: dict[str, dict[str, int]] = {}
     simulation_status_counts: dict[str, int] = {}
     for symbol in symbols:
         seconds, symbol_coverage = load_symbol_seconds(symbol, start, end, cache_dir)
         coverage[symbol] = symbol_coverage
         signal_bars = aggregate_to_5m(seconds)
         signal_config = variant_config
-        signals, rejected = _generate_signals(symbol, signal_bars, signal_config)
-        total_rejected += rejected
+        signals, diagnostics = _generate_signals_with_diagnostics(symbol, signal_bars, signal_config)
+        total_rejected += diagnostics.rejected
+        rejection_counts_by_symbol[symbol] = diagnostics.to_dict()["rejection_counts"]
+        for key, value in diagnostics.rejection_counts.items():
+            rejection_counts[key] = rejection_counts.get(key, 0) + value
         for signal in signals:
             trade, status = simulate_signal_on_seconds(
                 symbol=symbol,
@@ -137,6 +142,8 @@ def main() -> int:
         "candidate_trade_count": len(all_candidates),
         "simulation_status_counts": simulation_status_counts,
         "rejected_signal_count": total_rejected,
+        "signal_rejection_counts": dict(sorted(rejection_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "signal_rejection_counts_by_symbol": rejection_counts_by_symbol,
         "compound_summary": compound["summary"],
         "trades": compound["trades"],
     }

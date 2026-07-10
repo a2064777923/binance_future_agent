@@ -970,31 +970,65 @@ def _trail_prices(
     signed_move = mark - entry if side == "LONG" else entry - mark
     current_r = signed_move / risk_distance
     target_progress = _float_or_default(item.target_progress, 0.0)
-    target_progress_activation = "sentinel_profit_protection" in item.reasons and target_progress > 0
+    overrides = _sentinel_trailing_overrides(item.reasons)
+    sentinel_profit_reason = "sentinel_profit_protection" in item.reasons
+    sentinel_layer_activation = (
+        sentinel_profit_reason
+        and any(str(reason).startswith("sentinel_trend_profit_layer:") for reason in item.reasons)
+        and current_r >= max(overrides.get("lock_r", 0.0), 0.0)
+    )
+    target_progress_activation = (
+        sentinel_profit_reason
+        and target_progress > 0
+        and _sentinel_profit_gate_met(item, current_r=current_r, target_progress=target_progress)
+    )
     loss_control_activation = "sentinel_loss_control" in item.reasons
+    sentinel_activation = target_progress_activation or sentinel_layer_activation or loss_control_activation
+    if (target_progress_activation or loss_control_activation) and not _sentinel_profit_gate_met(
+        item,
+        current_r=current_r,
+        target_progress=target_progress,
+    ):
+        rejections.append("sentinel_profit_gate_not_met")
     if current_r < max(activate_r, 0.0) and not target_progress_activation:
-        if not loss_control_activation:
+        if not sentinel_layer_activation and not loss_control_activation:
             rejections.append("trailing_activation_r_not_reached")
-    if current_r <= 0 and not loss_control_activation:
+    if current_r <= 0:
         rejections.append("position_not_in_profit")
     if rejections:
         return {"stop_price": None, "target_price": None, "reason_codes": reason_codes, "rejections": rejections}
 
-    overrides = _sentinel_trailing_overrides(item.reasons)
     lock_r = max(overrides.get("lock_r", lock_r), 0.0)
     giveback_r = max(overrides.get("giveback_r", giveback_r), 0.0)
+    if loss_control_activation:
+        giveback_r = max(giveback_r, overrides.get("min_giveback_r", 0.0))
     target_extension_r = max(overrides.get("target_extension_r", target_extension_r), 0.0)
+    # Bug fix: lock_r=0 places the stop exactly at entry (break-even), but
+    # fees+slippage on exit make break-even a guaranteed small loss. The lock
+    # must cover at least one round-trip cost so "保本" actually preserves
+    # capital. Estimate cost as ~0.08% (maker+taker+slippage) of entry.
+    min_cost_r = 0.08 / 100.0 * entry / risk_distance if (entry > 0 and risk_distance > 0) else 0.0
+    if lock_r < min_cost_r and not loss_control_activation:
+        lock_r = min_cost_r
+        reason_codes.append(f"trailing_lock_r_floored_to_cost:{round(lock_r, 4)}")
     if side == "LONG":
         if loss_control_activation:
             candidate_stop = max(stop, mark - giveback_r * risk_distance)
         else:
-            candidate_stop = max(stop, entry + lock_r * risk_distance, mark - giveback_r * risk_distance)
+            # Clamp lock position to stay below mark — if lock_r would place stop
+            # above current price, fall back to stopping just below mark. This keeps
+            # the trailing guard active while preserving valid geometry.
+            lock_price = entry + lock_r * risk_distance
+            effective_lock = min(lock_price, mark - 0.0001 * entry)
+            candidate_stop = max(stop, effective_lock, mark - giveback_r * risk_distance)
         candidate_target = max(target, mark + target_extension_r * risk_distance)
     else:
         if loss_control_activation:
             candidate_stop = min(stop, mark + giveback_r * risk_distance)
         else:
-            candidate_stop = min(stop, entry - lock_r * risk_distance, mark + giveback_r * risk_distance)
+            lock_price = entry - lock_r * risk_distance
+            effective_lock = max(lock_price, mark + 0.0001 * entry)
+            candidate_stop = min(stop, effective_lock, mark + giveback_r * risk_distance)
         candidate_target = min(target, mark - target_extension_r * risk_distance)
 
     candidate_stop = _round_price(
@@ -1032,6 +1066,8 @@ def _trail_prices(
     )
     if target_progress_activation:
         reason_codes.append("trailing_activated_by_target_progress")
+    if sentinel_layer_activation:
+        reason_codes.append("trailing_activated_by_sentinel_layer")
     if loss_control_activation:
         reason_codes.append("trailing_activated_by_loss_control")
     return {
@@ -1047,6 +1083,7 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
     mapping = {
         "sentinel_lock_r": "lock_r",
         "sentinel_giveback_r": "giveback_r",
+        "sentinel_min_giveback_r": "min_giveback_r",
         "sentinel_target_extension_r": "target_extension_r",
     }
     for reason in reasons:
@@ -1060,6 +1097,26 @@ def _sentinel_trailing_overrides(reasons: list[str]) -> dict[str, float]:
         if parsed is not None and parsed >= 0:
             values[target] = parsed
     return values
+
+
+def _sentinel_profit_gate_met(item: PositionReviewItem, *, current_r: float, target_progress: float) -> bool:
+    reasons = [str(reason) for reason in item.reasons]
+    if not any(reason.startswith("sentinel_") for reason in reasons):
+        return True
+    configured_min_r = _reason_float(reasons, "sentinel_min_profit_r")
+    configured_min_progress = _reason_float(reasons, "sentinel_min_target_progress")
+    min_r = configured_min_r if configured_min_r is not None else 0.25
+    min_progress = configured_min_progress if configured_min_progress is not None else 0.25
+    return current_r >= max(min_r, 0.0) or target_progress >= max(min_progress, 0.0)
+
+
+def _reason_float(reasons: list[str], key: str) -> float | None:
+    prefix = f"{key}:"
+    for reason in reasons:
+        if not reason.startswith(prefix):
+            continue
+        return _float_or_none(reason[len(prefix) :])
+    return None
 
 
 def _position_direction(item: PositionReviewItem) -> str | None:
@@ -1419,15 +1476,42 @@ def _replace_protective_orders(
             "stop_loss_order": None,
             "take_profit_order": None,
         }
-    stop_response = client.new_algo_order(
-        symbol=order_plan.symbol,
-        side=order_plan.side,
-        order_type="STOP_MARKET",
-        stop_price=order_plan.stop_price,
-        close_position=True,
-        position_side=order_plan.position_side,
-        client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="trail-sl"),
+    # Bug fix: the old code cancelled both old SL+TP, then tried to place new
+    # SL then new TP. If the new SL or TP placement failed (e.g. -4509 "GTE can
+    # only be used with open positions" during a partial-fill race), the
+    # position was left with NO protective orders at all (裸奔). Now we place
+    # the new SL first, and if that fails we do NOT proceed to TP — instead we
+    # re-place the original SL as a fail-closed fallback so the position is
+    # never unprotected. The same guard wraps the TP placement.
+    original_sl_price = next(
+        (_float_or_default(o.get("stopPrice") or o.get("stop_price"), None) for o in order_plan.cancel_algo_orders
+         if str(o.get("algoType", "")).upper() in ("STOP_MARKET", "STOP", "CONDITIONAL") and "tp" not in str(o.get("clientAlgoId", "")).lower()),
+        None,
     )
+    original_tp_price = next(
+        (_float_or_default(o.get("stopPrice") or o.get("stop_price"), None) for o in order_plan.cancel_algo_orders
+         if str(o.get("algoType", "")).upper() in ("TAKE_PROFIT_MARKET", "TAKE_PROFIT") or "tp" in str(o.get("clientAlgoId", "")).lower()),
+        None,
+    )
+    try:
+        stop_response = client.new_algo_order(
+            symbol=order_plan.symbol,
+            side=order_plan.side,
+            order_type="STOP_MARKET",
+            stop_price=order_plan.stop_price,
+            close_position=True,
+            position_side=order_plan.position_side,
+            client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="trail-sl"),
+        )
+    except BinanceSignedError as exc:
+        # Fail-closed: re-place the original SL so the position is protected.
+        fallback = _fail_closed_reprotect(client, order_plan, checked_at, "sl", original_sl_price)
+        return {
+            "stop_loss_order": None,
+            "stop_loss_error": _signed_error_payload(exc),
+            "stop_loss_fallback": fallback,
+            "cancel_replaced_algo_orders": cancel_responses,
+        }
     try:
         target_response = client.new_algo_order(
             symbol=order_plan.symbol,
@@ -1441,7 +1525,9 @@ def _replace_protective_orders(
     except BinanceSignedError as exc:
         return {
             "stop_loss_order": stop_response,
+            "take_profit_order": None,
             "take_profit_error": _signed_error_payload(exc),
+            "take_profit_fallback": _fail_closed_reprotect(client, order_plan, checked_at, "tp", original_tp_price),
             "cancel_replaced_algo_orders": cancel_responses,
         }
     return {
@@ -1449,6 +1535,39 @@ def _replace_protective_orders(
         "take_profit_order": target_response,
         "cancel_replaced_algo_orders": cancel_responses,
     }
+
+
+def _fail_closed_reprotect(
+    client: BinanceFuturesSignedClient,
+    order_plan: PositionAdjustmentOrderPlan,
+    checked_at: str,
+    kind: str,
+    original_price: float | None,
+) -> dict[str, Any]:
+    """Re-place a protective order at the original price after a failed trail.
+
+    This is the fail-closed guard: if the trailing replacement fails (e.g.
+    -4509 during a position-state race), we re-place the protective order at
+    its previous price so the position is never left unprotected (裸奔).
+    Returns a dict describing the fallback attempt.
+    """
+    if original_price is None or original_price <= 0:
+        return {"action": f"fail_closed_{kind}_skipped", "reason": "no_original_price"}
+    order_type = "STOP_MARKET" if kind == "sl" else "TAKE_PROFIT_MARKET"
+    suffix = f"fail-closed-{kind}"
+    try:
+        response = client.new_algo_order(
+            symbol=order_plan.symbol,
+            side=order_plan.side,
+            order_type=order_type,
+            stop_price=original_price,
+            close_position=True,
+            position_side=order_plan.position_side,
+            client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action=suffix),
+        )
+        return {"action": f"fail_closed_{kind}_replaced", "order": response}
+    except BinanceSignedError as exc:
+        return {"action": f"fail_closed_{kind}_failed", "error": _signed_error_payload(exc)}
 
 
 def _backfill_protective_orders(
@@ -1514,6 +1633,18 @@ def _cancel_replaced_algo_orders(
                 )
             )
         except BinanceSignedError as exc:
+            if _is_stale_unknown_order_error(exc):
+                responses.append(
+                    {
+                        "status": "stale_missing",
+                        "symbol": order_plan.symbol,
+                        "algoId": algo_id,
+                        "clientAlgoId": client_algo_id,
+                        "warning": _signed_error_payload(exc),
+                        "order": dict(order),
+                    }
+                )
+                continue
             responses.append({"error": _signed_error_payload(exc), "order": dict(order)})
     return responses
 
@@ -1543,6 +1674,15 @@ def _signed_error_payload(exc: BinanceSignedError) -> dict[str, Any]:
         "code": exc.binance_code,
         "message": exc.binance_message,
     }
+
+
+def _is_stale_unknown_order_error(exc: BinanceSignedError) -> bool:
+    message = (exc.binance_message or "").lower()
+    return exc.binance_code == -2011 and (
+        "unknown order" in message
+        or "does not exist" in message
+        or "not found" in message
+    )
 
 
 def _same_side_algo_order(order: Mapping[str, Any], *, order_plan: PositionAdjustmentOrderPlan) -> bool:

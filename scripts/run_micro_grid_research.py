@@ -35,9 +35,11 @@ from run_second_agg_compound_backtest import fetch_zip, load_symbol_seconds, rea
 
 SECOND_MS = 1_000
 BLOCKED_EDGE_REVERSAL_REASONS = {
+    "entry_path_too_directional",
+}
+SOFT_EDGE_REVERSAL_REASONS = {
     "upper_extreme_too_fresh",
     "lower_extreme_too_fresh",
-    "entry_path_too_directional",
 }
 
 
@@ -67,6 +69,22 @@ class MicroGridProfile:
     min_filled_grid_layers: int = 1
     min_reservation_edge_fraction: float = -0.12
     max_reservation_edge_fraction: float = 0.50
+    dynamic_entry_edge_enabled: bool = False
+    dynamic_entry_base_edge_fraction: float = -0.08
+    dynamic_entry_max_push_fraction: float = 0.26
+    dynamic_entry_flow_push_fraction: float = 0.08
+    dynamic_entry_momentum_push_fraction: float = 0.08
+    dynamic_entry_volatility_push_fraction: float = 0.05
+    dynamic_entry_wick_push_fraction: float = 0.08
+    dynamic_entry_continuation_push_fraction: float = 0.05
+    dynamic_exit_geometry_enabled: bool = False
+    dynamic_exit_stop_widen_fraction: float = 0.14
+    dynamic_exit_max_stop_fraction: float = 0.62
+    dynamic_exit_target_mean_ratio: float = 0.92
+    dynamic_exit_target_quality_ratio: float = 0.08
+    dynamic_exit_target_beyond_mean_fraction: float = 0.16
+    dynamic_exit_max_target_fraction: float = 1.10
+    dynamic_exit_min_target_stop_ratio: float = 0.88
     post_only_entry_gap_bps: float = 0.0
     dynamic_wick_enabled: bool = True
     wick_model_mode: str = "ev"
@@ -139,6 +157,7 @@ class MicroGridProfile:
     min_turn_count: int = 4
     min_edge_alternations: int = 3
     min_reversal_response_rate: float = 0.50
+    max_reversal_response_rate: float = 1.0
     edge_zone_fraction: float = 0.16
     edge_response_seconds: int = 45
     edge_response_fraction: float = 0.22
@@ -166,9 +185,60 @@ class MicroGridProfile:
     dynamic_hold_enabled: bool = True
     dynamic_hold_min_seconds: int = 120
     dynamic_hold_multiplier: float = 2.5
+    # --- volatility regime adaptive scaling (偵察/快進快出/動態適配) ---
+    # The micro leg's stop/target/hold were fixed scalars of the span, which
+    # made it either get stopped by noise in high vol or sit dead in low vol.
+    # These three vol-regime thresholds (on instantaneous_vol_percent) bucket
+    # the regime and apply multipliers so the leg adapts: high vol widens the
+    # stop (avoid noise stops) and shortens hold (fast in/out); low vol
+    # tightens the width gate (no dead-water entries).
+    vol_regime_enabled: bool = True
+    vol_regime_low_threshold: float = 0.05    # %/s below this = low vol
+    vol_regime_high_threshold: float = 0.15   # %/s above this = high vol
+    # multipliers applied to stop/target/hold per regime (1.0 = no change)
+    vol_regime_low_stop_mult: float = 0.80
+    vol_regime_low_target_mult: float = 0.70
+    vol_regime_low_hold_mult: float = 0.60
+    vol_regime_high_stop_mult: float = 1.25
+    vol_regime_high_target_mult: float = 1.40
+    vol_regime_high_hold_mult: float = 0.45  # fast in/out when volatile
+    # width gate also adapts: low vol demands a tighter minimum width
+    vol_regime_low_min_width_mult: float = 0.6
+    vol_regime_high_max_width_mult: float = 1.3
+    # --- dynamic spike-depth entry prediction (偵察 + 計算掛單點位) ---
+    # Instead of posting at a fixed fraction of the span, scout recent spike
+    # depth (max excursion from local mean over a lookback) and post the
+    # passive entry at that predicted depth. Volatility clusters (lag-1 autocorr
+    # ~0.36 on real data), so recent spike depth is a usable predictor of where
+    # the next wick will reach. This lets the leg挂深一點 when the market is
+    # spiking and挂淺/不做 when it is dead.
+    spike_depth_entry_enabled: bool = True
+    spike_depth_lookback_seconds: int = 300  # scout last 5 min of spike depth
+    spike_depth_min_percent: float = 0.15   # below this the market is too dead to bother
+    spike_depth_max_percent: float = 4.0    # cap to avoid posting absurdly deep
+    spike_depth_entry_fraction: float = 0.85  # post at 85% of predicted depth (don't catch the exact tip)
+    spike_depth_stop_fraction: float = 1.3   # stop beyond the predicted depth
+    spike_depth_target_fraction: float = 0.5  # target: capture half the spike back toward center
     trailing_activate_fraction: float = 2.20
     trailing_lock_fraction: float = 0.35
     trailing_giveback_fraction: float = 0.90
+    target_progress_trailing_enabled: bool = False
+    target_progress_activate_fraction: float = 0.65
+    target_progress_lock_fraction: float = 0.22
+    target_progress_giveback_fraction: float = 0.45
+    post_fill_confirmation_enabled: bool = False
+    post_fill_confirmation_seconds: int = 8
+    post_fill_confirmation_min_progress: float = 0.08
+    post_fill_confirmation_max_adverse_progress: float = 0.20
+    post_fill_confirmation_stale_target_progress: float = 0.72
+    post_fill_confirmation_exit_loss_fraction: float = 0.10
+    adaptive_profit_lock_enabled: bool = False
+    adaptive_profit_lock_min_progress: float = 0.48
+    adaptive_profit_lock_max_progress: float = 0.78
+    adaptive_profit_lock_min_fraction: float = 0.08
+    adaptive_profit_lock_max_fraction: float = 0.52
+    adaptive_profit_lock_min_giveback_fraction: float = 0.28
+    adaptive_profit_lock_max_giveback_fraction: float = 0.72
     dynamic_level_planner_enabled: bool = False
     planner_min_recovery_probability: float = 0.55
     planner_wrong_direction_probability: float = 0.55
@@ -179,6 +249,9 @@ class MicroGridProfile:
     planner_max_stop_fraction: float = 0.44
     planner_max_target_fraction: float = 0.68
     planner_history_min_fills: int = 3
+    spike_depth_tail_buffer_fraction: float = 0.18
+    spike_depth_max_entry_edge_fraction: float = -1.45
+    spike_depth_max_stop_fraction: float = 1.20
     reentry_cooldown_seconds: int = 8
     maker_fee_bps: float = 2.0
     taker_fee_bps: float = 4.0
@@ -269,6 +342,9 @@ class MicroGridState:
     bollinger_width_percent: float = 0.0
     reservation_price: float = 0.0
     reservation_skew_percent: float = 0.0
+    # scouted recent spike depth (max excursion from local mean, %), used by
+    # the dynamic spike-depth entry predictor to post at predicted wick depth.
+    recent_spike_depth_percent: float = 0.0
     long_entry_edge_fraction: float = 0.04
     short_entry_edge_fraction: float = 0.04
     long_stop_span_fraction: float = 0.20
@@ -495,6 +571,16 @@ def main() -> int:
     parser.add_argument("--max-notional-fraction", type=float, default=4.0)
     parser.add_argument("--max-margin-fraction", type=float, default=0.4)
     parser.add_argument("--max-leverage", type=float, default=10.0)
+    parser.add_argument(
+        "--pullback-scale-mode",
+        choices=["cap", "none"],
+        default="cap",
+        help=(
+            "How portfolio replay uses pullback_size_multiplier. "
+            "'cap' preserves the historical research behavior; 'none' matches the live setup path, "
+            "where notional is governed by risk/notional/margin caps instead of this multiplier."
+        ),
+    )
     parser.add_argument("--symbol-quality-filter-enabled", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--symbol-quality-lookback-hours", type=float, default=72.0)
     parser.add_argument("--symbol-quality-min-samples", type=int, default=3)
@@ -526,6 +612,22 @@ def main() -> int:
     parser.add_argument("--min-filled-grid-layers", type=int, default=MicroGridProfile.min_filled_grid_layers)
     parser.add_argument("--min-reservation-edge-fraction", type=float, default=MicroGridProfile.min_reservation_edge_fraction)
     parser.add_argument("--max-reservation-edge-fraction", type=float, default=MicroGridProfile.max_reservation_edge_fraction)
+    parser.add_argument("--dynamic-entry-edge-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_entry_edge_enabled)
+    parser.add_argument("--dynamic-entry-base-edge-fraction", type=float, default=MicroGridProfile.dynamic_entry_base_edge_fraction)
+    parser.add_argument("--dynamic-entry-max-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_max_push_fraction)
+    parser.add_argument("--dynamic-entry-flow-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_flow_push_fraction)
+    parser.add_argument("--dynamic-entry-momentum-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_momentum_push_fraction)
+    parser.add_argument("--dynamic-entry-volatility-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_volatility_push_fraction)
+    parser.add_argument("--dynamic-entry-wick-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_wick_push_fraction)
+    parser.add_argument("--dynamic-entry-continuation-push-fraction", type=float, default=MicroGridProfile.dynamic_entry_continuation_push_fraction)
+    parser.add_argument("--dynamic-exit-geometry-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_exit_geometry_enabled)
+    parser.add_argument("--dynamic-exit-stop-widen-fraction", type=float, default=MicroGridProfile.dynamic_exit_stop_widen_fraction)
+    parser.add_argument("--dynamic-exit-max-stop-fraction", type=float, default=MicroGridProfile.dynamic_exit_max_stop_fraction)
+    parser.add_argument("--dynamic-exit-target-mean-ratio", type=float, default=MicroGridProfile.dynamic_exit_target_mean_ratio)
+    parser.add_argument("--dynamic-exit-target-quality-ratio", type=float, default=MicroGridProfile.dynamic_exit_target_quality_ratio)
+    parser.add_argument("--dynamic-exit-target-beyond-mean-fraction", type=float, default=MicroGridProfile.dynamic_exit_target_beyond_mean_fraction)
+    parser.add_argument("--dynamic-exit-max-target-fraction", type=float, default=MicroGridProfile.dynamic_exit_max_target_fraction)
+    parser.add_argument("--dynamic-exit-min-target-stop-ratio", type=float, default=MicroGridProfile.dynamic_exit_min_target_stop_ratio)
     parser.add_argument("--post-only-entry-gap-bps", type=float, default=MicroGridProfile.post_only_entry_gap_bps)
     parser.add_argument("--min-width-percent", type=float, default=MicroGridProfile.min_width_percent)
     parser.add_argument("--max-width-percent", type=float, default=MicroGridProfile.max_width_percent)
@@ -534,6 +636,7 @@ def main() -> int:
     parser.add_argument("--min-turn-count", type=int, default=MicroGridProfile.min_turn_count)
     parser.add_argument("--min-edge-alternations", type=int, default=MicroGridProfile.min_edge_alternations)
     parser.add_argument("--min-reversal-response-rate", type=float, default=MicroGridProfile.min_reversal_response_rate)
+    parser.add_argument("--max-reversal-response-rate", type=float, default=MicroGridProfile.max_reversal_response_rate)
     parser.add_argument("--edge-response-fraction", type=float, default=MicroGridProfile.edge_response_fraction)
     parser.add_argument("--edge-response-max-adverse-fraction", type=float, default=MicroGridProfile.edge_response_max_adverse_fraction)
     parser.add_argument("--max-path-efficiency", type=float, default=MicroGridProfile.max_path_efficiency)
@@ -598,6 +701,23 @@ def main() -> int:
     parser.add_argument("--trailing-activate-fraction", type=float, default=MicroGridProfile.trailing_activate_fraction)
     parser.add_argument("--trailing-lock-fraction", type=float, default=MicroGridProfile.trailing_lock_fraction)
     parser.add_argument("--trailing-giveback-fraction", type=float, default=MicroGridProfile.trailing_giveback_fraction)
+    parser.add_argument("--target-progress-trailing-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.target_progress_trailing_enabled)
+    parser.add_argument("--target-progress-activate-fraction", type=float, default=MicroGridProfile.target_progress_activate_fraction)
+    parser.add_argument("--target-progress-lock-fraction", type=float, default=MicroGridProfile.target_progress_lock_fraction)
+    parser.add_argument("--target-progress-giveback-fraction", type=float, default=MicroGridProfile.target_progress_giveback_fraction)
+    parser.add_argument("--post-fill-confirmation-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.post_fill_confirmation_enabled)
+    parser.add_argument("--post-fill-confirmation-seconds", type=int, default=MicroGridProfile.post_fill_confirmation_seconds)
+    parser.add_argument("--post-fill-confirmation-min-progress", type=float, default=MicroGridProfile.post_fill_confirmation_min_progress)
+    parser.add_argument("--post-fill-confirmation-max-adverse-progress", type=float, default=MicroGridProfile.post_fill_confirmation_max_adverse_progress)
+    parser.add_argument("--post-fill-confirmation-stale-target-progress", type=float, default=MicroGridProfile.post_fill_confirmation_stale_target_progress)
+    parser.add_argument("--post-fill-confirmation-exit-loss-fraction", type=float, default=MicroGridProfile.post_fill_confirmation_exit_loss_fraction)
+    parser.add_argument("--adaptive-profit-lock-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.adaptive_profit_lock_enabled)
+    parser.add_argument("--adaptive-profit-lock-min-progress", type=float, default=MicroGridProfile.adaptive_profit_lock_min_progress)
+    parser.add_argument("--adaptive-profit-lock-max-progress", type=float, default=MicroGridProfile.adaptive_profit_lock_max_progress)
+    parser.add_argument("--adaptive-profit-lock-min-fraction", type=float, default=MicroGridProfile.adaptive_profit_lock_min_fraction)
+    parser.add_argument("--adaptive-profit-lock-max-fraction", type=float, default=MicroGridProfile.adaptive_profit_lock_max_fraction)
+    parser.add_argument("--adaptive-profit-lock-min-giveback-fraction", type=float, default=MicroGridProfile.adaptive_profit_lock_min_giveback_fraction)
+    parser.add_argument("--adaptive-profit-lock-max-giveback-fraction", type=float, default=MicroGridProfile.adaptive_profit_lock_max_giveback_fraction)
     parser.add_argument("--dynamic-hold-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.dynamic_hold_enabled)
     parser.add_argument("--dynamic-hold-min-seconds", type=int, default=MicroGridProfile.dynamic_hold_min_seconds)
     parser.add_argument("--dynamic-hold-multiplier", type=float, default=MicroGridProfile.dynamic_hold_multiplier)
@@ -611,6 +731,9 @@ def main() -> int:
     parser.add_argument("--planner-max-stop-fraction", type=float, default=MicroGridProfile.planner_max_stop_fraction)
     parser.add_argument("--planner-max-target-fraction", type=float, default=MicroGridProfile.planner_max_target_fraction)
     parser.add_argument("--planner-history-min-fills", type=int, default=MicroGridProfile.planner_history_min_fills)
+    parser.add_argument("--spike-depth-tail-buffer-fraction", type=float, default=MicroGridProfile.spike_depth_tail_buffer_fraction)
+    parser.add_argument("--spike-depth-max-entry-edge-fraction", type=float, default=MicroGridProfile.spike_depth_max_entry_edge_fraction)
+    parser.add_argument("--spike-depth-max-stop-fraction", type=float, default=MicroGridProfile.spike_depth_max_stop_fraction)
     parser.add_argument("--max-symbol-losses-per-day", type=int, default=MicroGridProfile.max_symbol_losses_per_day)
     parser.add_argument("--max-candidate-trades-per-symbol", type=int, default=0)
     parser.add_argument("--quiet", action="store_true", help="write JSON output without printing the full payload")
@@ -648,6 +771,22 @@ def main() -> int:
         min_filled_grid_layers=args.min_filled_grid_layers,
         min_reservation_edge_fraction=args.min_reservation_edge_fraction,
         max_reservation_edge_fraction=args.max_reservation_edge_fraction,
+        dynamic_entry_edge_enabled=args.dynamic_entry_edge_enabled,
+        dynamic_entry_base_edge_fraction=args.dynamic_entry_base_edge_fraction,
+        dynamic_entry_max_push_fraction=args.dynamic_entry_max_push_fraction,
+        dynamic_entry_flow_push_fraction=args.dynamic_entry_flow_push_fraction,
+        dynamic_entry_momentum_push_fraction=args.dynamic_entry_momentum_push_fraction,
+        dynamic_entry_volatility_push_fraction=args.dynamic_entry_volatility_push_fraction,
+        dynamic_entry_wick_push_fraction=args.dynamic_entry_wick_push_fraction,
+        dynamic_entry_continuation_push_fraction=args.dynamic_entry_continuation_push_fraction,
+        dynamic_exit_geometry_enabled=args.dynamic_exit_geometry_enabled,
+        dynamic_exit_stop_widen_fraction=args.dynamic_exit_stop_widen_fraction,
+        dynamic_exit_max_stop_fraction=args.dynamic_exit_max_stop_fraction,
+        dynamic_exit_target_mean_ratio=args.dynamic_exit_target_mean_ratio,
+        dynamic_exit_target_quality_ratio=args.dynamic_exit_target_quality_ratio,
+        dynamic_exit_target_beyond_mean_fraction=args.dynamic_exit_target_beyond_mean_fraction,
+        dynamic_exit_max_target_fraction=args.dynamic_exit_max_target_fraction,
+        dynamic_exit_min_target_stop_ratio=args.dynamic_exit_min_target_stop_ratio,
         post_only_entry_gap_bps=args.post_only_entry_gap_bps,
         min_width_percent=args.min_width_percent,
         max_width_percent=args.max_width_percent,
@@ -656,6 +795,7 @@ def main() -> int:
         min_turn_count=args.min_turn_count,
         min_edge_alternations=args.min_edge_alternations,
         min_reversal_response_rate=args.min_reversal_response_rate,
+        max_reversal_response_rate=args.max_reversal_response_rate,
         edge_response_fraction=args.edge_response_fraction,
         edge_response_max_adverse_fraction=args.edge_response_max_adverse_fraction,
         max_path_efficiency=args.max_path_efficiency,
@@ -720,6 +860,23 @@ def main() -> int:
         trailing_activate_fraction=args.trailing_activate_fraction,
         trailing_lock_fraction=args.trailing_lock_fraction,
         trailing_giveback_fraction=args.trailing_giveback_fraction,
+        target_progress_trailing_enabled=args.target_progress_trailing_enabled,
+        target_progress_activate_fraction=args.target_progress_activate_fraction,
+        target_progress_lock_fraction=args.target_progress_lock_fraction,
+        target_progress_giveback_fraction=args.target_progress_giveback_fraction,
+        post_fill_confirmation_enabled=args.post_fill_confirmation_enabled,
+        post_fill_confirmation_seconds=args.post_fill_confirmation_seconds,
+        post_fill_confirmation_min_progress=args.post_fill_confirmation_min_progress,
+        post_fill_confirmation_max_adverse_progress=args.post_fill_confirmation_max_adverse_progress,
+        post_fill_confirmation_stale_target_progress=args.post_fill_confirmation_stale_target_progress,
+        post_fill_confirmation_exit_loss_fraction=args.post_fill_confirmation_exit_loss_fraction,
+        adaptive_profit_lock_enabled=args.adaptive_profit_lock_enabled,
+        adaptive_profit_lock_min_progress=args.adaptive_profit_lock_min_progress,
+        adaptive_profit_lock_max_progress=args.adaptive_profit_lock_max_progress,
+        adaptive_profit_lock_min_fraction=args.adaptive_profit_lock_min_fraction,
+        adaptive_profit_lock_max_fraction=args.adaptive_profit_lock_max_fraction,
+        adaptive_profit_lock_min_giveback_fraction=args.adaptive_profit_lock_min_giveback_fraction,
+        adaptive_profit_lock_max_giveback_fraction=args.adaptive_profit_lock_max_giveback_fraction,
         dynamic_hold_enabled=args.dynamic_hold_enabled,
         dynamic_hold_min_seconds=args.dynamic_hold_min_seconds,
         dynamic_hold_multiplier=args.dynamic_hold_multiplier,
@@ -733,6 +890,9 @@ def main() -> int:
         planner_max_stop_fraction=args.planner_max_stop_fraction,
         planner_max_target_fraction=args.planner_max_target_fraction,
         planner_history_min_fills=args.planner_history_min_fills,
+        spike_depth_tail_buffer_fraction=args.spike_depth_tail_buffer_fraction,
+        spike_depth_max_entry_edge_fraction=args.spike_depth_max_entry_edge_fraction,
+        spike_depth_max_stop_fraction=args.spike_depth_max_stop_fraction,
         max_symbol_losses_per_day=args.max_symbol_losses_per_day,
     )
     coverage: dict[str, Any] = {}
@@ -793,6 +953,7 @@ def main() -> int:
         max_notional_fraction=args.max_notional_fraction,
         max_margin_fraction=args.max_margin_fraction,
         max_leverage=args.max_leverage,
+        pullback_scale_mode=args.pullback_scale_mode,
         symbol_quality_filter_enabled=args.symbol_quality_filter_enabled,
         symbol_quality_lookback_hours=args.symbol_quality_lookback_hours,
         symbol_quality_min_samples=args.symbol_quality_min_samples,
@@ -807,8 +968,9 @@ def main() -> int:
             "signal": "second-level short-window dynamic band, edge alternation/response, center-cross count, turn count, drift-vs-width, and trend-pause filter",
             "orders": "when a micro oscillation passes, place both passive low-buy and high-short orders near predicted wick zones; unfilled orders expire quickly",
             "exit": "ride the oscillation toward the opposite band, then target, stop beyond local wick zone, cost-aware trailing lock, or max-hold failsafe",
-            "sizing": "portfolio replay scales notional by risk, max notional, margin x leverage caps, pullback quality, and optional rolling per-symbol trade quality; leverage changes margin efficiency, not price edge",
+            "sizing": "portfolio replay scales notional by risk, max notional, margin x leverage caps, configured pullback scale mode, and optional rolling per-symbol trade quality; leverage changes margin efficiency, not price edge",
             "intent": "research a smart-grid micro-oscillation supplement: second/tick data captures information, while trades may hold across a full multi-second or multi-minute wave",
+            "pullback_scale_mode": args.pullback_scale_mode,
         },
         "symbols": symbols,
         "window": {
@@ -1053,6 +1215,9 @@ def micro_trade_quality_scale_from_values(values: dict[str, str]) -> tuple[float
     edge_reason = str(values.get("edge_reversal_reason") or "")
     if edge_reason in BLOCKED_EDGE_REVERSAL_REASONS:
         return 0.0, [f"quality_edge_reversal_blocked:{edge_reason}"]
+    if edge_reason in SOFT_EDGE_REVERSAL_REASONS:
+        scale *= 0.65
+        reasons.append(f"quality_edge_reversal_fresh:{edge_reason}")
 
     if "basket_size_weight" in values:
         basket_weight = max(0.01, code_float(values, "basket_size_weight", 0.75))
@@ -1508,13 +1673,24 @@ def build_micro_grid_state(
         long_pullback_quality=float(pullback["long_pullback_quality"]),
         short_pullback_quality=float(pullback["short_pullback_quality"]),
         pullback_model_reason=str(pullback["pullback_model_reason"]),
+        recent_spike_depth_percent=recent_spike_depth_percent(structure_window, profile),
     )
     return state, []
 
 
 def state_rejection_reasons(state: MicroGridState, profile: MicroGridProfile) -> list[str]:
     reasons: list[str] = []
-    if not (profile.min_width_percent <= state.width_percent <= profile.max_width_percent):
+    # Width gate adapts to vol regime: low vol demands a tighter min width so
+    # the leg does not post dead-water entries; high vol allows wider ranges.
+    min_width = profile.min_width_percent
+    max_width = profile.max_width_percent
+    vol_regime = classify_vol_regime(state.instantaneous_vol_percent, profile)
+    if profile.vol_regime_enabled and vol_regime is not None:
+        if state.instantaneous_vol_percent < profile.vol_regime_low_threshold:
+            min_width = profile.min_width_percent * profile.vol_regime_low_min_width_mult
+        elif state.instantaneous_vol_percent > profile.vol_regime_high_threshold:
+            max_width = profile.max_width_percent * profile.vol_regime_high_max_width_mult
+    if not (min_width <= state.width_percent <= max_width):
         reasons.append("width_outside_profile")
     if profile.round_trip_cost_percent > 0 and state.width_percent / profile.round_trip_cost_percent < profile.min_width_cost_ratio:
         reasons.append("width_does_not_cover_cost")
@@ -1530,6 +1706,8 @@ def state_rejection_reasons(state: MicroGridState, profile: MicroGridProfile) ->
         reasons.append("not_enough_edge_alternations")
     if state.reversal_response_rate < profile.min_reversal_response_rate:
         reasons.append("weak_edge_reversal_response")
+    if state.reversal_response_rate > profile.max_reversal_response_rate:
+        reasons.append("overheated_edge_reversal_response")
     if state.path_efficiency > profile.max_path_efficiency:
         reasons.append("path_too_directional")
     if state.drift_to_width > profile.max_drift_to_width:
@@ -1537,6 +1715,228 @@ def state_rejection_reasons(state: MicroGridState, profile: MicroGridProfile) ->
     if state.trend_pause:
         reasons.append(f"trend_pause_{state.trend_direction}")
     return reasons
+
+
+def recent_spike_depth_percent(window: list[BacktestBar], profile: "MicroGridProfile") -> float:
+    """Scout the max price excursion from local mean over the lookback.
+
+    This is the 偵察 step: measure how deep recent wicks reached, so the entry
+    can be posted at that predicted depth instead of a fixed span fraction.
+    Returns a percent of price (e.g. 1.5 = 1.5% spike). 0.0 if unavailable.
+    """
+    lookback = max(60, int(profile.spike_depth_lookback_seconds))
+    chunk = window[-lookback:]
+    if len(chunk) < 30:
+        return 0.0
+    closes = [b.close for b in chunk if b.close > 0]
+    if len(closes) < 30:
+        return 0.0
+    mean = sum(closes) / len(closes)
+    if mean <= 0:
+        return 0.0
+    # max excursion using highs/lows (captures wicks, not just closes)
+    max_dev = 0.0
+    for b in chunk:
+        if b.high > 0:
+            max_dev = max(max_dev, abs(b.high - mean) / mean * 100.0)
+        if b.low > 0:
+            max_dev = max(max_dev, abs(b.low - mean) / mean * 100.0)
+    return max_dev
+
+
+def classify_vol_regime(instantaneous_vol_percent: float, profile: "MicroGridProfile") -> tuple[float, float, float] | None:
+    """Return (stop_mult, target_mult, hold_mult) for the current vol regime.
+
+    The micro leg's geometry was fixed scalars of the span; this lets it adapt:
+      - low vol:  tighter stop/target, shorter hold (avoid dead-water entries)
+      - high vol: wider stop (avoid noise stops), wider target, much shorter
+                  hold (fast in/out before a directional break)
+    Returns None when vol-regime scaling is disabled or vol is unavailable.
+    """
+    if not profile.vol_regime_enabled:
+        return None
+    if not isinstance(instantaneous_vol_percent, (int, float)):
+        return None
+    vol = float(instantaneous_vol_percent)
+    if vol != vol:  # NaN
+        return None
+    if vol < profile.vol_regime_low_threshold:
+        return (
+            profile.vol_regime_low_stop_mult,
+            profile.vol_regime_low_target_mult,
+            profile.vol_regime_low_hold_mult,
+        )
+    if vol > profile.vol_regime_high_threshold:
+        return (
+            profile.vol_regime_high_stop_mult,
+            profile.vol_regime_high_target_mult,
+            profile.vol_regime_high_hold_mult,
+        )
+    return (1.0, 1.0, 1.0)  # mid regime: no scaling
+
+
+def minimum_entry_edge_fraction(profile: MicroGridProfile) -> float:
+    lower = profile.min_reservation_edge_fraction
+    if profile.dynamic_entry_edge_enabled:
+        lower = min(
+            lower,
+            profile.dynamic_entry_base_edge_fraction - max(0.0, profile.dynamic_entry_max_push_fraction),
+            profile.wick_min_entry_fraction,
+        )
+    return lower
+
+
+def dynamic_entry_edge_fraction(side: str, state: MicroGridState, profile: MicroGridProfile) -> tuple[float, list[str]]:
+    lower = minimum_entry_edge_fraction(profile)
+    base = clamp(profile.dynamic_entry_base_edge_fraction, lower, profile.max_reservation_edge_fraction)
+    if not profile.dynamic_entry_edge_enabled:
+        return base, []
+
+    pressures = dynamic_entry_pressure_components(side, state, profile)
+
+    flow_push = max(0.0, profile.dynamic_entry_flow_push_fraction) * pressures["flow_pressure"]
+    momentum_push = max(0.0, profile.dynamic_entry_momentum_push_fraction) * pressures["momentum_pressure"]
+    volatility_push = max(0.0, profile.dynamic_entry_volatility_push_fraction) * pressures["volatility_pressure"]
+    wick_push = max(0.0, profile.dynamic_entry_wick_push_fraction) * pressures["wick_pressure"]
+    continuation_push = max(0.0, profile.dynamic_entry_continuation_push_fraction) * pressures["continuation_pressure"]
+    total_push = min(
+        max(0.0, profile.dynamic_entry_max_push_fraction),
+        flow_push + momentum_push + volatility_push + wick_push + continuation_push,
+    )
+    edge = clamp(base - total_push, lower, profile.max_reservation_edge_fraction)
+    multiplier = abs(edge) / max(abs(base), 1e-9)
+    return edge, [
+        f"dynamic_entry_enabled:{profile.dynamic_entry_edge_enabled}",
+        f"dynamic_entry_base_edge_fraction:{round(base, 6)}",
+        f"dynamic_entry_min_edge_fraction:{round(lower, 6)}",
+        f"dynamic_entry_flow_pressure:{round(pressures['flow_pressure'], 6)}",
+        f"dynamic_entry_flow_push_fraction:{round(flow_push, 6)}",
+        f"dynamic_entry_momentum_pressure:{round(pressures['momentum_pressure'], 6)}",
+        f"dynamic_entry_momentum_push_fraction:{round(momentum_push, 6)}",
+        f"dynamic_entry_volatility_pressure:{round(pressures['volatility_pressure'], 6)}",
+        f"dynamic_entry_volatility_push_fraction:{round(volatility_push, 6)}",
+        f"dynamic_entry_wick_pressure:{round(pressures['wick_pressure'], 6)}",
+        f"dynamic_entry_wick_push_fraction:{round(wick_push, 6)}",
+        f"dynamic_entry_continuation_pressure:{round(pressures['continuation_pressure'], 6)}",
+        f"dynamic_entry_continuation_push_fraction:{round(continuation_push, 6)}",
+        f"dynamic_entry_total_push_fraction:{round(total_push, 6)}",
+        f"dynamic_entry_push_multiplier:{round(multiplier, 6)}",
+        f"dynamic_entry_model_edge_fraction:{round(edge, 6)}",
+    ]
+
+
+def dynamic_entry_pressure_components(side: str, state: MicroGridState, profile: MicroGridProfile) -> dict[str, float]:
+    width = max(abs(state.width_percent), 0.0001)
+    if side == "long":
+        flow_pressure = clamp((0.50 - state.entry_taker_buy_ratio) / 0.18, 0.0, 1.0)
+        directional_drift = max(0.0, -state.recent_drift_percent)
+        continuation_fraction = state.long_entry_continuation_fraction
+    else:
+        flow_pressure = clamp((state.entry_taker_buy_ratio - 0.50) / 0.18, 0.0, 1.0)
+        directional_drift = max(0.0, state.recent_drift_percent)
+        continuation_fraction = state.short_entry_continuation_fraction
+
+    momentum_pressure = clamp(
+        directional_drift / max(width * 0.35, profile.round_trip_cost_percent * 1.5, 0.04),
+        0.0,
+        1.0,
+    )
+    volatility_pressure = clamp(
+        state.instantaneous_vol_percent / max(width * 0.25, profile.round_trip_cost_percent, 0.03),
+        0.0,
+        1.0,
+    )
+    wick_pressure = clamp(
+        state.recent_spike_depth_percent / max(width * 0.75, profile.spike_depth_min_percent, 0.01),
+        0.0,
+        1.0,
+    )
+    continuation_pressure = clamp(
+        continuation_fraction / max(profile.reversal_max_continuation_fraction, 0.02),
+        0.0,
+        1.0,
+    )
+    return {
+        "flow_pressure": flow_pressure,
+        "momentum_pressure": momentum_pressure,
+        "volatility_pressure": volatility_pressure,
+        "wick_pressure": wick_pressure,
+        "continuation_pressure": continuation_pressure,
+    }
+
+
+def dynamic_exit_span_fractions(
+    side: str,
+    *,
+    edge_fraction: float,
+    base_stop_fraction: float,
+    base_target_fraction: float,
+    state: MicroGridState,
+    profile: MicroGridProfile,
+) -> tuple[float, float, list[str]]:
+    if not profile.dynamic_exit_geometry_enabled:
+        return base_stop_fraction, base_target_fraction, []
+    pressures = dynamic_entry_pressure_components(side, state, profile)
+    pullback_quality = clamp(pullback_quality_for_side(side, state), 0.0, 1.0)
+    wick_success = clamp(state.long_wick_success_rate if side == "long" else state.short_wick_success_rate, 0.0, 1.0)
+    response = clamp(state.reversal_response_rate, 0.0, 1.0)
+    chaos = max(
+        clamp((state.recent_path_efficiency - 0.55) / 0.35, 0.0, 1.0),
+        clamp((state.recent_drift_to_width - max(profile.max_drift_to_width * 0.75, 0.01)) / max(profile.max_drift_to_width, 0.01), 0.0, 1.0),
+        clamp((state.drift_to_width - max(profile.max_drift_to_width, 0.01)) / max(profile.max_drift_to_width, 0.01), 0.0, 1.0),
+    )
+    quality = clamp(
+        pullback_quality * 0.28
+        + response * 0.28
+        + wick_success * 0.16
+        + (1.0 - pressures["continuation_pressure"]) * 0.14
+        + (1.0 - chaos) * 0.14,
+        0.0,
+        1.0,
+    )
+    stop_pressure = clamp(
+        pressures["volatility_pressure"] * 0.34
+        + pressures["wick_pressure"] * 0.26
+        + pressures["momentum_pressure"] * 0.22
+        + pressures["flow_pressure"] * 0.18,
+        0.0,
+        1.0,
+    )
+    stop_widen = max(0.0, profile.dynamic_exit_stop_widen_fraction) * stop_pressure * (0.70 + quality * 0.30) * (1.0 - chaos * 0.45)
+    stop_fraction = max(base_stop_fraction, base_stop_fraction + stop_widen)
+    stop_cap = max(
+        base_stop_fraction,
+        min(profile.dynamic_exit_max_stop_fraction, profile.wick_max_stop_fraction + 0.32),
+    )
+    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, stop_cap)
+
+    mean_distance = max(0.0, 0.50 - edge_fraction)
+    target_mean_ratio = clamp(
+        profile.dynamic_exit_target_mean_ratio + profile.dynamic_exit_target_quality_ratio * quality - 0.08 * chaos,
+        0.70,
+        1.05,
+    )
+    beyond_mean = max(0.0, profile.dynamic_exit_target_beyond_mean_fraction) * clamp((quality - 0.68) / 0.32, 0.0, 1.0) * (1.0 - chaos * 0.65)
+    target_from_mean = mean_distance * target_mean_ratio + beyond_mean
+    target_fraction = max(
+        base_target_fraction,
+        target_from_mean,
+        stop_fraction * max(0.0, profile.dynamic_exit_min_target_stop_ratio),
+    )
+    target_fraction = clamp(target_fraction, profile.wick_min_target_fraction, min(profile.dynamic_exit_max_target_fraction, profile.wick_max_target_fraction + 0.60))
+    return stop_fraction, target_fraction, [
+        f"dynamic_exit_geometry_enabled:{profile.dynamic_exit_geometry_enabled}",
+        f"dynamic_exit_quality:{round(quality, 6)}",
+        f"dynamic_exit_chaos_pressure:{round(chaos, 6)}",
+        f"dynamic_exit_stop_pressure:{round(stop_pressure, 6)}",
+        f"dynamic_exit_stop_widen_fraction:{round(stop_widen, 6)}",
+        f"dynamic_exit_stop_cap_fraction:{round(stop_cap, 6)}",
+        f"dynamic_exit_mean_distance_fraction:{round(mean_distance, 6)}",
+        f"dynamic_exit_target_mean_ratio:{round(target_mean_ratio, 6)}",
+        f"dynamic_exit_beyond_mean_fraction:{round(beyond_mean, 6)}",
+        f"dynamic_exit_stop_span_fraction:{round(stop_fraction, 6)}",
+        f"dynamic_exit_target_span_fraction:{round(target_fraction, 6)}",
+    ]
 
 
 def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProfile) -> list[GridOrder]:
@@ -1552,6 +1952,7 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
     sell_target_fraction = profile.target_fraction
     buy_hold_seconds = int(profile.max_hold_seconds)
     sell_hold_seconds = int(profile.max_hold_seconds)
+    entry_min_edge_fraction = minimum_entry_edge_fraction(profile)
     if profile.dynamic_wick_enabled:
         buy_entry = state.lower_price + span * state.long_entry_edge_fraction
         sell_entry = state.upper_price - span * state.short_entry_edge_fraction
@@ -1567,6 +1968,108 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         sell_entry = max(sell_entry, state.upper_price - span * entry_fraction)
     buy_edge_fraction = reservation_adjusted_edge_fraction("long", edge_fraction_for_price("long", buy_entry, state), state, profile)
     sell_edge_fraction = reservation_adjusted_edge_fraction("short", edge_fraction_for_price("short", sell_entry, state), state, profile)
+    entry_reason_codes: dict[str, list[str]] = {"long": [], "short": []}
+    # --- volatility regime adaptive scaling (偵察 + 動態適配 + 快進快出) ---
+    # Bucket the instantaneous vol into low/mid/high and rescale stop/target/hold
+    # so the leg is not stopped by noise in high vol nor dead in low vol.
+    vol_regime = classify_vol_regime(state.instantaneous_vol_percent, profile)
+    if profile.vol_regime_enabled and vol_regime is not None:
+        stop_mult, target_mult, hold_mult = vol_regime
+        buy_stop_fraction *= stop_mult
+        sell_stop_fraction *= stop_mult
+        buy_target_fraction *= target_mult
+        sell_target_fraction *= target_mult
+        buy_hold_seconds = max(int(buy_hold_seconds * hold_mult), 1)
+        sell_hold_seconds = max(int(sell_hold_seconds * hold_mult), 1)
+    # --- dynamic spike-depth entry (偵察近期插針深度 -> 計算掛單點位) ---
+    # Post the passive entry at the predicted next-wick depth, derived from
+    # the scouted recent spike depth. This replaces the fixed span-fraction
+    # entry with a volatility-adapted depth: 挂深一點 when the market is
+    # spiking, skip (fall back to band edge) when dead. Stop/target are also
+    # rescaled to the predicted depth so the geometry is internally consistent.
+    if profile.spike_depth_entry_enabled and state.recent_spike_depth_percent >= profile.spike_depth_min_percent:
+        spike_pct = clamp(state.recent_spike_depth_percent, 0.0, profile.spike_depth_max_percent) / 100.0
+        # predicted depth as a fraction of span (so it composes with the grid layer math)
+        width_frac = state.width_percent / 100.0
+        if width_frac > 0:
+            depth_in_span = spike_pct / width_frac
+            tail_buffer = max(0.0, profile.spike_depth_tail_buffer_fraction)
+            spike_entry_cap = min(profile.spike_depth_max_entry_edge_fraction, entry_min_edge_fraction)
+            spike_stop_cap = max(profile.spike_depth_max_stop_fraction, profile.wick_min_stop_fraction)
+            # Entry is posted just beyond the observed spike depth plus a
+            # tail-risk buffer. The buffer is strongest when flow/momentum are
+            # still pushing into the wick; this is the SLXUSDT failure mode.
+            buy_pressures = dynamic_entry_pressure_components("long", state, profile)
+            sell_pressures = dynamic_entry_pressure_components("short", state, profile)
+            buy_tail_pressure = clamp(
+                buy_pressures["flow_pressure"] * 0.28
+                + buy_pressures["momentum_pressure"] * 0.30
+                + buy_pressures["volatility_pressure"] * 0.18
+                + buy_pressures["wick_pressure"] * 0.14
+                + buy_pressures["continuation_pressure"] * 0.10,
+                0.0,
+                1.0,
+            )
+            sell_tail_pressure = clamp(
+                sell_pressures["flow_pressure"] * 0.28
+                + sell_pressures["momentum_pressure"] * 0.30
+                + sell_pressures["volatility_pressure"] * 0.18
+                + sell_pressures["wick_pressure"] * 0.14
+                + sell_pressures["continuation_pressure"] * 0.10,
+                0.0,
+                1.0,
+            )
+            buy_spike_entry_edge = -depth_in_span * (profile.spike_depth_entry_fraction + tail_buffer * buy_tail_pressure)
+            sell_spike_entry_edge = -depth_in_span * (profile.spike_depth_entry_fraction + tail_buffer * sell_tail_pressure)
+            buy_spike_entry_edge = clamp(buy_spike_entry_edge, spike_entry_cap, profile.max_reservation_edge_fraction)
+            sell_spike_entry_edge = clamp(sell_spike_entry_edge, spike_entry_cap, profile.max_reservation_edge_fraction)
+            spike_stop_frac = min(spike_stop_cap, depth_in_span * profile.spike_depth_stop_fraction * (1.0 + tail_buffer * max(buy_tail_pressure, sell_tail_pressure)))
+            spike_target_frac = depth_in_span * profile.spike_depth_target_fraction
+            # only override if it posts deeper (more passive) than the current edge
+            buy_edge_fraction = min(buy_edge_fraction, buy_spike_entry_edge)
+            sell_edge_fraction = min(sell_edge_fraction, sell_spike_entry_edge)
+            buy_stop_fraction = max(buy_stop_fraction, spike_stop_frac)
+            sell_stop_fraction = max(sell_stop_fraction, spike_stop_frac)
+            buy_target_fraction = max(buy_target_fraction, spike_target_frac)
+            sell_target_fraction = max(sell_target_fraction, spike_target_frac)
+            entry_min_edge_fraction = min(entry_min_edge_fraction, buy_edge_fraction, sell_edge_fraction)
+            spike_reasons = [
+                f"spike_depth_entry_edge_fraction:{round(min(buy_spike_entry_edge, sell_spike_entry_edge), 6)}",
+                f"spike_depth_long_entry_edge_fraction:{round(buy_spike_entry_edge, 6)}",
+                f"spike_depth_short_entry_edge_fraction:{round(sell_spike_entry_edge, 6)}",
+                f"spike_depth_percent:{round(state.recent_spike_depth_percent, 6)}",
+                f"spike_depth_in_span:{round(depth_in_span, 6)}",
+                f"spike_depth_tail_buffer_fraction:{round(tail_buffer, 6)}",
+                f"spike_depth_long_tail_pressure:{round(buy_tail_pressure, 6)}",
+                f"spike_depth_short_tail_pressure:{round(sell_tail_pressure, 6)}",
+                f"spike_depth_stop_span_fraction:{round(spike_stop_frac, 6)}",
+                f"spike_depth_dynamic_min_edge_fraction:{round(entry_min_edge_fraction, 6)}",
+            ]
+            entry_reason_codes["long"].extend(spike_reasons)
+            entry_reason_codes["short"].extend(spike_reasons)
+    if profile.dynamic_entry_edge_enabled:
+        long_dynamic_edge, long_dynamic_reasons = dynamic_entry_edge_fraction("long", state, profile)
+        short_dynamic_edge, short_dynamic_reasons = dynamic_entry_edge_fraction("short", state, profile)
+        long_existing_edge = buy_edge_fraction
+        short_existing_edge = sell_edge_fraction
+        buy_edge_fraction = min(buy_edge_fraction, long_dynamic_edge)
+        sell_edge_fraction = min(sell_edge_fraction, short_dynamic_edge)
+        entry_reason_codes["long"].extend(
+            [
+                *long_dynamic_reasons,
+                f"dynamic_entry_existing_edge_fraction:{round(long_existing_edge, 6)}",
+                f"dynamic_entry_existing_deeper:{long_existing_edge < long_dynamic_edge}",
+                f"dynamic_entry_applied_edge_fraction:{round(buy_edge_fraction, 6)}",
+            ]
+        )
+        entry_reason_codes["short"].extend(
+            [
+                *short_dynamic_reasons,
+                f"dynamic_entry_existing_edge_fraction:{round(short_existing_edge, 6)}",
+                f"dynamic_entry_existing_deeper:{short_existing_edge < short_dynamic_edge}",
+                f"dynamic_entry_applied_edge_fraction:{round(sell_edge_fraction, 6)}",
+            ]
+        )
     if profile.dynamic_level_planner_enabled:
         long_plan = dynamic_level_plan(
             "long",
@@ -1599,30 +2102,42 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         short_plan = None
         buy_edge_fraction = pullback_adjusted_edge_fraction("long", buy_edge_fraction, state, profile)
         sell_edge_fraction = pullback_adjusted_edge_fraction("short", sell_edge_fraction, state, profile)
+    if profile.dynamic_entry_edge_enabled:
+        entry_reason_codes["long"].append(f"dynamic_entry_post_pullback_edge_fraction:{round(buy_edge_fraction, 6)}")
+        entry_reason_codes["short"].append(f"dynamic_entry_post_pullback_edge_fraction:{round(sell_edge_fraction, 6)}")
     grid_range_fraction = dynamic_grid_range_fraction(state, profile)
     target_buffer = span * clamp(profile.target_edge_buffer_fraction, 0.0, 0.35)
     orders: list[GridOrder] = []
     layers = max(1, int(profile.grid_layer_count))
     layer_spacing = grid_range_fraction * max(0.0, profile.grid_layer_spacing_fraction) / max(1, layers - 1)
     seen_entries: set[tuple[str, int]] = set()
-    for side, base_edge_fraction, target_fraction, stop_fraction, hold_seconds, plan in (
-        ("long", buy_edge_fraction, buy_target_fraction, buy_stop_fraction, buy_hold_seconds, long_plan),
-        ("short", sell_edge_fraction, sell_target_fraction, sell_stop_fraction, sell_hold_seconds, short_plan),
+    min_edge_fraction = entry_min_edge_fraction
+    for side, base_edge_fraction, target_fraction, stop_fraction, hold_seconds, plan, side_entry_reasons in (
+        ("long", buy_edge_fraction, buy_target_fraction, buy_stop_fraction, buy_hold_seconds, long_plan, entry_reason_codes["long"]),
+        ("short", sell_edge_fraction, sell_target_fraction, sell_stop_fraction, sell_hold_seconds, short_plan, entry_reason_codes["short"]),
     ):
         for layer in range(layers):
             edge_fraction = clamp(
                 base_edge_fraction - layer * layer_spacing,
-                profile.min_reservation_edge_fraction,
+                min_edge_fraction,
                 profile.max_reservation_edge_fraction,
+            )
+            layer_stop_fraction, layer_target_fraction, exit_reason_codes = dynamic_exit_span_fractions(
+                side,
+                edge_fraction=edge_fraction,
+                base_stop_fraction=stop_fraction,
+                base_target_fraction=target_fraction,
+                state=state,
+                profile=profile,
             )
             if side == "long":
                 entry = state.lower_price + span * edge_fraction
-                target = min(entry + span * target_fraction, state.upper_price - target_buffer)
-                stop = entry - span * stop_fraction
+                target = min(entry + span * layer_target_fraction, state.upper_price - target_buffer)
+                stop = entry - span * layer_stop_fraction
             else:
                 entry = state.upper_price - span * edge_fraction
-                target = max(entry - span * target_fraction, state.lower_price + target_buffer)
-                stop = entry + span * stop_fraction
+                target = max(entry - span * layer_target_fraction, state.lower_price + target_buffer)
+                stop = entry + span * layer_stop_fraction
             adjusted_target, target_adjustment = cost_aware_target(side, entry, target, state, profile)
             dedupe_key = (side, round(entry, 10))
             if dedupe_key in seen_entries:
@@ -1639,13 +2154,14 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
                     target=adjusted_target,
                     stop=stop,
                     hold_seconds=hold_seconds,
-                    stop_fraction=stop_fraction,
-                    target_fraction=target_fraction,
+                    stop_fraction=layer_stop_fraction,
+                    target_fraction=layer_target_fraction,
                     target_adjustment=target_adjustment,
                     layer=layer,
                     layer_size=layer_size,
                     edge_fraction=edge_fraction,
                     dynamic_plan=plan,
+                    entry_reason_codes=[*side_entry_reasons, *exit_reason_codes],
                 )
             )
     return orders
@@ -1668,6 +2184,7 @@ def build_single_grid_order(
     layer_size: float,
     edge_fraction: float,
     dynamic_plan: DynamicLevelPlan | None = None,
+    entry_reason_codes: list[str] | None = None,
 ) -> list[GridOrder]:
     reward = (target - entry) if side == "long" else (entry - target)
     risk = (entry - stop) if side == "long" else (stop - entry)
@@ -1787,6 +2304,7 @@ def build_single_grid_order(
                 f"entry_price:{round(entry, 8)}",
                 f"target_price:{round(target, 8)}",
                 f"stop_price:{round(stop, 8)}",
+                *(entry_reason_codes or []),
                 *dynamic_level_reason_codes(dynamic_plan),
             ],
             max_hold_seconds=max(1, int(hold_seconds)),
@@ -1840,15 +2358,23 @@ def grid_price_or_reward_rejection_reasons(state: MicroGridState, profile: Micro
         ("short", sell_edge_fraction, state.short_target_span_fraction if profile.dynamic_wick_enabled else profile.target_fraction, state.short_stop_span_fraction if profile.dynamic_wick_enabled else profile.stop_fraction, state.short_hold_seconds if profile.dynamic_wick_enabled else profile.max_hold_seconds),
     ):
         for layer in range(layers):
-            edge_fraction = clamp(base_edge_fraction - layer * layer_spacing, profile.min_reservation_edge_fraction, profile.max_reservation_edge_fraction)
+            edge_fraction = clamp(base_edge_fraction - layer * layer_spacing, minimum_entry_edge_fraction(profile), profile.max_reservation_edge_fraction)
+            layer_stop_fraction, layer_target_fraction, _exit_reasons = dynamic_exit_span_fractions(
+                side,
+                edge_fraction=edge_fraction,
+                base_stop_fraction=stop_fraction,
+                base_target_fraction=target_fraction,
+                state=state,
+                profile=profile,
+            )
             if side == "long":
                 entry = state.lower_price + span * edge_fraction
-                target = min(entry + span * target_fraction, state.upper_price - target_buffer)
-                stop = entry - span * stop_fraction
+                target = min(entry + span * layer_target_fraction, state.upper_price - target_buffer)
+                stop = entry - span * layer_stop_fraction
             else:
                 entry = state.upper_price - span * edge_fraction
-                target = max(entry - span * target_fraction, state.lower_price + target_buffer)
-                stop = entry + span * stop_fraction
+                target = max(entry - span * layer_target_fraction, state.lower_price + target_buffer)
+                stop = entry + span * layer_stop_fraction
             target, _ = cost_aware_target(side, entry, target, state, profile)
             reasons.extend(single_grid_order_rejection_reasons(state, profile, side=side, entry=entry, target=target, stop=stop))
     return sorted(set(reasons))
@@ -1921,7 +2447,7 @@ def reservation_adjusted_edge_fraction(side: str, base_edge_fraction: float, sta
         adjusted = max(base_edge_fraction, reservation_edge_short)
     else:
         adjusted = base_edge_fraction
-    return clamp(adjusted, profile.min_reservation_edge_fraction, profile.max_reservation_edge_fraction)
+    return clamp(adjusted, minimum_entry_edge_fraction(profile), profile.max_reservation_edge_fraction)
 
 
 def pullback_quality_for_side(side: str, state: MicroGridState) -> float:
@@ -1934,8 +2460,9 @@ def pullback_adjusted_edge_fraction(side: str, base_edge_fraction: float, state:
     quality = pullback_quality_for_side(side, state)
     shift = max(0.0, float(profile.pullback_entry_shift_fraction)) * (1.0 - clamp(quality, 0.0, 1.0))
     model = state.long_wick_model if side == "long" else state.short_wick_model
-    ev_min_entry = profile.wick_ev_min_entry_edge_fraction if profile.dynamic_wick_enabled and model == "ev" else profile.min_reservation_edge_fraction
-    lower = max(profile.min_reservation_edge_fraction, ev_min_entry)
+    min_entry = minimum_entry_edge_fraction(profile)
+    ev_min_entry = profile.wick_ev_min_entry_edge_fraction if profile.dynamic_wick_enabled and model == "ev" else min_entry
+    lower = max(min_entry, ev_min_entry)
     lower = min(base_edge_fraction, lower)
     return clamp(base_edge_fraction - shift, lower, profile.max_reservation_edge_fraction)
 
@@ -1960,8 +2487,8 @@ def side_flow_blocks_order(side: str, state: MicroGridState, profile: MicroGridP
 
 def planner_min_entry_edge_fraction(profile: MicroGridProfile) -> float:
     if not profile.dynamic_level_planner_enabled:
-        return profile.min_reservation_edge_fraction
-    return min(profile.min_reservation_edge_fraction, profile.wick_min_entry_fraction)
+        return minimum_entry_edge_fraction(profile)
+    return min(minimum_entry_edge_fraction(profile), profile.wick_min_entry_fraction)
 
 
 def dynamic_level_plan(
@@ -2097,7 +2624,11 @@ def dynamic_level_plan(
     else:
         stop_fraction += profile.planner_vol_stop_multiplier * vol_fraction * 0.25 * intervention
         mode = "balanced"
-    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, min(profile.planner_max_stop_fraction, profile.wick_max_stop_fraction + 0.18))
+    planner_stop_cap = max(
+        base_stop_fraction,
+        min(profile.planner_max_stop_fraction, profile.wick_max_stop_fraction + 0.18),
+    )
+    stop_fraction = clamp(stop_fraction, profile.wick_min_stop_fraction, planner_stop_cap)
 
     target_fraction = max(base_target_fraction, profile.wick_min_target_fraction)
     target_from_vol = profile.planner_vol_target_multiplier * vol_fraction
@@ -2179,6 +2710,7 @@ def dynamic_level_plan(
             f"planner_intervention:{round(intervention, 6)}",
             f"planner_base_entry_edge_fraction:{round(base_entry_edge_fraction, 6)}",
             f"planner_base_stop_fraction:{round(base_stop_fraction, 6)}",
+            f"planner_stop_cap_fraction:{round(planner_stop_cap, 6)}",
             f"planner_base_target_fraction:{round(base_target_fraction, 6)}",
             f"planner_entry_edge_fraction:{round(entry_edge, 6)}",
             f"planner_stop_span_fraction:{round(stop_fraction, 6)}",
@@ -2463,6 +2995,17 @@ def simulate_grid_basket_on_ticks(
             dynamic_stop = basket_order.stop_price
             best_price = basket_order.entry_price
             worst_price = basket_order.entry_price
+        confirmation_trade = post_fill_confirmation_exit(
+            basket_order,
+            profile,
+            entry_time_ms=first_fill_ms,
+            tick_stream=tick_stream,
+            start_position=position,
+            quantity=quantity,
+            entry_fee=entry_fee,
+        )
+        if confirmation_trade is not None:
+            return confirmation_trade, "filled", fill_index
         if basket_order.side == "long":
             best_price = max(best_price, tick.price)
             worst_price = min(worst_price, tick.price)
@@ -2545,6 +3088,17 @@ def simulate_filled_basket_on_ticks(
     dynamic_stop = basket_order.stop_price
     end_ms = max(fill.fill_time_ms for fill in fills) + max(1, basket_order.max_hold_seconds) * SECOND_MS
     last_tick = tick_stream.ticks[fill_pos] if fill_pos < len(tick_stream.ticks) else None
+    confirmation_trade = post_fill_confirmation_exit(
+        basket_order,
+        profile,
+        entry_time_ms=first_fill_ms,
+        tick_stream=tick_stream,
+        start_position=fill_pos,
+        quantity=quantity,
+        entry_fee=entry_fee,
+    )
+    if confirmation_trade is not None:
+        return confirmation_trade, "filled", fill_index
 
     for tick in iter_ticks(tick_stream, fill_pos, end_ms=end_ms):
         last_tick = tick
@@ -2608,6 +3162,96 @@ def simulate_filled_basket_on_ticks(
         raw_exit=last_tick.price,
         exit_reason=reason,
     ), "filled", fill_index
+
+
+def post_fill_confirmation_exit(
+    order: GridOrder,
+    profile: MicroGridProfile,
+    *,
+    entry_time_ms: int,
+    tick_stream: TickStream,
+    start_position: int,
+    quantity: float,
+    entry_fee: float,
+) -> MicroGridTrade | None:
+    if not profile.post_fill_confirmation_enabled:
+        return None
+    target_move = favorable_target_move(order)
+    if target_move <= 0:
+        return None
+    check_seconds = max(1, int(profile.post_fill_confirmation_seconds))
+    check_end_ms = entry_time_ms + check_seconds * SECOND_MS
+    max_adverse = max(0.0, profile.post_fill_confirmation_max_adverse_progress) * target_move
+    min_progress = max(0.0, profile.post_fill_confirmation_min_progress) * target_move
+    stale_progress = max(0.0, profile.post_fill_confirmation_stale_target_progress) * target_move
+    max_exit_loss = max(0.0, profile.post_fill_confirmation_exit_loss_fraction) * abs(order.entry_price - order.stop_price)
+    best_price = order.entry_price
+    worst_price = order.entry_price
+    last_tick: AggTradeTick | None = None
+    reason: str | None = None
+    for tick in iter_ticks(tick_stream, start_position, end_ms=check_end_ms):
+        if tick.time_ms < entry_time_ms:
+            continue
+        last_tick = tick
+        if order.side == "long":
+            best_price = max(best_price, tick.price)
+            worst_price = min(worst_price, tick.price)
+            if tick.price <= order.stop_price or tick.price >= order.target_price:
+                return None
+            favorable = best_price - order.entry_price
+            adverse = order.entry_price - worst_price
+            current_pnl_price = tick.price - order.entry_price
+            giveback = best_price - tick.price
+        else:
+            best_price = min(best_price, tick.price)
+            worst_price = max(worst_price, tick.price)
+            if tick.price >= order.stop_price or tick.price <= order.target_price:
+                return None
+            favorable = order.entry_price - best_price
+            adverse = worst_price - order.entry_price
+            current_pnl_price = order.entry_price - tick.price
+            giveback = tick.price - best_price
+        if favorable >= stale_progress and giveback >= max(min_progress, target_move * 0.12):
+            reason = "post_fill_confirmation_stale_reversion"
+            break
+        if adverse >= max_adverse and favorable < min_progress and current_pnl_price >= -max_exit_loss:
+            reason = "post_fill_confirmation_adverse_continuation"
+            break
+    if reason is None and last_tick is not None:
+        if order.side == "long":
+            favorable = best_price - order.entry_price
+            current_pnl_price = last_tick.price - order.entry_price
+        else:
+            favorable = order.entry_price - best_price
+            current_pnl_price = order.entry_price - last_tick.price
+        if favorable < min_progress and current_pnl_price >= -max_exit_loss:
+            reason = "post_fill_confirmation_no_reversal"
+    if reason is None or last_tick is None:
+        return None
+    exit_price = last_tick.price
+    return close_trade_at_ms(
+        replace(
+            order,
+            reason_codes=[
+                *order.reason_codes,
+                "post_fill_confirmation_enabled:True",
+                f"post_fill_confirmation_reason:{reason}",
+                f"post_fill_confirmation_seconds:{check_seconds}",
+                f"post_fill_confirmation_min_progress:{round(profile.post_fill_confirmation_min_progress, 6)}",
+                f"post_fill_confirmation_max_adverse_progress:{round(profile.post_fill_confirmation_max_adverse_progress, 6)}",
+                f"post_fill_confirmation_stale_target_progress:{round(profile.post_fill_confirmation_stale_target_progress, 6)}",
+            ],
+        ),
+        entry_time_ms=entry_time_ms,
+        exit_time_ms=last_tick.time_ms,
+        profile=profile,
+        quantity=quantity,
+        entry_fee=entry_fee,
+        best_price=best_price,
+        worst_price=worst_price,
+        raw_exit=exit_price,
+        exit_reason="post_fill_confirmation_exit",
+    )
 
 
 def simulate_filled_basket_on_seconds(
@@ -2772,6 +3416,17 @@ def simulate_grid_order_on_ticks(
     dynamic_stop = order.stop_price
     end_ms = fill_tick.time_ms + max(1, order.max_hold_seconds) * SECOND_MS
     last_tick = fill_tick
+    confirmation_trade = post_fill_confirmation_exit(
+        order,
+        profile,
+        entry_time_ms=fill_tick.time_ms,
+        tick_stream=tick_stream,
+        start_position=fill_pos,
+        quantity=quantity,
+        entry_fee=entry_fee,
+    )
+    if confirmation_trade is not None:
+        return confirmation_trade, "filled", fill_index
 
     for tick in iter_ticks(tick_stream, fill_pos, end_ms=end_ms):
         last_tick = tick
@@ -2933,6 +3588,7 @@ def replay_portfolio(
     max_notional_fraction: float,
     max_margin_fraction: float = 1.0,
     max_leverage: float = 1.0,
+    pullback_scale_mode: str = "cap",
     symbol_quality_filter_enabled: bool = False,
     symbol_quality_lookback_hours: float = 72.0,
     symbol_quality_min_samples: int = 3,
@@ -3005,6 +3661,7 @@ def replay_portfolio(
             max_margin_fraction=max_margin_fraction,
             max_leverage=max_leverage,
             available_margin_usdt=margin_available,
+            pullback_scale_mode=pullback_scale_mode,
         )
         scale *= symbol_quality_scale
         scale *= trade_quality_scale
@@ -3140,6 +3797,7 @@ def position_scale(
     max_margin_fraction: float = 1.0,
     max_leverage: float = 1.0,
     available_margin_usdt: float | None = None,
+    pullback_scale_mode: str = "cap",
 ) -> float:
     if equity <= 0 or trade.notional_usdt <= 0:
         return 0.0
@@ -3151,7 +3809,7 @@ def position_scale(
     effective_leverage = max(max_leverage, 1.0)
     margin_budget = equity * max(max_margin_fraction, 0.0) if available_margin_usdt is None else max(available_margin_usdt, 0.0)
     max_by_margin = margin_budget * effective_leverage / trade.notional_usdt
-    max_by_pullback = pullback_trade_scale_cap(trade)
+    max_by_pullback = pullback_trade_scale_cap(trade) if pullback_scale_mode == "cap" else math.inf
     return max(0.0, min(max_by_risk, max_by_notional, max_by_margin, max_by_pullback))
 
 
@@ -3232,17 +3890,112 @@ def update_trailing_stop(order: GridOrder, profile: MicroGridProfile, best_price
     trailing_giveback = order_float_code(order, "planner_trailing_giveback_fraction", profile.trailing_giveback_fraction)
     if order.side == "long":
         favorable = best_price - order.entry_price
-        if favorable < risk * trailing_activate:
-            return current_stop
-        lock = order.entry_price + risk * trailing_lock
-        giveback = best_price - risk * trailing_giveback
-        return max(current_stop, lock, giveback)
+        stop = current_stop
+        if profile.adaptive_profit_lock_enabled:
+            stop = adaptive_profit_lock_stop(order, profile, favorable=favorable, best_price=best_price, current_stop=stop)
+        if profile.target_progress_trailing_enabled:
+            target_move = max(order.target_price - order.entry_price, 0.0)
+            if target_move > 0 and favorable >= target_move * max(0.0, profile.target_progress_activate_fraction):
+                lock = order.entry_price + target_move * max(0.0, profile.target_progress_lock_fraction)
+                giveback = best_price - target_move * max(0.0, profile.target_progress_giveback_fraction)
+                stop = max(stop, lock, giveback)
+        if favorable >= risk * trailing_activate:
+            lock = order.entry_price + risk * trailing_lock
+            giveback = best_price - risk * trailing_giveback
+            stop = max(stop, lock, giveback)
+        return stop
     favorable = order.entry_price - best_price
-    if favorable < risk * trailing_activate:
+    stop = current_stop
+    if profile.adaptive_profit_lock_enabled:
+        stop = adaptive_profit_lock_stop(order, profile, favorable=favorable, best_price=best_price, current_stop=stop)
+    if profile.target_progress_trailing_enabled:
+        target_move = max(order.entry_price - order.target_price, 0.0)
+        if target_move > 0 and favorable >= target_move * max(0.0, profile.target_progress_activate_fraction):
+            lock = order.entry_price - target_move * max(0.0, profile.target_progress_lock_fraction)
+            giveback = best_price + target_move * max(0.0, profile.target_progress_giveback_fraction)
+            stop = min(stop, lock, giveback)
+    if favorable >= risk * trailing_activate:
+        lock = order.entry_price - risk * trailing_lock
+        giveback = best_price + risk * trailing_giveback
+        stop = min(stop, lock, giveback)
+    return stop
+
+
+def adaptive_profit_lock_stop(
+    order: GridOrder,
+    profile: MicroGridProfile,
+    *,
+    favorable: float,
+    best_price: float,
+    current_stop: float,
+) -> float:
+    target_move = favorable_target_move(order)
+    if target_move <= 0 or favorable <= 0:
         return current_stop
-    lock = order.entry_price - risk * trailing_lock
-    giveback = best_price + risk * trailing_giveback
+    progress = favorable / target_move
+    confidence = order_continuation_confidence(order)
+    activate = lerp(
+        clamp(profile.adaptive_profit_lock_min_progress, 0.0, 2.0),
+        clamp(profile.adaptive_profit_lock_max_progress, 0.0, 2.0),
+        confidence,
+    )
+    if progress < activate:
+        return current_stop
+    span = max(1e-9, 1.0 - activate)
+    normalized_progress = clamp((progress - activate) / span, 0.0, 1.0)
+    smooth_progress = normalized_progress * normalized_progress * (3.0 - 2.0 * normalized_progress)
+    raw_lock_fraction = lerp(
+        max(0.0, profile.adaptive_profit_lock_min_fraction),
+        max(0.0, profile.adaptive_profit_lock_max_fraction),
+        smooth_progress,
+    )
+    lock_fraction = raw_lock_fraction * (1.0 - 0.50 * confidence)
+    giveback_fraction = lerp(
+        max(0.0, profile.adaptive_profit_lock_min_giveback_fraction),
+        max(0.0, profile.adaptive_profit_lock_max_giveback_fraction),
+        confidence,
+    )
+    if order.side == "long":
+        lock = order.entry_price + target_move * lock_fraction
+        giveback = best_price - target_move * giveback_fraction
+        return max(current_stop, lock, giveback)
+    lock = order.entry_price - target_move * lock_fraction
+    giveback = best_price + target_move * giveback_fraction
     return min(current_stop, lock, giveback)
+
+
+def favorable_target_move(order: GridOrder) -> float:
+    if order.side == "long":
+        return max(order.target_price - order.entry_price, 0.0)
+    return max(order.entry_price - order.target_price, 0.0)
+
+
+def order_continuation_confidence(order: GridOrder) -> float:
+    values = reason_code_map(order.reason_codes)
+    side = order.side
+    pullback_key = "long_pullback_quality" if side == "long" else "short_pullback_quality"
+    reversal_ready = 1.0 if values.get("edge_reversal_ready") == "True" else 0.0
+    entry_reversal = clamp(code_float(values, "entry_reversal_fraction", 0.0) / 0.35, 0.0, 1.0)
+    adverse_continuation = clamp(code_float(values, "entry_continuation_fraction", 0.0) / 0.18, 0.0, 1.0)
+    wick_success = clamp(code_float(values, "wick_success_rate", code_float(values, "wick_win_rate", 0.0)), 0.0, 1.0)
+    wick_score = clamp(code_float(values, "wick_score", 0.0), 0.0, 1.0)
+    net_reward = clamp(code_float(values, "net_notional_reward_percent", 0.0) / 1.0, 0.0, 1.0)
+    pullback_quality = clamp(code_float(values, pullback_key, 0.0), 0.0, 1.0)
+    confidence = (
+        0.08
+        + reversal_ready * 0.10
+        + entry_reversal * 0.22
+        + (1.0 - adverse_continuation) * 0.18
+        + wick_success * 0.16
+        + wick_score * 0.10
+        + net_reward * 0.08
+        + pullback_quality * 0.08
+    )
+    return clamp(confidence, 0.0, 1.0)
+
+
+def lerp(start: float, end: float, weight: float) -> float:
+    return start + (end - start) * clamp(weight, 0.0, 1.0)
 
 
 def order_float_code(order: GridOrder, key: str, default: float) -> float:

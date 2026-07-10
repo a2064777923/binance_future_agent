@@ -32,6 +32,9 @@ class LocalSubmittedIntent:
     quantity: float
     entry_price: float
     leverage: int
+    source_status: str = "submitted"
+    original_event_id: int | None = None
+    client_order_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -42,6 +45,9 @@ class LocalSubmittedIntent:
             "quantity": self.quantity,
             "entry_price": self.entry_price,
             "leverage": self.leverage,
+            "source_status": self.source_status,
+            "original_event_id": self.original_event_id,
+            "client_order_id": self.client_order_id,
         }
 
 
@@ -106,6 +112,7 @@ class TradeOutcomeSweepReport:
             "summary": {
                 "submitted_intents": len(self.items),
                 "checked": sum(1 for item in self.items if item.fetched),
+                "fetch_error": sum(1 for item in self.items if item.status == "fetch_error"),
                 "already_reconciled": sum(
                     1 for item in self.items if item.status == "already_reconciled"
                 ),
@@ -141,9 +148,11 @@ def build_latest_trade_outcome(
     intent = load_latest_submitted_intent(store.connection, symbol=symbol)
     if intent is None:
         return None
+    start_time = _iso_to_epoch_ms(intent.occurred_at)
     trades = client.user_trades(
         intent.symbol,
-        start_time=_iso_to_epoch_ms(intent.occurred_at),
+        start_time=start_time,
+        end_time=_capped_user_trades_end_time(start_time),
         limit=500,
     )
     outcome = summarize_trade_outcome(intent, trades)
@@ -173,11 +182,12 @@ def reconcile_submitted_trade_outcomes(
     persist_closed: bool = False,
     include_reconciled: bool = False,
     limit: int = 500,
+    max_intents: int | None = None,
 ) -> TradeOutcomeSweepReport:
-    intents = load_submitted_intents(store.connection, symbol=symbol)
+    intents = load_submitted_intents(store.connection, symbol=symbol, max_intents=max_intents)
     items: list[TradeOutcomeSweepItem] = []
     for index, intent in enumerate(intents):
-        if _has_closed_outcome_for_event(store.connection, intent.event_id) and not include_reconciled:
+        if _has_closed_outcome_for_intent(store.connection, intent) and not include_reconciled:
             items.append(
                 TradeOutcomeSweepItem(
                     intent=intent,
@@ -187,12 +197,27 @@ def reconcile_submitted_trade_outcomes(
                 )
             )
             continue
-        trades = client.user_trades(
-            intent.symbol,
-            start_time=_iso_to_epoch_ms(intent.occurred_at),
-            end_time=_next_same_symbol_start_ms(intents, index),
-            limit=limit,
-        )
+        start_time = _iso_to_epoch_ms(intent.occurred_at)
+        try:
+            trades = client.user_trades(
+                intent.symbol,
+                start_time=start_time,
+                end_time=_capped_user_trades_end_time(
+                    start_time,
+                    requested_end_time=_next_same_symbol_start_ms(intents, index),
+                ),
+                limit=limit,
+            )
+        except Exception as exc:
+            items.append(
+                TradeOutcomeSweepItem(
+                    intent=intent,
+                    status="fetch_error",
+                    fetched=False,
+                    reason=f"{exc.__class__.__name__}:{exc}",
+                )
+            )
+            continue
         outcome = summarize_trade_outcome(intent, trades)
         if persist_closed and outcome.status == "closed":
             outcome = replace(outcome, persisted=persist_trade_outcome(store, outcome))
@@ -232,20 +257,14 @@ def load_latest_submitted_intent(
     ).fetchall()
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
-        if payload.get("status") != "submitted":
+        if str(payload.get("status") or "") not in {"submitted", "position_adjustment_submitted_cleanup_deferred"}:
             continue
         intent = payload.get("intent")
         if not isinstance(intent, Mapping):
             continue
-        return LocalSubmittedIntent(
-            event_id=int(row["event_id"]),
-            occurred_at=str(row["occurred_at"]),
-            symbol=str(row["symbol"] or intent.get("symbol", "")).upper(),
-            side=str(intent.get("side", "")).upper(),
-            quantity=float(intent.get("quantity", 0)),
-            entry_price=float(intent.get("entry_price", 0)),
-            leverage=int(intent.get("leverage", 0)),
-        )
+        if _watchdog_submitted_intent_explicitly_unfilled(connection, intent):
+            continue
+        return _local_intent_from_payload(row, payload, intent)
     return None
 
 
@@ -253,17 +272,27 @@ def load_submitted_intents(
     connection: sqlite3.Connection,
     *,
     symbol: str | None = None,
+    max_intents: int | None = None,
 ) -> list[LocalSubmittedIntent]:
     params: list[str] = []
     where = ""
     if symbol:
         where = "WHERE symbol = ?"
         params.append(symbol.upper())
+    limit_clause = ""
+    if max_intents is not None and max_intents > 0:
+        limit_clause = "LIMIT ?"
+        params.append(str(max_intents))
     rows = connection.execute(
         f"""
         SELECT event_id, occurred_at, symbol, payload_json
-        FROM order_intents
-        {where}
+        FROM (
+            SELECT event_id, occurred_at, symbol, payload_json, id
+            FROM order_intents
+            {where}
+            ORDER BY occurred_at DESC, id DESC
+            {limit_clause}
+        )
         ORDER BY occurred_at ASC, id ASC
         """,
         params,
@@ -271,23 +300,67 @@ def load_submitted_intents(
     intents: list[LocalSubmittedIntent] = []
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
-        if payload.get("status") != "submitted":
+        status = str(payload.get("status") or "")
+        if status not in {"submitted", "position_adjustment_submitted_cleanup_deferred"}:
             continue
         intent = payload.get("intent")
         if not isinstance(intent, Mapping):
             continue
-        intents.append(
-            LocalSubmittedIntent(
-                event_id=int(row["event_id"]),
-                occurred_at=str(row["occurred_at"]),
-                symbol=str(row["symbol"] or intent.get("symbol", "")).upper(),
-                side=str(intent.get("side", "")).upper(),
-                quantity=float(intent.get("quantity", 0)),
-                entry_price=float(intent.get("entry_price", 0)),
-                leverage=int(intent.get("leverage", 0)),
-            )
-        )
+        if _watchdog_submitted_intent_explicitly_unfilled(connection, intent):
+            continue
+        intents.append(_local_intent_from_payload(row, payload, intent))
     return intents
+
+
+def _local_intent_from_payload(
+    row: sqlite3.Row,
+    payload: Mapping[str, Any],
+    intent: Mapping[str, Any],
+) -> LocalSubmittedIntent:
+    metadata = intent.get("metadata")
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    original_event_id = _int_or_none(metadata.get("pending_intent_event_id"))
+    client_order_id = metadata.get("client_order_id") or metadata.get("pending_client_order_id")
+    occurred_at = str(row["occurred_at"])
+    original_time = _original_pending_time(metadata, intent)
+    if original_event_id is not None and original_time:
+        # Pending-limit watchdog rows are written when a late fill is reconciled.
+        # Use the original signal/intent time for trade-history windows so the
+        # entry fill is not missed.
+        occurred_at = original_time
+    return LocalSubmittedIntent(
+        event_id=int(row["event_id"]),
+        occurred_at=occurred_at,
+        symbol=str(row["symbol"] or intent.get("symbol", "")).upper(),
+        side=str(intent.get("side", "")).upper(),
+        quantity=float(intent.get("quantity", 0)),
+        entry_price=float(intent.get("entry_price", 0)),
+        leverage=int(intent.get("leverage", 0)),
+        source_status=str(payload.get("status") or "submitted"),
+        original_event_id=original_event_id,
+        client_order_id=str(client_order_id) if client_order_id is not None else None,
+    )
+
+
+def _original_pending_time(metadata: Mapping[str, Any], intent: Mapping[str, Any]) -> str | None:
+    latency = metadata.get("latency")
+    if isinstance(latency, Mapping):
+        for key in ("agent_started_at", "signal_time"):
+            value = latency.get(key)
+            if value:
+                return str(value)
+        for key in ("entry_submit_started_at_ms", "signal_time_ms", "agent_started_at_ms"):
+            value = latency.get(key)
+            iso = _epoch_ms_to_iso(value)
+            if iso:
+                return iso
+    for key in ("created_at", "submitted_at"):
+        value = metadata.get(key)
+        if value:
+            return str(value)
+    decided_at = intent.get("decided_at")
+    return str(decided_at) if decided_at else None
 
 
 def summarize_trade_outcome(
@@ -388,13 +461,88 @@ def _iso_to_epoch_ms(value: str) -> int:
     return int(datetime.fromisoformat(normalized).timestamp() * 1000)
 
 
+_BINANCE_USER_TRADES_MAX_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
+
+
+def _capped_user_trades_end_time(
+    start_time_ms: int,
+    *,
+    requested_end_time: int | None = None,
+    now_ms: int | None = None,
+) -> int:
+    max_end_time = start_time_ms + _BINANCE_USER_TRADES_MAX_INTERVAL_MS - 1000
+    current_end_time = int(datetime.now(tz=UTC).timestamp() * 1000) if now_ms is None else int(now_ms)
+    max_end_time = min(max_end_time, current_end_time)
+    if requested_end_time is None:
+        return max(max_end_time, start_time_ms + 1)
+    return max(min(requested_end_time, max_end_time), start_time_ms + 1)
+
+
 def _next_same_symbol_start_ms(intents: list[LocalSubmittedIntent], current_index: int) -> int | None:
     current = intents[current_index]
+    current_start = _iso_to_epoch_ms(current.occurred_at)
     for later in intents[current_index + 1 :]:
         if later.symbol != current.symbol:
             continue
-        return max(_iso_to_epoch_ms(later.occurred_at) - 1, _iso_to_epoch_ms(current.occurred_at))
+        later_start = _iso_to_epoch_ms(later.occurred_at)
+        if later_start <= current_start:
+            continue
+        return later_start - 1
     return None
+
+
+def _has_closed_outcome_for_intent(connection: sqlite3.Connection, intent: LocalSubmittedIntent) -> bool:
+    if _has_closed_outcome_for_event(connection, intent.event_id):
+        return True
+    if intent.original_event_id is not None and _has_closed_outcome_for_event(connection, intent.original_event_id):
+        return True
+    return False
+
+
+def _watchdog_submitted_intent_explicitly_unfilled(
+    connection: sqlite3.Connection,
+    intent: Mapping[str, Any],
+) -> bool:
+    metadata = intent.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    pending_event_id = _int_or_none(metadata.get("pending_intent_event_id"))
+    if pending_event_id is None:
+        return False
+    client_order_id = metadata.get("pending_client_order_id") or metadata.get("client_order_id")
+    rows = connection.execute(
+        """
+        SELECT payload_json
+        FROM exchange_responses
+        WHERE payload_json LIKE ?
+          AND payload_json LIKE ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 20
+        """,
+        (
+            "%pending_limit_watchdog%",
+            f"%{pending_event_id}%",
+        ),
+    ).fetchall()
+    for row in rows:
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except json.JSONDecodeError:
+            continue
+        response = payload.get("response")
+        if not isinstance(response, Mapping):
+            continue
+        if _int_or_none(response.get("pending_intent_event_id")) != pending_event_id:
+            continue
+        if client_order_id and str(response.get("client_order_id") or "") != str(client_order_id):
+            continue
+        query = response.get("entry_order_query")
+        if not isinstance(query, Mapping):
+            return False
+        status = str(query.get("status") or "").upper()
+        executed = _float(query.get("executedQty")) or _float(query.get("executedQuantity")) or 0.0
+        return status != "FILLED" and executed <= 0.0
+    return False
 
 
 def _epoch_ms_to_iso(value: Any) -> str | None:
@@ -409,6 +557,13 @@ def _float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _existing_event_id(connection: sqlite3.Connection, category: str, ref_id: str) -> int | None:

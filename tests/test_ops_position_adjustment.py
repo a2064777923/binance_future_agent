@@ -16,6 +16,7 @@ from bfa.ops.position_adjustment import (
 )
 from bfa.ops.position_hold_check import position_hold_check_from_live_status
 from bfa.ops.position_review import position_review_from_hold_check
+from bfa.ops.position_review import PositionReviewItem, PositionReviewReport
 
 
 EXCHANGE_INFO = Path(__file__).parent / "fixtures" / "binance_market" / "exchange_info.json"
@@ -65,6 +66,8 @@ class FakeSignedClient:
         cross_side_algo_orders=False,
         fail_take_profit_algo=False,
         fail_cancel_algo=False,
+        fail_cancel_algo_code=-2011,
+        fail_cancel_algo_message="Unknown order sent.",
     ):
         self.mark_price = mark_price
         self.closed = False
@@ -73,6 +76,8 @@ class FakeSignedClient:
         self.cross_side_algo_orders = cross_side_algo_orders
         self.fail_take_profit_algo = fail_take_profit_algo
         self.fail_cancel_algo = fail_cancel_algo
+        self.fail_cancel_algo_code = fail_cancel_algo_code
+        self.fail_cancel_algo_message = fail_cancel_algo_message
         self.position_amount = 0.2
         self.orders = []
         self.algo_orders = []
@@ -150,8 +155,8 @@ class FakeSignedClient:
                 endpoint="/fapi/v1/algoOrder",
                 params={},
                 status_code=400,
-                binance_code=-2011,
-                binance_message="synthetic cancel failure",
+                binance_code=self.fail_cancel_algo_code,
+                binance_message=self.fail_cancel_algo_message,
                 headers={},
             )
         return {"status": "CANCELED", **kwargs}
@@ -280,6 +285,47 @@ class PositionAdjustmentTests(unittest.TestCase):
         self.assertEqual(adjustment.status, "adjustment_plan_blocked")
         self.assertFalse(adjustment.adjustment_allowed)
         self.assertIn("trailing_activation_r_not_reached", adjustment.plans[0].reasons)
+
+    def test_sentinel_loss_control_cannot_trail_negative_r_position(self):
+        item = PositionReviewItem(
+            symbol="BTCUSDT",
+            position_side="LONG",
+            position_amt=0.2,
+            recommendation="trail_or_reduce",
+            urgency="normal",
+            reasons=[
+                "sentinel_reversal_risk_trailing",
+                "sentinel_loss_control",
+                "sentinel_min_profit_r:0.45",
+                "sentinel_min_target_progress:0.35",
+            ],
+            entry_price=100,
+            mark_price=99.0,
+            stop_price=96,
+            target_price=108,
+            stop_r_multiple=-0.25,
+            target_progress=-0.125,
+            algo_protection_count=2,
+            algo_orders=protective_algo_orders(),
+            matching_intent_event_id=123,
+        )
+        adjustment = position_adjustment_plan_from_review(
+            PositionReviewReport(
+                status="review_required",
+                action_required=True,
+                checked_at="2026-06-20T04:00:00Z",
+                positions=[item],
+            ),
+            position_mode="hedge",
+            trailing_protection_enabled=True,
+            trailing_activate_r=0.0,
+            filters_by_symbol={"BTCUSDT": SymbolExecutionFilters(symbol="BTCUSDT", tick_size=Decimal("0.1"))},
+        )
+
+        self.assertEqual(adjustment.status, "adjustment_plan_blocked")
+        self.assertFalse(adjustment.adjustment_allowed)
+        self.assertIn("sentinel_profit_gate_not_met", adjustment.plans[0].reasons)
+        self.assertIn("position_not_in_profit", adjustment.plans[0].reasons)
 
     def test_partial_take_profit_quantity_respects_step_size(self):
         adjustment = position_adjustment_plan_from_review(
@@ -647,8 +693,47 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
         self.assertEqual(report.executions[0].error["message"], "protective order replacement needs follow-up")
         self.assertIn("take_profit_error", report.executions[0].order_response)
 
-    def test_trailing_replacement_defers_cleanup_when_old_algo_cancel_fails(self):
+    def test_trailing_replacement_continues_when_old_algo_cancel_is_stale_unknown_order(self):
         fake = FakeSignedClient(mark_price="107", fail_cancel_algo=True)
+        config = load_config(
+            env={
+                "BFA_MODE": "live",
+                "BFA_POSITION_MODE": "hedge",
+                "BFA_TRAILING_PROTECTION_ENABLED": "true",
+                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+            }
+        )
+        preview = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake,
+            exchange_info=self.exchange_info(),
+        )
+
+        report = build_position_adjustment_execute_report(
+            config,
+            db_path=str(self.db_path),
+            signed_client=fake,
+            confirm_token=preview.expected_confirmation_token,
+            exchange_info=self.exchange_info(),
+        )
+
+        self.assertEqual(report.status, "position_adjustment_submitted")
+        self.assertTrue(report.adjustment_executed)
+        self.assertEqual(len(fake.algo_orders), 2)
+        self.assertEqual(len(fake.cancelled_algo_orders), 2)
+        cancel_results = report.executions[0].order_response["cancel_replaced_algo_orders"]
+        self.assertTrue(all(item.get("status") == "stale_missing" for item in cancel_results))
+
+    def test_trailing_replacement_defers_cleanup_when_old_algo_cancel_really_fails(self):
+        fake = FakeSignedClient(
+            mark_price="107",
+            fail_cancel_algo=True,
+            fail_cancel_algo_code=-2019,
+            fail_cancel_algo_message="margin is insufficient",
+        )
         config = load_config(
             env={
                 "BFA_MODE": "live",

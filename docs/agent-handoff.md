@@ -7,11 +7,13 @@ private env files, API keys, passwords, and SSH keys must stay outside git.
 ## First Read
 
 1. `AGENTS.md` - repository safety rules and working conventions.
-2. `README.md` - project overview and common local commands.
-3. `docs/deployment.md` - server deployment and operations runbook.
-4. `docs/live-scalping-ops.md` - live scalping/raw-feed operational notes.
-5. `docs/position-profit-protection.md` - active position protection logic.
-6. `.planning/POST-GSD-LIVE-ITERATIONS.md` - post-GSD live strategy changes
+2. `docs/current-live-strategy.md` - current live strategy, server snapshot,
+   risk profile, services, and non-secret env facts.
+3. `README.md` - project overview and common local commands.
+4. `docs/deployment.md` - server deployment and operations runbook.
+5. `docs/live-scalping-ops.md` - live scalping/raw-feed operational notes.
+6. `docs/position-profit-protection.md` - active position protection logic.
+7. `.planning/POST-GSD-LIVE-ITERATIONS.md` - post-GSD live strategy changes
    that are newer than the formal Phase 70 artifacts.
 
 The planning history lives under `.planning/`. It is useful for context, but
@@ -54,12 +56,19 @@ On Linux/macOS, replace `.venv\Scripts\python` with `.venv/bin/python`.
 The live deployment is isolated from other projects:
 
 - App root: `/opt/binance-futures-agent`
-- Checked-out app path: `/opt/binance-futures-agent/app`
+- Live app path: `/opt/binance-futures-agent/app`
 - Python: `/opt/binance-futures-agent/.venv/bin/python`
 - Env file: `/etc/binance-futures-agent/env`
 - SQLite DB: `/opt/binance-futures-agent/data/agent.sqlite`
 - Runtime state: `/opt/binance-futures-agent/runtime`
 - Logs: `/opt/binance-futures-agent/logs`
+
+The live app path is a deployed copy, not necessarily a git checkout. The
+latest checked live caps were `BFA_ACCOUNT_CAPITAL_USDT=200`,
+`BFA_MAX_PORTFOLIO_MARGIN_USDT=160`, base `BFA_MAX_OPEN_POSITIONS=5`, and
+`BFA_MICRO_GRID_EXTRA_OPEN_POSITIONS=2`; see
+`docs/current-live-strategy.md` for the full non-secret snapshot. Always verify
+the server env before using these numbers.
 
 Do not put server credentials in this repository. Configure SSH access outside
 the repo. Any agent operating from another machine must obtain SSH access and
@@ -68,10 +77,21 @@ the server env file through an out-of-band channel.
 Useful read-only checks:
 
 ```bash
+systemctl list-units --type=service --type=timer --all 'binance-futures-agent*' --no-pager
+
 python -m bfa.cli ops live-status \
   --env-file /etc/binance-futures-agent/env \
   --db /opt/binance-futures-agent/data/agent.sqlite \
   --check-binance
+
+python -m bfa.cli ops position-hold-check \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite
+
+python -m bfa.cli ops live-cycle-explainability \
+  --env-file /etc/binance-futures-agent/env \
+  --db /opt/binance-futures-agent/data/agent.sqlite \
+  --latest-cycles 10
 
 python -m bfa.cli ops kill-switch-clearance \
   --env-file /etc/binance-futures-agent/env
@@ -79,6 +99,27 @@ python -m bfa.cli ops kill-switch-clearance \
 
 Only use mutation commands after reading their docs and confirming the current
 live state. The live account is real money.
+
+## Current Live Ops Semantics
+
+Before assuming "the bot stopped," inspect systemd timers, the latest live
+result, current exchange positions, open algo orders, and matching event-store
+intents. A healthy timer can produce no new position when passive entries expire
+unfilled or when risk gates reject the current state.
+
+Processed live-cycle statuses include `entry_order_expired_canceled`,
+`entry_order_unknown_canceled`, `entry_order_reconciled_from_position`,
+`protective_order_failed_no_position`, and `protective_order_failed_open`.
+They keep the live timer from falsely failing after the state is recorded.
+`protective_order_failed_open` is still urgent risk evidence: verify exchange
+protection and current position ownership immediately. `entry_order_unknown_cancel_failed`
+remains a failed status.
+
+Unmatched positions require special care. If `ops position-hold-check` shows an
+active exchange position with no matching submitted intent, the pending-limit
+watchdog cannot help because it only reconciles unresolved pending entry
+intents. Classify the symbol as manual only after operator confirmation;
+otherwise handle protection or closure through the explicit confirmation flow.
 
 ## Current Strategy Shape
 
@@ -90,10 +131,66 @@ The current system is a fused live strategy with a regime router:
   post-only limit entry, short pending wait, and fast protection management.
 - `CHOP`: no new entry.
 
+A Lorenzian Distance Classifier (LDC) trend-leg confidence modifier was
+implemented on 2026-06-26 but is **dormant**: flag defaults off, the
+`quant_setup_ldc` variant is not the live variant, and live behavior is
+unchanged. It is gated on offline `lift > 1.0` validation plus a server
+proxy-side calibration before any testnet/live enablement. The first real
+artifact passed the offline gate only barely (`lift=1.0043`) and failed the
+server proxy-side sanity check (`agreement_fraction=0.1607` since
+`2026-06-20T00:00:00Z`), so future agents must not switch
+`BFA_LIVE_QUANT_SETUP_VARIANT=quant_setup_ldc` without retraining/revalidating
+against the actual routed trend setup. See
+`docs/superpowers/specs/2026-06-26-lorenz-distance-classifier-design.md` and
+iteration entry 13 in `.planning/POST-GSD-LIVE-ITERATIONS.md`.
+
+Actual tick-based setup calibration now exists in
+`scripts/server_actual_setup_ldc_calibration.py`. It uses server raw-feed gzip
+trade ticks and the real persisted setup geometry, so it is the correct path for
+future LDC or direction-filter training. The current server raw-feed is usable
+but short-retention: files observed on 2026-06-26 covered roughly
+`2026-06-25T13:20Z` through `2026-06-26T13:45Z`, not a multi-week history. The
+latest 120 trend setup calibration (`ldc_actual_latest_120_v2`) had only 19
+usable labels, so its lift is not production evidence. Keep LDC disabled until
+there are enough filled tick-labeled samples across symbols/days.
+
 Micro-grid can use extra slots and an extra same-direction notional allowance so
 trend positions do not fully crowd out scalping attempts. Protective SL/TP is
 required for live fills, and the pending-limit watchdog plus position sentinel
 exist to close gaps between submitted limit orders, fills, and protection.
+
+Micro-grid is now an independent fast lane and should not be analyzed as a
+trend candidate that happened to use small exits. It bypasses AI, records
+`strategy_leg=micro_grid`, uses `regime_label=RANGE`, and persists latency
+fields so signal-to-submit delay can be audited. Trend candidates still use the
+AI review path when enabled. See `docs/current-live-strategy.md` before
+changing routing or risk.
+
+Micro-grid live now consumes real per-symbol market context derived from the
+same Binance snapshots used elsewhere in the system. Do not reintroduce fake
+liquidity or synthetic `min_executable_notional` values in the live path. If a
+symbol lacks market context, the candidate should carry explicit `missing_*`
+diagnostics or be rejected.
+
+Trend entries now have an additional fresh-confirmation gate in
+`quant_setup_live_action_flow`: when short-window micro momentum and taker flow
+both flip against the proposed trend side, setup rejects with
+`fresh_trend_confirmation_failed:*` and records
+`price_basis.fresh_trend_confirmation`. This is a narrow adverse-flow guard,
+not a replacement for regime routing or entry geometry.
+
+Position sentinel protection is layered. Trend positions observe until the
+defensive layer (`0.60R` or `0.30` target progress), then can trail only with
+reversal/fade/giveback evidence and the three-minute trend cooldown. The strong
+layer starts at `1.00R` or `0.55` target progress and locks more profit.
+Micro-grid keeps a faster path and can protect the first wave after 20 seconds
+only if current/recent MFE reaches `0.65R` or `0.55` target progress. Tiny
+profit noise should still observe.
+
+Live outcome guard is a downsize-first feedback signal, not a one-trade kill
+switch. The default symbol sample floor is `5` closed outcomes; lower values can
+be set explicitly for experiments, but should not be treated as production
+evidence.
 
 ## Runtime Data Policy
 

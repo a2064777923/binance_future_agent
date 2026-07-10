@@ -6,6 +6,8 @@ from bfa.execution.models import OrderIntent, RiskDecision
 from bfa.execution.outcome import (
     LocalSubmittedIntent,
     build_latest_trade_outcome,
+    _capped_user_trades_end_time,
+    load_submitted_intents,
     persist_trade_outcome,
     reconcile_submitted_trade_outcomes,
     summarize_trade_outcome,
@@ -31,6 +33,29 @@ class FakeTradeMapClient:
     def user_trades(self, symbol, *, start_time=None, end_time=None, limit=500):
         self.calls.append((symbol, start_time, end_time, limit))
         return list(self.trades_by_symbol.get(symbol, []))
+
+
+class FailingTradeMapClient(FakeTradeMapClient):
+    def __init__(self, trades_by_symbol, fail_symbols):
+        super().__init__(trades_by_symbol)
+        self.fail_symbols = set(fail_symbols)
+
+    def user_trades(self, symbol, *, start_time=None, end_time=None, limit=500):
+        self.calls.append((symbol, start_time, end_time, limit))
+        if symbol in self.fail_symbols:
+            raise RuntimeError("synthetic fetch failure")
+        return list(self.trades_by_symbol.get(symbol, []))
+
+
+class CountingConnection:
+    def __init__(self, connection):
+        self.connection = connection
+        self.sql = []
+        self.row_factory = connection.row_factory
+
+    def execute(self, sql, params=()):
+        self.sql.append(str(sql))
+        return self.connection.execute(sql, params)
 
 
 class TradeOutcomeTests(unittest.TestCase):
@@ -333,6 +358,409 @@ class TradeOutcomeTests(unittest.TestCase):
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM fills").fetchone()[0], 2)
         self.assertEqual(connection.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0], 1)
         self.assertEqual([call[0] for call in client.calls], ["ZECUSDT", "BNBUSDT"])
+
+    def test_reconcile_caps_user_trade_query_window_to_binance_seven_day_limit(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-06-20T00:00:00Z",
+            source="execution.live",
+            symbol="ZECUSDT",
+            ref_id="order_intent:ZECUSDT:2026-06-20T00:00:00Z",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "ZECUSDT",
+                    "side": "BUY",
+                    "quantity": 0.032,
+                    "entry_price": 467.68,
+                    "leverage": 3,
+                },
+            },
+            event_type="order_intent",
+        )
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T00:00:00Z",
+            source="execution.live",
+            symbol="ZECUSDT",
+            ref_id="order_intent:ZECUSDT:2026-07-05T00:00:00Z",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "ZECUSDT",
+                    "side": "BUY",
+                    "quantity": 0.032,
+                    "entry_price": 467.68,
+                    "leverage": 3,
+                },
+            },
+            event_type="order_intent",
+        )
+        client = FakeTradeClient([])
+
+        reconcile_submitted_trade_outcomes(store, client)
+
+        first_call = client.calls[0]
+        self.assertEqual(first_call[0], "ZECUSDT")
+        self.assertEqual(first_call[2] - first_call[1], 7 * 24 * 60 * 60 * 1000 - 1000)
+
+    def test_user_trade_query_window_is_capped_to_now_for_recent_intents(self):
+        start_time = 1783557622000
+
+        end_time = _capped_user_trades_end_time(start_time, now_ms=start_time + 60_000)
+
+        self.assertEqual(end_time, start_time + 60_000)
+
+    def test_reconcile_records_fetch_error_without_aborting_batch(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        for index, symbol in enumerate(("BTCUSDT", "ETHUSDT"), start=1):
+            store.insert_artifact(
+                "order_intents",
+                occurred_at=f"2026-07-05T00:0{index}:00Z",
+                source="execution.live",
+                symbol=symbol,
+                ref_id=f"order_intent:{symbol}:{index}",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "quantity": 1,
+                        "entry_price": 100,
+                        "leverage": 3,
+                    },
+                },
+                event_type="order_intent",
+            )
+        client = FailingTradeMapClient({"ETHUSDT": []}, fail_symbols={"BTCUSDT"})
+
+        report = reconcile_submitted_trade_outcomes(store, client)
+        payload = report.to_dict()
+
+        self.assertEqual(payload["summary"]["fetch_error"], 1)
+        self.assertEqual(payload["summary"]["open_or_partial"], 1)
+        self.assertEqual([item["status"] for item in payload["items"]], ["fetch_error", "open_or_partial"])
+
+    def test_reconcile_can_limit_to_newest_submitted_intents(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        for index, symbol in enumerate(("BTCUSDT", "ETHUSDT", "SOLUSDT"), start=1):
+            store.insert_artifact(
+                "order_intents",
+                occurred_at=f"2026-07-05T00:0{index}:00Z",
+                source="execution.live",
+                symbol=symbol,
+                ref_id=f"order_intent:{symbol}:{index}",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": symbol,
+                        "side": "BUY",
+                        "quantity": 1,
+                        "entry_price": 100,
+                        "leverage": 3,
+                    },
+                },
+                event_type="order_intent",
+            )
+        client = FakeTradeMapClient({})
+
+        report = reconcile_submitted_trade_outcomes(store, client, max_intents=2)
+
+        self.assertEqual(report.to_dict()["summary"]["submitted_intents"], 2)
+        self.assertEqual([call[0] for call in client.calls], ["ETHUSDT", "SOLUSDT"])
+
+    def test_reconcile_max_intents_is_applied_in_sql_before_filtering(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        for index in range(40):
+            store.insert_artifact(
+                "order_intents",
+                occurred_at=f"2026-07-05T00:{index:02d}:00Z",
+                source="execution.live",
+                symbol=f"T{index}USDT",
+                ref_id=f"order_intent:T{index}USDT",
+                payload={
+                    "status": "rejected"
+                    if index < 35
+                    else "submitted",
+                    "intent": {
+                        "symbol": f"T{index}USDT",
+                        "side": "BUY",
+                        "quantity": 1,
+                        "entry_price": 100,
+                        "leverage": 3,
+                    },
+                },
+                event_type="order_intent",
+            )
+        counting = CountingConnection(connection)
+
+        intents = load_submitted_intents(counting, max_intents=3)
+
+        self.assertEqual([intent.symbol for intent in intents], ["T37USDT", "T38USDT", "T39USDT"])
+        self.assertTrue(any("LIMIT ?" in sql for sql in counting.sql))
+
+    def test_reconcile_includes_pending_limit_watchdog_submitted_intents(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        pending_event_id = store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T12:29:28Z",
+            source="execution.live",
+            symbol="BIRBUSDT",
+            ref_id="order_intent:BIRBUSDT:2026-07-05T12:29:28Z",
+            payload={
+                "status": "entry_order_pending",
+                "intent": {
+                    "symbol": "BIRBUSDT",
+                    "side": "BUY",
+                    "quantity": 10646,
+                    "entry_price": 0.07754,
+                    "leverage": 30,
+                    "metadata": {
+                        "client_order_id": "bfa-birbusdt-20260705122928-trc",
+                    },
+                },
+            },
+            event_type="order_intent",
+        )
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T12:40:58Z",
+            source="execution.live",
+            symbol="BIRBUSDT",
+            ref_id="order_intent:BIRBUSDT:2026-07-05T12:40:58Z",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "BIRBUSDT",
+                    "side": "BUY",
+                    "quantity": 10646,
+                    "entry_price": 0.07754,
+                    "leverage": 30,
+                    "metadata": {
+                        "pending_intent_event_id": pending_event_id,
+                        "pending_client_order_id": "bfa-birbusdt-20260705122928-trc",
+                        "latency": {
+                            "agent_started_at": "2026-07-05T12:29:28Z",
+                        },
+                    },
+                },
+            },
+            event_type="order_intent",
+        )
+        client = FakeTradeMapClient(
+            {
+                "BIRBUSDT": [
+                    {
+                        "id": 1001,
+                        "orderId": 528508672,
+                        "symbol": "BIRBUSDT",
+                        "side": "BUY",
+                        "qty": "10646",
+                        "price": "0.07754",
+                        "quoteQty": "825.49084",
+                        "realizedPnl": "0",
+                        "commission": "0.33019634",
+                        "commissionAsset": "USDT",
+                        "time": 1783255254215,
+                    },
+                    {
+                        "id": 1002,
+                        "orderId": 528700000,
+                        "symbol": "BIRBUSDT",
+                        "side": "SELL",
+                        "qty": "10646",
+                        "price": "0.07887",
+                        "quoteQty": "839.65002",
+                        "realizedPnl": "14.15918",
+                        "commission": "0.33586001",
+                        "commissionAsset": "USDT",
+                        "time": 1783256708496,
+                    },
+                ],
+            }
+        )
+
+        report = reconcile_submitted_trade_outcomes(store, client, persist_closed=True)
+        payload = report.to_dict()
+
+        self.assertEqual(payload["summary"]["submitted_intents"], 1)
+        self.assertEqual(payload["summary"]["closed"], 1)
+        self.assertEqual(payload["summary"]["persisted_outcomes_inserted"], 1)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM fills").fetchone()[0], 2)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM outcomes").fetchone()[0], 1)
+        item = payload["items"][0]
+        self.assertEqual(item["intent"]["original_event_id"], pending_event_id)
+        self.assertEqual(client.calls[0][1], 1783254568000)
+
+    def test_reconcile_skips_watchdog_submitted_order_when_query_showed_unfilled(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        pending_event_id = store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T12:29:28Z",
+            source="execution.live",
+            symbol="BIRBUSDT",
+            ref_id="order_intent:BIRBUSDT:2026-07-05T12:29:28Z:trm",
+            payload={
+                "status": "entry_order_pending",
+                "intent": {
+                    "symbol": "BIRBUSDT",
+                    "side": "BUY",
+                    "quantity": 9378,
+                    "entry_price": 0.07702,
+                    "leverage": 30,
+                    "metadata": {
+                        "client_order_id": "bfa-birbusdt-20260705122928-trm",
+                    },
+                },
+            },
+            event_type="order_intent",
+        )
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T12:40:58Z",
+            source="execution.live",
+            symbol="BIRBUSDT",
+            ref_id="order_intent:BIRBUSDT:2026-07-05T12:40:58Z:trm",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "BIRBUSDT",
+                    "side": "BUY",
+                    "quantity": 10646,
+                    "entry_price": 0.07754,
+                    "leverage": 30,
+                    "metadata": {
+                        "pending_intent_event_id": pending_event_id,
+                        "pending_client_order_id": "bfa-birbusdt-20260705122928-trm",
+                        "latency": {"agent_started_at": "2026-07-05T12:29:28Z"},
+                    },
+                },
+            },
+            event_type="order_intent",
+        )
+        store.insert_artifact(
+            "exchange_responses",
+            occurred_at="2026-07-05T12:40:58Z",
+            source="binance_usdm",
+            symbol="BIRBUSDT",
+            ref_id="exchange_response:pending_limit_watchdog:BIRBUSDT:2026-07-05T12:40:58Z",
+            payload={
+                "response_type": "pending_limit_watchdog",
+                "response": {
+                    "watchdog_status": "filled_protected",
+                    "pending_intent_event_id": pending_event_id,
+                    "client_order_id": "bfa-birbusdt-20260705122928-trm",
+                    "entry_order_query": {
+                        "status": "NEW",
+                        "executedQty": "0",
+                        "avgPrice": "0.00",
+                    },
+                },
+            },
+            event_type="exchange_response",
+        )
+
+        intents = load_submitted_intents(connection, symbol="BIRBUSDT")
+        report = reconcile_submitted_trade_outcomes(
+            store,
+            FakeTradeMapClient({"BIRBUSDT": []}),
+            symbol="BIRBUSDT",
+            persist_closed=True,
+        )
+
+        self.assertEqual(intents, [])
+        self.assertEqual(report.to_dict()["summary"]["submitted_intents"], 0)
+
+    def test_same_signal_layered_intents_do_not_truncate_each_other_window(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        for suffix, quantity, entry_price in (
+            ("trc", 10646, 0.07754),
+            ("trm", 9378, 0.07702),
+        ):
+            pending_event_id = store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-07-05T12:29:28Z",
+                source="execution.live",
+                symbol="BIRBUSDT",
+                ref_id=f"order_intent:BIRBUSDT:2026-07-05T12:29:28Z:{suffix}",
+                payload={
+                    "status": "entry_order_pending",
+                    "intent": {
+                        "symbol": "BIRBUSDT",
+                        "side": "BUY",
+                        "quantity": quantity,
+                        "entry_price": entry_price,
+                        "leverage": 30,
+                        "metadata": {"client_order_id": f"bfa-birbusdt-20260705122928-{suffix}"},
+                    },
+                },
+                event_type="order_intent",
+            )
+            store.insert_artifact(
+                "order_intents",
+                occurred_at="2026-07-05T12:40:58Z",
+                source="execution.live",
+                symbol="BIRBUSDT",
+                ref_id=f"order_intent:BIRBUSDT:2026-07-05T12:40:58Z:{suffix}",
+                payload={
+                    "status": "submitted",
+                    "intent": {
+                        "symbol": "BIRBUSDT",
+                        "side": "BUY",
+                        "quantity": quantity,
+                        "entry_price": entry_price,
+                        "leverage": 30,
+                        "metadata": {
+                            "pending_intent_event_id": pending_event_id,
+                            "pending_client_order_id": f"bfa-birbusdt-20260705122928-{suffix}",
+                            "latency": {"agent_started_at": "2026-07-05T12:29:28Z"},
+                        },
+                    },
+                },
+                event_type="order_intent",
+            )
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T13:10:00Z",
+            source="execution.live",
+            symbol="BIRBUSDT",
+            ref_id="order_intent:BIRBUSDT:2026-07-05T13:10:00Z:next",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "BIRBUSDT",
+                    "side": "SELL",
+                    "quantity": 1,
+                    "entry_price": 0.08,
+                    "leverage": 30,
+                },
+            },
+            event_type="order_intent",
+        )
+        client = FakeTradeMapClient({"BIRBUSDT": []})
+
+        reconcile_submitted_trade_outcomes(store, client, symbol="BIRBUSDT")
+
+        self.assertEqual(len(client.calls), 3)
+        self.assertEqual(client.calls[0][1], 1783254568000)
+        self.assertEqual(client.calls[0][2], 1783256999999)
+        self.assertEqual(client.calls[1][1], 1783254568000)
+        self.assertEqual(client.calls[1][2], 1783256999999)
 
     def test_reconcile_submitted_trade_outcomes_skips_already_closed_by_default(self):
         connection = sqlite3.connect(":memory:")
