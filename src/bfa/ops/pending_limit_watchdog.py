@@ -13,11 +13,26 @@ from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceSignedError
 from bfa.execution.models import OrderIntent, RiskDecision
-from bfa.execution.store import persist_exchange_response, persist_order_intent
+from bfa.execution.store import (
+    load_pending_limit_entry_rows,
+    order_intent_from_mapping,
+    persist_exchange_response,
+    persist_order_intent,
+    resolve_pending_limit_entry,
+)
 
 
 class PendingLimitWatchdogClient(Protocol):
     def query_order(
+        self,
+        *,
+        symbol: str,
+        order_id: int | str | None = None,
+        orig_client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        ...
+
+    def cancel_order(
         self,
         *,
         symbol: str,
@@ -55,6 +70,8 @@ class PendingLimitOrderIntent:
     status: str
     intent: OrderIntent
     client_order_id: str
+    expires_at: str
+    strategy_leg: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +79,8 @@ class PendingLimitOrderIntent:
             "occurred_at": self.occurred_at,
             "status": self.status,
             "client_order_id": self.client_order_id,
+            "expires_at": self.expires_at,
+            "strategy_leg": self.strategy_leg,
             "intent": self.intent.to_dict(),
         }
 
@@ -107,7 +126,7 @@ class PendingLimitWatchdogReport:
 
     @property
     def action_taken(self) -> bool:
-        return any(item.action in {"place_protective_orders", "mark_resolved"} for item in self.items)
+        return any(item.action in {"place_protective_orders", "mark_resolved", "cancel_order"} for item in self.items)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -191,6 +210,7 @@ def execute_pending_limit_watchdog(
     checked_at: str | None = None,
     max_items: int = 10,
     execute_protective_orders: bool = True,
+    position_snapshot: list[dict[str, Any]] | None = None,
 ) -> PendingLimitWatchdogReport:
     """Reconcile old pending limit entries before the live cycle opens new risk."""
 
@@ -200,13 +220,13 @@ def execute_pending_limit_watchdog(
     connection = connect(resolved_db_path)
     try:
         migrate(connection)
-        pending = [
-            item
-            for item in _load_unresolved_pending_limit_intents(connection)
-            if item.intent.symbol.upper() not in manual_symbols
-        ]
+        pending = _load_unresolved_pending_limit_intents(
+            connection,
+            max_items=max_items,
+            excluded_symbols=manual_symbols,
+        )
         items: list[PendingLimitWatchdogItem] = []
-        for pending_intent in pending[: max(0, max_items)]:
+        for pending_intent in pending:
             items.append(
                 _check_pending_intent(
                     config,
@@ -215,6 +235,7 @@ def execute_pending_limit_watchdog(
                     pending_intent,
                     checked_at=checked,
                     execute_protective_orders=execute_protective_orders,
+                    position_snapshot=position_snapshot,
                 )
             )
         return PendingLimitWatchdogReport(
@@ -224,7 +245,11 @@ def execute_pending_limit_watchdog(
             reasons=[] if execute_protective_orders else ["execution_disabled_observe_only"],
             pending_count=len(pending),
             checked_count=len(items),
-            protected_count=sum(1 for item in items if item.status in {"filled_protected", "position_reconciled_protected"}),
+            protected_count=sum(
+                1
+                for item in items
+                if item.status in {"filled_protected", "position_reconciled_protected", "partial_filled_protected"}
+            ),
             items=items,
         )
     finally:
@@ -239,6 +264,7 @@ def _check_pending_intent(
     *,
     checked_at: str,
     execute_protective_orders: bool,
+    position_snapshot: list[dict[str, Any]] | None,
 ) -> PendingLimitWatchdogItem:
     response: dict[str, Any] = {
         "response_type": "pending_limit_watchdog",
@@ -262,11 +288,41 @@ def _check_pending_intent(
         response["entry_order_query_error"] = _signed_error_payload(exc)
         query = None
 
+    query_status = _order_status(query) if query is not None else None
+    partial_fill = query_status == "PARTIALLY_FILLED" and _executed_quantity(query or {}) > 0
+    if partial_fill:
+        if not execute_protective_orders:
+            return PendingLimitWatchdogItem(
+                intent_event_id=pending.event_id,
+                symbol=pending.intent.symbol,
+                status="partial_fill_cancel_pending",
+                action="cancel_order_pending",
+                reasons=["pending_limit_partially_filled", "execution_disabled_observe_only"],
+                client_order_id=pending.client_order_id,
+                query_status=query_status,
+            )
+        cancel_item = _cancel_pending_order(
+            connection,
+            client,
+            pending,
+            response,
+            checked_at=checked_at,
+            query_status=query_status,
+            failure_status="partial_fill_cancel_failed",
+        )
+        if cancel_item is not None:
+            return cancel_item
+
     query_active_intent = _active_intent_from_order_query(pending.intent, query) if query is not None else None
     active_intent = None
     position_payload = None
     if query_active_intent is not None:
-        active_intent, position_payload = _active_intent_from_position(config, client, query_active_intent)
+        active_intent, position_payload = _active_intent_from_position(
+            config,
+            client,
+            query_active_intent,
+            position_snapshot=position_snapshot,
+        )
         response["position_reconcile"] = position_payload
         if active_intent is None:
             return _handle_filled_without_active_position(
@@ -279,7 +335,12 @@ def _check_pending_intent(
                 position_payload=position_payload,
             )
     elif query is None:
-        active_intent, position_payload = _active_intent_from_position(config, client, pending.intent)
+        active_intent, position_payload = _active_intent_from_position(
+            config,
+            client,
+            pending.intent,
+            position_snapshot=position_snapshot,
+        )
         response["position_reconcile"] = position_payload
 
     if active_intent is None:
@@ -295,6 +356,48 @@ def _check_pending_intent(
                     query_status=query_status,
                 )
             return _persist_terminal_no_fill(connection, pending, response, checked_at=checked_at, query_status=query_status)
+        if query is None:
+            return PendingLimitWatchdogItem(
+                intent_event_id=pending.event_id,
+                symbol=pending.intent.symbol,
+                status="order_query_failed",
+                action="watch",
+                reasons=["pending_limit_order_query_failed", "pending_limit_kept_unresolved"],
+                client_order_id=pending.client_order_id,
+                query_status=query_status,
+            )
+        if _pending_expired(pending, checked_at=checked_at):
+            if not execute_protective_orders:
+                return PendingLimitWatchdogItem(
+                    intent_event_id=pending.event_id,
+                    symbol=pending.intent.symbol,
+                    status="expired_cancel_pending",
+                    action="cancel_order_pending",
+                    reasons=["pending_limit_ttl_expired", "execution_disabled_observe_only"],
+                    client_order_id=pending.client_order_id,
+                    query_status=query_status,
+                )
+            cancel_item = _cancel_pending_order(
+                connection,
+                client,
+                pending,
+                response,
+                checked_at=checked_at,
+                query_status=query_status,
+                failure_status="expired_cancel_failed",
+            )
+            if cancel_item is not None:
+                return cancel_item
+            return _persist_terminal_no_fill(
+                connection,
+                pending,
+                {**response, "watchdog_status": "expired_canceled"},
+                checked_at=checked_at,
+                query_status=query_status,
+                item_status="expired_canceled",
+                item_action="cancel_order",
+                reason_code="pending_limit_ttl_expired",
+            )
         return PendingLimitWatchdogItem(
             intent_event_id=pending.event_id,
             symbol=pending.intent.symbol,
@@ -328,9 +431,21 @@ def _check_pending_intent(
 
     protective = _place_missing_protective_orders(config, client, active_intent, checked_at=checked_at)
     response.update(protective["response"])
-    status = "filled_protected" if protective["complete"] else "protection_failed"
+    status = (
+        "partial_filled_protected"
+        if partial_fill and protective["complete"]
+        else "filled_protected"
+        if protective["complete"]
+        else "protection_failed"
+    )
     response["watchdog_status"] = status
-    intent_status = "submitted" if protective["complete"] else "protective_order_failed_open"
+    intent_status = (
+        "entry_order_partial_filled_protected"
+        if partial_fill and protective["complete"]
+        else "submitted"
+        if protective["complete"]
+        else "protective_order_failed_open"
+    )
     persisted_intent = replace(
         active_intent,
         decided_at=checked_at,
@@ -351,8 +466,16 @@ def _check_pending_intent(
             protective["complete"],
             ["pending_limit_watchdog_reconciled"] if protective["complete"] else ["pending_limit_watchdog_protection_failed"],
         ),
+        pending_intent_event_id=pending.event_id,
+        resolved_at=checked_at if protective["complete"] else None,
+        resolution_status=intent_status if protective["complete"] else None,
     )
-    if position_payload and position_payload.get("status") == "position_found" and protective["complete"]:
+    if (
+        not partial_fill
+        and position_payload
+        and position_payload.get("status") == "position_found"
+        and protective["complete"]
+    ):
         status = "position_reconciled_protected"
     return PendingLimitWatchdogItem(
         intent_event_id=pending.event_id,
@@ -375,12 +498,15 @@ def _persist_terminal_no_fill(
     *,
     checked_at: str,
     query_status: str | None,
+    item_status: str = "terminal_no_fill",
+    item_action: str = "mark_resolved",
+    reason_code: str = "pending_limit_terminal_no_fill",
 ) -> PendingLimitWatchdogItem:
-    response = {**dict(response), "watchdog_status": "terminal_no_fill"}
+    response = {**dict(response), "watchdog_status": str(response.get("watchdog_status") or "terminal_no_fill")}
     intent = replace(
         pending.intent,
         decided_at=checked_at,
-        reason_codes=_dedupe([*pending.intent.reason_codes, "pending_limit_terminal_no_fill"]),
+        reason_codes=_dedupe([*pending.intent.reason_codes, reason_code]),
         metadata={
             **pending.intent.metadata,
             "pending_intent_event_id": pending.event_id,
@@ -393,14 +519,17 @@ def _persist_terminal_no_fill(
         intent=intent,
         intent_status="entry_order_expired_canceled",
         response=response,
-        risk=RiskDecision(True, ["pending_limit_terminal_no_fill"]),
+        risk=RiskDecision(True, [reason_code]),
+        pending_intent_event_id=pending.event_id,
+        resolved_at=checked_at,
+        resolution_status="entry_order_expired_canceled",
     )
     return PendingLimitWatchdogItem(
         intent_event_id=pending.event_id,
         symbol=pending.intent.symbol,
-        status="terminal_no_fill",
-        action="mark_resolved",
-        reasons=["pending_limit_terminal_no_fill"],
+        status=item_status,
+        action=item_action,
+        reasons=[reason_code],
         client_order_id=pending.client_order_id,
         query_status=query_status,
         exchange_response_event_id=persisted.get("exchange_response"),
@@ -457,6 +586,9 @@ def _handle_filled_without_active_position(
         intent_status="entry_order_filled_no_active_position",
         response=response,
         risk=RiskDecision(True, ["pending_limit_filled_no_active_position"]),
+        pending_intent_event_id=pending.event_id,
+        resolved_at=checked_at,
+        resolution_status="entry_order_filled_no_active_position",
     )
     return PendingLimitWatchdogItem(
         intent_event_id=pending.event_id,
@@ -478,6 +610,9 @@ def _persist_watchdog_resolution(
     intent_status: str,
     response: Mapping[str, Any],
     risk: RiskDecision,
+    pending_intent_event_id: int | None = None,
+    resolved_at: str | None = None,
+    resolution_status: str | None = None,
 ) -> dict[str, int]:
     store = EventStore(connection)
     persisted = {
@@ -489,7 +624,56 @@ def _persist_watchdog_resolution(
         response=dict(response),
         response_type="pending_limit_watchdog",
     )
+    if pending_intent_event_id is not None and resolved_at and resolution_status:
+        resolve_pending_limit_entry(
+            connection,
+            intent_event_id=pending_intent_event_id,
+            resolved_at=resolved_at,
+            resolution_status=resolution_status,
+        )
     return persisted
+
+
+def _cancel_pending_order(
+    connection: sqlite3.Connection,
+    client: PendingLimitWatchdogClient,
+    pending: PendingLimitOrderIntent,
+    response: dict[str, Any],
+    *,
+    checked_at: str,
+    query_status: str | None,
+    failure_status: str,
+) -> PendingLimitWatchdogItem | None:
+    try:
+        response["entry_order_cancel"] = dict(
+            client.cancel_order(
+                symbol=pending.intent.symbol,
+                orig_client_order_id=pending.client_order_id,
+            )
+        )
+        return None
+    except (AttributeError, TypeError) as exc:
+        response["entry_order_cancel_error"] = {"message": str(exc), "kind": type(exc).__name__}
+    except BinanceSignedError as exc:
+        response["entry_order_cancel_error"] = _signed_error_payload(exc)
+    observed_intent = replace(pending.intent, decided_at=checked_at)
+    store = EventStore(connection)
+    persisted_id = persist_exchange_response(
+        store,
+        intent=observed_intent,
+        response={**response, "watchdog_status": failure_status},
+        response_type="pending_limit_watchdog",
+    )
+    return PendingLimitWatchdogItem(
+        intent_event_id=pending.event_id,
+        symbol=pending.intent.symbol,
+        status=failure_status,
+        action="cancel_order_failed",
+        reasons=["pending_limit_cancel_failed", "pending_limit_kept_unresolved"],
+        client_order_id=pending.client_order_id,
+        query_status=query_status,
+        exchange_response_event_id=persisted_id,
+    )
 
 
 def _place_missing_protective_orders(
@@ -594,13 +778,18 @@ def _active_intent_from_position(
     config: AppConfig,
     client: PendingLimitWatchdogClient,
     intent: OrderIntent,
+    *,
+    position_snapshot: list[dict[str, Any]] | None = None,
 ) -> tuple[OrderIntent | None, dict[str, Any]]:
-    try:
-        positions = _call_position_risk(client, intent.symbol)
-    except (AttributeError, TypeError) as exc:
-        return None, {"status": "position_check_failed", "message": str(exc), "kind": type(exc).__name__}
-    except BinanceSignedError as exc:
-        return None, {"status": "position_check_failed", **_signed_error_payload(exc)}
+    if position_snapshot is not None:
+        positions = position_snapshot
+    else:
+        try:
+            positions = _call_position_risk(client, intent.symbol)
+        except (AttributeError, TypeError) as exc:
+            return None, {"status": "position_check_failed", "message": str(exc), "kind": type(exc).__name__}
+        except BinanceSignedError as exc:
+            return None, {"status": "position_check_failed", **_signed_error_payload(exc)}
 
     intended_side = _position_side(intent, config) or ("LONG" if intent.side.upper() == "BUY" else "SHORT")
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
@@ -638,68 +827,35 @@ def _active_intent_from_position(
     return None, {"status": "no_matching_position"}
 
 
-def _load_unresolved_pending_limit_intents(connection: sqlite3.Connection) -> list[PendingLimitOrderIntent]:
-    resolved = _resolved_pending_event_ids(connection)
-    rows = connection.execute(
-        """
-        SELECT event_id, occurred_at, symbol, payload_json
-        FROM order_intents
-        ORDER BY occurred_at ASC, id ASC
-        """
-    ).fetchall()
+def _load_unresolved_pending_limit_intents(
+    connection: sqlite3.Connection,
+    *,
+    max_items: int,
+    excluded_symbols: set[str] | None = None,
+) -> list[PendingLimitOrderIntent]:
+    rows = load_pending_limit_entry_rows(
+        connection,
+        max_items=max_items,
+        excluded_symbols=excluded_symbols,
+    )
     pending: list[PendingLimitOrderIntent] = []
     for row in rows:
-        event_id = int(row["event_id"])
-        if event_id in resolved or _has_closed_outcome_for_event(connection, event_id):
-            continue
-        payload = json.loads(str(row["payload_json"]))
-        if payload.get("status") != "entry_order_pending":
-            continue
-        intent_payload = payload.get("intent")
-        if not isinstance(intent_payload, Mapping):
-            continue
-        intent = _intent_from_payload(intent_payload)
+        event_id = int(row["intent_event_id"])
+        intent = order_intent_from_mapping(json.loads(str(row["intent_json"])))
         if intent.order_type.upper() != "LIMIT":
             continue
         pending.append(
             PendingLimitOrderIntent(
                 event_id=event_id,
                 occurred_at=str(row["occurred_at"]),
-                status=str(payload.get("status")),
+                status=str(row["status"]),
                 intent=intent,
-                client_order_id=_intent_client_order_id(intent),
+                client_order_id=str(row["client_order_id"]),
+                expires_at=str(row["expires_at"]),
+                strategy_leg=str(row["strategy_leg"]) if row["strategy_leg"] is not None else None,
             )
         )
     return pending
-
-
-def _resolved_pending_event_ids(connection: sqlite3.Connection) -> set[int]:
-    rows = connection.execute(
-        """
-        SELECT payload_json
-        FROM exchange_responses
-        WHERE payload_json LIKE '%pending_limit_watchdog%'
-        """
-    ).fetchall()
-    resolved: set[int] = set()
-    for row in rows:
-        try:
-            payload = json.loads(str(row["payload_json"]))
-        except json.JSONDecodeError:
-            continue
-        response = payload.get("response")
-        response_payload = response if isinstance(response, Mapping) else {}
-        if response_payload.get("watchdog_status") not in {
-            "filled_protected",
-            "position_reconciled_protected",
-            "terminal_no_fill",
-            "filled_no_active_position",
-        }:
-            continue
-        event_id = _int_or_none(response_payload.get("pending_intent_event_id"))
-        if event_id is not None:
-            resolved.add(event_id)
-    return resolved
 
 
 def _has_closed_outcome_for_event(connection: sqlite3.Connection, event_id: int) -> bool:
@@ -713,31 +869,6 @@ def _has_closed_outcome_for_event(connection: sqlite3.Connection, event_id: int)
         (f"outcome:{event_id}:closed",),
     ).fetchone()
     return row is not None
-
-
-def _intent_from_payload(payload: Mapping[str, Any]) -> OrderIntent:
-    quantity = _float(payload.get("quantity")) or 0.0
-    entry_price = _float(payload.get("entry_price")) or 0.0
-    notional = _float(payload.get("notional_usdt"))
-    metadata = payload.get("metadata")
-    return OrderIntent(
-        symbol=str(payload.get("symbol", "")).upper(),
-        side=str(payload.get("side", "")).upper(),
-        quantity=quantity,
-        notional_usdt=notional if notional is not None else quantity * entry_price,
-        entry_price=entry_price,
-        stop_price=_float(payload.get("stop_price")) or 0.0,
-        target_price=_float(payload.get("target_price")) or 0.0,
-        leverage=int(_float(payload.get("leverage")) or 1),
-        mode=str(payload.get("mode") or "live"),
-        decided_at=str(payload.get("decided_at") or ""),
-        order_type=str(payload.get("order_type") or "LIMIT"),
-        time_in_force=str(payload.get("time_in_force")) if payload.get("time_in_force") is not None else None,
-        limit_wait_seconds=_int_or_none(payload.get("limit_wait_seconds")),
-        reduce_only=bool(payload.get("reduce_only", False)),
-        reason_codes=[str(item) for item in payload.get("reason_codes", [])],
-        metadata=dict(metadata) if isinstance(metadata, Mapping) else {},
-    )
 
 
 def _intent_client_order_id(intent: OrderIntent) -> str:
@@ -833,11 +964,13 @@ def _report_status(
     statuses = {item.status for item in items}
     if "protection_failed" in statuses:
         return "pending_limit_watchdog_protection_failed"
-    if "filled_unprotected" in statuses:
+    if statuses.intersection({"expired_cancel_failed", "partial_fill_cancel_failed", "order_query_failed"}):
+        return "pending_limit_watchdog_check_failed"
+    if statuses.intersection({"filled_unprotected", "expired_cancel_pending", "partial_fill_cancel_pending"}):
         return "pending_limit_watchdog_action_ready"
     if "filled_position_check_failed" in statuses:
         return "pending_limit_watchdog_check_failed"
-    if any(status in statuses for status in {"filled_protected", "position_reconciled_protected"}):
+    if any(status in statuses for status in {"filled_protected", "position_reconciled_protected", "partial_filled_protected"}):
         return "pending_limit_watchdog_protected"
     if not execution_enabled and any(status in statuses for status in {"filled_already_protected"}):
         return "pending_limit_watchdog_observing"
@@ -883,3 +1016,12 @@ def _dedupe(items: list[str]) -> list[str]:
 
 def _now_iso() -> str:
     return datetime.now(tz=UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _pending_expired(pending: PendingLimitOrderIntent, *, checked_at: str) -> bool:
+    try:
+        checked = datetime.fromisoformat(checked_at.replace("Z", "+00:00")).astimezone(UTC)
+        expires = datetime.fromisoformat(pending.expires_at.replace("Z", "+00:00")).astimezone(UTC)
+    except (TypeError, ValueError):
+        return True
+    return checked >= expires

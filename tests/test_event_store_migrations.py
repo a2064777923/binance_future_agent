@@ -24,6 +24,7 @@ class EventStoreMigrationTests(unittest.TestCase):
 
         self.assertIn("schema_version", tables)
         self.assertIn("events", tables)
+        self.assertIn("pending_limit_entries", tables)
         for table in CATEGORY_TABLES:
             self.assertIn(table, tables)
 
@@ -60,6 +61,28 @@ class EventStoreMigrationTests(unittest.TestCase):
         self.assertIn("idx_events_symbol_time", indexes)
         self.assertIn("idx_narratives_time_id", indexes)
         self.assertIn("idx_market_snapshots_symbol_time", indexes)
+        self.assertIn("idx_pending_limit_entries_status_expiry", indexes)
+        self.assertIn("idx_pending_limit_entries_symbol_status", indexes)
+        self.assertIn("idx_fills_ref_id", indexes)
+
+    def test_pending_limit_query_uses_status_expiry_index(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        migrate(connection)
+
+        plan = connection.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT intent_event_id
+            FROM pending_limit_entries
+            WHERE status = 'pending'
+            ORDER BY expires_at ASC, intent_event_id ASC
+            LIMIT 10
+            """
+        ).fetchall()
+
+        detail = " ".join(str(row[3]) for row in plan)
+        self.assertIn("idx_pending_limit_entries_status_expiry", detail)
 
 
 def _table_names(connection):

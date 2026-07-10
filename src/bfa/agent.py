@@ -20,7 +20,7 @@ from bfa.ai.providers import ai_source, build_ai_client
 from bfa.backtest.models import built_in_variants
 from bfa.backtest.matrix import HotUniverseConfig, select_hot_usdt_symbols
 from bfa.config import AppConfig, RuntimeMode, market_symbols, rss_feed_urls, validate_config
-from bfa.event_store.migrations import connect
+from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.execution.executor import ExecutionEngine
@@ -40,6 +40,8 @@ from bfa.narrative.manual import ManualExportCollector
 from bfa.narrative.market_heat import MarketHeatNarrativeCollector
 from bfa.narrative.rss import RssFeedCollector
 from bfa.ops.pending_limit_watchdog import execute_pending_limit_watchdog
+from bfa.ops.pending_order_quality import execute_pending_order_quality_check
+from bfa.ops.live_status import LiveStatusReport, OpenAiBackoffStatus, ProtectiveEvidence
 from bfa.ops.position_adjustment import build_position_adjustment_plan_report, execute_position_adjustment_plan_report
 from bfa.strategy.candidates import CandidateSignal, StrategyConfig, generate_candidates
 from bfa.strategy.features import extract_features
@@ -135,6 +137,20 @@ class AgentRunResult:
         }
 
 
+@dataclass(frozen=True)
+class LiveExchangeSnapshot:
+    positions: list[dict[str, Any]]
+    open_orders: list[dict[str, Any]]
+    open_algo_orders: list[dict[str, Any]]
+    account: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class LiveLocalRiskContext:
+    daily_realized_pnl_usdt: float
+    pending_registry: dict[str, dict[str, Any]]
+
+
 def run_agent_once(
     *,
     config: AppConfig,
@@ -180,15 +196,8 @@ def run_agent_once(
         )
 
     signed_client = signed_client or _build_signed_client(config, mode)
-    preflight_risk_state = (
-        _risk_state_from_exchange(
-            signed_client,
-            manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
-        )
-        if mode is RuntimeMode.LIVE
-        else None
-    )
-    if mode is RuntimeMode.LIVE and preflight_risk_state is None:
+    live_snapshot = _live_exchange_snapshot(signed_client) if mode is RuntimeMode.LIVE else None
+    if mode is RuntimeMode.LIVE and live_snapshot is None:
         return AgentRunResult(
             status="position_risk_failed",
             mode=mode.value,
@@ -203,17 +212,66 @@ def run_agent_once(
             db_path=db_path,
             signed_client=signed_client,
             started_at=started_at,
+            position_snapshot=live_snapshot.positions,
         )
-        if mode is RuntimeMode.LIVE and preflight_risk_state is not None
+        if mode is RuntimeMode.LIVE and live_snapshot is not None
         else None
     )
-    if mode is RuntimeMode.LIVE and pending_limit_watchdog_report is not None:
-        preflight_risk_state = _risk_state_from_exchange(
-            signed_client,
-            manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
+    resolved_watchdog_ids = _resolved_watchdog_client_order_ids(pending_limit_watchdog_report)
+    ops_snapshot = (
+        replace(
+            live_snapshot,
+            open_orders=[
+                order
+                for order in live_snapshot.open_orders
+                if str(order.get("clientOrderId") or order.get("origClientOrderId") or "")
+                not in resolved_watchdog_ids
+            ],
         )
+        if live_snapshot is not None
+        else None
+    )
+    if pending_limit_watchdog_report is not None and pending_limit_watchdog_report.protected_count > 0:
+        ops_snapshot = _snapshot_with_refreshed_algo_orders(ops_snapshot, signed_client)
+    local_risk_context = (
+        _load_live_local_risk_context(
+            db_path or config.get("BFA_DB_PATH"),
+            now=started_at,
+            timezone_name=config.get("BFA_DAILY_LOSS_TIMEZONE", "UTC"),
+        )
+        if mode is RuntimeMode.LIVE
+        else None
+    )
+    if mode is RuntimeMode.LIVE and local_risk_context is None:
+        return AgentRunResult(
+            status="position_risk_failed",
+            mode=mode.value,
+            started_at=started_at,
+            validation_errors=["unable to read local live risk context"],
+            source_health=_pre_collection_source_health(config, reason="local_risk_context_failed"),
+        )
+    preflight_risk_state = (
+        _risk_state_from_exchange(
+            signed_client,
+            config=config,
+            manual_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
+            snapshot=ops_snapshot,
+            pending_registry=local_risk_context.pending_registry,
+            ignored_client_order_ids=resolved_watchdog_ids,
+            daily_realized_pnl_usdt=local_risk_context.daily_realized_pnl_usdt,
+        )
+        if mode is RuntimeMode.LIVE and ops_snapshot is not None and local_risk_context is not None
+        else None
+    )
     position_adjustment_plan = (
-        _live_position_adjustment_plan(config, db_path=db_path, signed_client=signed_client, market_client=market)
+        _live_position_adjustment_plan(
+            config,
+            db_path=db_path,
+            signed_client=signed_client,
+            market_client=market,
+            snapshot=ops_snapshot,
+            openai_backoff_active=backoff.active,
+        )
         if mode is RuntimeMode.LIVE and preflight_risk_state is not None
         else None
     )
@@ -232,11 +290,15 @@ def run_agent_once(
                 started_at=started_at,
                 adjustment_plan=position_adjustment_plan,
             )
+            if position_auto_management_execution is not None and position_auto_management_execution.adjustment_executed:
+                ops_snapshot = _snapshot_with_refreshed_algo_orders(ops_snapshot, signed_client)
             position_adjustment_plan = _live_position_adjustment_plan(
                 config,
                 db_path=db_path,
                 signed_client=signed_client,
                 market_client=market,
+                snapshot=ops_snapshot,
+                openai_backoff_active=backoff.active,
             )
             position_lifecycle_event_id = _persist_position_lifecycle(
                 store,
@@ -253,7 +315,13 @@ def run_agent_once(
             preflight_risk_state,
             preflight_reasons,
         )
-        if preflight_reasons:
+        quality_can_recheck_capacity = bool(
+            preflight_reasons
+            and preflight_risk_state is not None
+            and preflight_risk_state.pending_positions > 0
+            and _truthy(config.get("BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED", "false"))
+        )
+        if preflight_reasons and not quality_can_recheck_capacity:
             return AgentRunResult(
                 status="entry_capacity_blocked",
                 mode=mode.value,
@@ -409,6 +477,29 @@ def run_agent_once(
             evaluation_candidates=evaluation_candidates,
             micro_fast_lane=micro_fast_lane_enabled,
         )
+        pending_quality_report = None
+        if mode is RuntimeMode.LIVE and evaluation_candidates and ops_snapshot is not None:
+            pending_quality_report = execute_pending_order_quality_check(
+                config,
+                db_path=db_path or config.get("BFA_DB_PATH"),
+                signed_client=signed_client,
+                checked_at=started_at,
+                market_context_by_symbol=micro_market_context,
+                open_orders=ops_snapshot.open_orders,
+                signal_sides_by_symbol=_candidate_signal_sides(evaluation_candidates),
+                execute=True,
+            )
+            source_health["pending_order_quality"] = pending_quality_report.to_dict()
+            canceled_ids = pending_quality_report.canceled_client_order_ids
+            if canceled_ids and preflight_risk_state is not None:
+                preflight_risk_state = replace(
+                    preflight_risk_state,
+                    pending_exposures=[
+                        exposure
+                        for exposure in preflight_risk_state.pending_exposures
+                        if str(exposure.get("client_order_id") or "") not in canceled_ids
+                    ],
+                )
         decision_snapshot_event_id = _persist_decision_snapshot(
             store,
             config=config,
@@ -435,6 +526,34 @@ def run_agent_once(
                 candidate_count=0,
                 rejected_count=len(candidates.rejected),
                 scan_symbols=scan_symbols,
+                position_review=_position_review_summary(position_adjustment_plan),
+                position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
+                paper_guard=outcome_guard.to_dict() if outcome_guard is not None else None,
+                source_health=source_health,
+                persisted={
+                    **_position_lifecycle_persisted(position_lifecycle_event_id),
+                    **_decision_snapshot_persisted(decision_snapshot_event_id),
+                    "candidates": persisted_candidate_count,
+                },
+            )
+
+        post_quality_preflight_reasons = _live_entry_capacity_blockers(config, preflight_risk_state)
+        post_quality_preflight_reasons = _live_micro_grid_extra_capacity_preflight_reasons(
+            config,
+            preflight_risk_state,
+            post_quality_preflight_reasons,
+        )
+        if post_quality_preflight_reasons:
+            return AgentRunResult(
+                status="entry_capacity_blocked",
+                mode=mode.value,
+                started_at=started_at,
+                market_snapshot_count=len(market_snapshots),
+                narrative_record_count=len(narrative_records),
+                candidate_count=len(evaluation_candidates),
+                rejected_count=len(candidates.rejected),
+                scan_symbols=scan_symbols,
+                risk_reasons=post_quality_preflight_reasons,
                 position_review=_position_review_summary(position_adjustment_plan),
                 position_adjustment_plan=_position_adjustment_summary(position_adjustment_plan),
                 paper_guard=outcome_guard.to_dict() if outcome_guard is not None else None,
@@ -1954,6 +2073,7 @@ def _evaluate_candidate_queue(
                 continued=True,
                 end_reason="symbol_filters_missing",
             )
+
             continue
 
         execution_started_at_ms = _epoch_ms()
@@ -2464,6 +2584,16 @@ def _live_execution_queue(
     return [*allowed_micro, *immediate_normal[:normal_limit], *delayed_normal[:normal_limit]]
 
 
+def _candidate_signal_sides(candidates: list[CandidateSignal]) -> dict[str, str]:
+    sides: dict[str, str] = {}
+    for candidate in candidates:
+        features = candidate.features if isinstance(candidate.features, dict) else {}
+        side = str(features.get("micro_grid_side") or features.get("selected_side") or "").strip().lower()
+        if side in {"long", "short"}:
+            sides.setdefault(candidate.symbol.upper(), side)
+    return sides
+
+
 def _execution_queue_source_health(*, fused_candidates, evaluation_candidates, micro_fast_lane: bool) -> dict[str, Any]:
     return {
         "micro_fast_lane_enabled": bool(micro_fast_lane),
@@ -2892,7 +3022,15 @@ def _ai_run_with_quant_execution_reasons(ai_run: AiDecisionRun, setup) -> AiDeci
     return replace(ai_run, validation=merged_validation)
 
 
-def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, signed_client, market_client=None):
+def _live_position_adjustment_plan(
+    config: AppConfig,
+    *,
+    db_path: str | None,
+    signed_client,
+    market_client=None,
+    snapshot: LiveExchangeSnapshot | None = None,
+    openai_backoff_active: bool = False,
+):
     if signed_client is None:
         return None
     try:
@@ -2902,6 +3040,16 @@ def _live_position_adjustment_plan(config: AppConfig, *, db_path: str | None, si
             check_binance=True,
             signed_client=signed_client,
             market_client=market_client,
+            live_status_report=(
+                _live_status_from_snapshot(
+                    config,
+                    db_path=db_path,
+                    snapshot=snapshot,
+                    openai_backoff_active=openai_backoff_active,
+                )
+                if snapshot is not None
+                else None
+            ),
         )
     except Exception:
         return None
@@ -2913,6 +3061,7 @@ def _execute_live_pending_limit_watchdog(
     db_path: str | None,
     signed_client,
     started_at: str,
+    position_snapshot: list[dict[str, Any]] | None = None,
 ):
     if signed_client is None:
         return None
@@ -2922,6 +3071,7 @@ def _execute_live_pending_limit_watchdog(
             db_path=db_path or config.get("BFA_DB_PATH"),
             signed_client=signed_client,
             checked_at=started_at,
+            position_snapshot=position_snapshot,
         )
     except Exception:
         return None
@@ -3169,19 +3319,90 @@ def _build_signed_client(config: AppConfig, mode: RuntimeMode):
     )
 
 
-def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None = None) -> RiskState | None:
+def _live_exchange_snapshot(signed_client) -> LiveExchangeSnapshot | None:
     if signed_client is None:
         return None
     try:
-        positions = signed_client.position_risk()
-    except Exception:
-        return None
-    account_available_balance = None
-    account_total_wallet_balance = None
-    try:
+        positions = list(signed_client.position_risk())
+        open_orders = list(signed_client.open_orders())
+        open_algo_orders = list(signed_client.open_algo_orders())
         account = signed_client.account()
     except Exception:
-        account = {}
+        return None
+    if not isinstance(account, dict):
+        return None
+    return LiveExchangeSnapshot(
+        positions=[dict(item) for item in positions],
+        open_orders=[dict(item) for item in open_orders],
+        open_algo_orders=[dict(item) for item in open_algo_orders],
+        account=dict(account),
+    )
+
+
+def _live_status_from_snapshot(
+    config: AppConfig,
+    *,
+    db_path: str | None,
+    snapshot: LiveExchangeSnapshot,
+    openai_backoff_active: bool,
+) -> LiveStatusReport:
+    account = snapshot.account
+    exchange_evidence = {
+        "account": {
+            "can_trade": account.get("canTrade"),
+            "total_wallet_balance": account.get("totalWalletBalance"),
+            "available_balance": account.get("availableBalance"),
+        },
+        "positions": [
+            dict(position)
+            for position in snapshot.positions
+            if (_float_or_none(position.get("positionAmt")) or 0.0) != 0.0
+        ],
+        "open_orders": [dict(order) for order in snapshot.open_orders],
+        "open_algo_orders": [dict(order) for order in snapshot.open_algo_orders],
+    }
+    return LiveStatusReport(
+        db_path=str(db_path or config.get("BFA_DB_PATH")),
+        runtime_dir=config.get("BFA_RUNTIME_DIR"),
+        counts={},
+        latest={},
+        openai_backoff=OpenAiBackoffStatus(active=openai_backoff_active),
+        protective_evidence=ProtectiveEvidence(complete=False),
+        exchange_evidence=exchange_evidence,
+        lva05_complete=False,
+    )
+
+
+def _snapshot_with_refreshed_algo_orders(
+    snapshot: LiveExchangeSnapshot | None,
+    signed_client,
+) -> LiveExchangeSnapshot | None:
+    if snapshot is None or signed_client is None:
+        return snapshot
+    try:
+        open_algo_orders = [dict(item) for item in signed_client.open_algo_orders()]
+    except Exception:
+        return None
+    return replace(snapshot, open_algo_orders=open_algo_orders)
+
+
+def _risk_state_from_exchange(
+    signed_client,
+    *,
+    config: AppConfig | None = None,
+    manual_symbols: set[str] | None = None,
+    snapshot: LiveExchangeSnapshot | None = None,
+    pending_registry: Mapping[str, Mapping[str, Any]] | None = None,
+    ignored_client_order_ids: set[str] | None = None,
+    daily_realized_pnl_usdt: float = 0.0,
+) -> RiskState | None:
+    snapshot = snapshot or _live_exchange_snapshot(signed_client)
+    if snapshot is None:
+        return None
+    positions = snapshot.positions
+    account = snapshot.account
+    account_available_balance = None
+    account_total_wallet_balance = None
     if isinstance(account, dict):
         account_available_balance = _float_or_none(account.get("availableBalance"))
         account_total_wallet_balance = _float_or_none(account.get("totalWalletBalance"))
@@ -3209,33 +3430,175 @@ def _risk_state_from_exchange(signed_client, *, manual_symbols: set[str] | None 
         else:
             active_positions += 1
             active_exposures.append(exposure)
+    pending_exposures = _pending_exposures_from_open_orders(
+        snapshot.open_orders,
+        pending_registry=pending_registry or {},
+        ignored_client_order_ids=ignored_client_order_ids or set(),
+        fallback_leverage=_positive_int_or_default(config.get("BFA_MAX_LEVERAGE"), 1) if config else 1,
+        manual_symbols=excluded,
+    )
     return RiskState(
         active_positions=active_positions,
         active_exposures=active_exposures,
+        pending_exposures=pending_exposures,
         manual_exposures=manual_exposures,
         account_available_balance_usdt=account_available_balance,
         account_total_wallet_balance_usdt=account_total_wallet_balance,
+        daily_realized_pnl_usdt=daily_realized_pnl_usdt,
     )
+
+
+def _pending_exposures_from_open_orders(
+    open_orders: list[Mapping[str, Any]],
+    *,
+    pending_registry: Mapping[str, Mapping[str, Any]],
+    ignored_client_order_ids: set[str],
+    fallback_leverage: int,
+    manual_symbols: set[str],
+) -> list[dict[str, Any]]:
+    exposures: list[dict[str, Any]] = []
+    for order in open_orders:
+        symbol = str(order.get("symbol") or "").upper()
+        if not symbol or symbol in manual_symbols:
+            continue
+        status = str(order.get("status") or "").upper()
+        order_type = str(order.get("type") or order.get("origType") or "").upper()
+        reduce_only = bool(order.get("reduceOnly")) or bool(order.get("closePosition"))
+        client_order_id = str(order.get("clientOrderId") or order.get("origClientOrderId") or "")
+        if (
+            status not in {"NEW", "PARTIALLY_FILLED"}
+            or order_type != "LIMIT"
+            or reduce_only
+            or client_order_id in ignored_client_order_ids
+        ):
+            continue
+        original_qty = _float_or_none(order.get("origQty")) or 0.0
+        executed_qty = _float_or_none(order.get("executedQty")) or 0.0
+        remaining_qty = max(original_qty - executed_qty, 0.0)
+        price = _float_or_none(order.get("price")) or 0.0
+        registry = pending_registry.get(client_order_id) or {}
+        leverage = int(_float_or_none(registry.get("leverage")) or fallback_leverage or 1)
+        notional = remaining_qty * price
+        exposures.append(
+            {
+                "symbol": symbol,
+                "direction": "LONG" if str(order.get("side") or "").upper() == "BUY" else "SHORT",
+                "notional_usdt": notional,
+                "initial_margin_usdt": notional / max(leverage, 1),
+                "leverage": leverage,
+                "strategy_leg": str(registry.get("strategy_leg") or "").strip().lower() or "unknown",
+                "client_order_id": client_order_id,
+            }
+        )
+    return exposures
+
+
+def _load_live_local_risk_context(
+    db_path: str,
+    *,
+    now: str,
+    timezone_name: str,
+) -> LiveLocalRiskContext | None:
+    connection = connect(db_path)
+    try:
+        migrate(connection)
+        registry_rows = connection.execute(
+            """
+            SELECT client_order_id, strategy_leg, intent_json
+            FROM pending_limit_entries
+            WHERE status = 'pending'
+            """
+        ).fetchall()
+        registry: dict[str, dict[str, Any]] = {}
+        for row in registry_rows:
+            try:
+                intent = json.loads(str(row["intent_json"]))
+            except json.JSONDecodeError:
+                return None
+            registry[str(row["client_order_id"])] = {
+                "strategy_leg": row["strategy_leg"],
+                "leverage": intent.get("leverage"),
+            }
+        daily_pnl = _daily_realized_pnl_from_outcomes(
+            connection,
+            now=now,
+            timezone_name=timezone_name,
+        )
+        return LiveLocalRiskContext(
+            daily_realized_pnl_usdt=daily_pnl,
+            pending_registry=registry,
+        )
+    except Exception:
+        return None
+    finally:
+        connection.close()
+
+
+def _daily_realized_pnl_from_outcomes(
+    connection,
+    *,
+    now: str,
+    timezone_name: str,
+) -> float:
+    local_timezone = UTC if timezone_name.strip().upper() == "UTC" else ZoneInfo(timezone_name)
+    current = datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(local_timezone)
+    start_local = current.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_utc = start_local.astimezone(UTC).isoformat().replace("+00:00", "Z")
+    rows = connection.execute(
+        """
+        SELECT payload_json
+        FROM outcomes
+        WHERE occurred_at >= ? AND occurred_at <= ?
+        ORDER BY occurred_at ASC, id ASC
+        """,
+        (start_utc, current.astimezone(UTC).isoformat().replace("+00:00", "Z")),
+    ).fetchall()
+    total = 0.0
+    for row in rows:
+        payload = json.loads(str(row["payload_json"]))
+        if str(payload.get("status") or "") != "closed":
+            continue
+        total += _float_or_none(payload.get("net_realized_pnl_usdt")) or 0.0
+    return round(total, 8)
+
+
+def _resolved_watchdog_client_order_ids(report) -> set[str]:
+    if report is None:
+        return set()
+    resolved_statuses = {
+        "expired_canceled",
+        "terminal_no_fill",
+        "partial_filled_protected",
+        "filled_protected",
+        "position_reconciled_protected",
+        "filled_without_active_position",
+    }
+    return {
+        str(item.client_order_id)
+        for item in report.items
+        if item.client_order_id and item.status in resolved_statuses
+    }
 
 
 def _live_entry_capacity_blockers(config: AppConfig, risk_state: RiskState | None) -> list[str]:
     if risk_state is None:
         return []
     reasons: list[str] = []
-    if risk_state.active_positions > 0 and not _truthy(config.get("BFA_MULTI_POSITION_ENABLED")):
+    occupied_slots = risk_state.total_bot_positions
+    if occupied_slots > 0 and not _truthy(config.get("BFA_MULTI_POSITION_ENABLED")):
         reasons.append("multi_position_disabled")
     try:
         max_open_positions = int(config.get("BFA_MAX_OPEN_POSITIONS"))
     except (TypeError, ValueError):
         max_open_positions = 0
-    if risk_state.active_positions > 0 and risk_state.active_positions >= max_open_positions:
+    if occupied_slots > 0 and occupied_slots >= max_open_positions:
         reasons.append("max_open_positions_reached")
     portfolio_margin_cap = _portfolio_margin_cap(config)
     include_manual_margin = _truthy(config.get("BFA_MANUAL_MARGIN_PRESSURE_GUARD_ENABLED"))
     measured_margin = (
         risk_state.total_initial_margin_usdt
         if include_manual_margin
-        else risk_state.active_initial_margin_usdt
+        else risk_state.committed_initial_margin_usdt
     )
     if portfolio_margin_cap > 0 and measured_margin >= portfolio_margin_cap:
         reasons.append("portfolio_margin_cap_reached")
@@ -3261,7 +3624,7 @@ def _live_micro_grid_extra_capacity_preflight_reasons(
         base_max_open = int(config.get("BFA_MAX_OPEN_POSITIONS"))
     except (TypeError, ValueError):
         base_max_open = 0
-    if risk_state.active_positions >= base_max_open + extra_slots:
+    if risk_state.total_bot_positions >= base_max_open + extra_slots:
         return reasons
     return [reason for reason in reasons if reason != "max_open_positions_reached"]
 

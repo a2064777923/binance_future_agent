@@ -4,20 +4,31 @@ import unittest
 from pathlib import Path
 
 from bfa.config import load_config
+from bfa.event_store.migrations import connect
 from bfa.event_store.store import EventStore
+from bfa.execution.binance_client import BinanceSignedError
 from bfa.execution.models import OrderIntent, RiskDecision
 from bfa.execution.store import persist_order_intent
-from bfa.ops.pending_limit_watchdog import build_pending_limit_watchdog_report
+from bfa.ops.pending_limit_watchdog import build_pending_limit_watchdog_report, execute_pending_limit_watchdog
 
 
 class FakePendingLimitClient:
-    def __init__(self, *, order_status="FILLED", executed_qty="0.2", protected=False, active_position=True):
+    def __init__(
+        self,
+        *,
+        order_status="FILLED",
+        executed_qty="0.2",
+        protected=False,
+        active_position=True,
+        cancel_fails=False,
+    ):
         self.order_status = order_status
         self.executed_qty = executed_qty
         self.protected = protected
         self.active_position = active_position
         self.calls = []
         self.algo_orders = []
+        self.cancel_fails = cancel_fails
 
     def query_order(self, **kwargs):
         self.calls.append(("query_order", kwargs))
@@ -56,6 +67,23 @@ class FakePendingLimitClient:
         self.algo_orders.append(kwargs)
         return {"algoId": 100 + len(self.algo_orders), **kwargs}
 
+    def cancel_order(self, **kwargs):
+        self.calls.append(("cancel_order", kwargs))
+        if self.cancel_fails:
+            raise BinanceSignedError(
+                endpoint="/fapi/v1/order",
+                params={},
+                status_code=500,
+                binance_code=-1000,
+                binance_message="synthetic cancel failure",
+                headers={},
+            )
+        return {
+            "symbol": kwargs.get("symbol"),
+            "status": "CANCELED",
+            "origClientOrderId": kwargs.get("orig_client_order_id"),
+        }
+
 
 class PendingLimitWatchdogTests(unittest.TestCase):
     def setUp(self):
@@ -79,6 +107,7 @@ class PendingLimitWatchdogTests(unittest.TestCase):
                     decided_at="2026-06-20T09:00:00Z",
                     order_type="LIMIT",
                     time_in_force="GTX",
+                    limit_wait_seconds=20,
                     metadata={"client_order_id": "bfa-btc-pending-1"},
                 ),
                 status="entry_order_pending",
@@ -105,6 +134,16 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         connection = sqlite3.connect(self.db_path)
         try:
             return connection.execute("SELECT COUNT(*) FROM exchange_responses").fetchone()[0]
+        finally:
+            connection.close()
+
+    def pending_row(self):
+        connection = connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT * FROM pending_limit_entries ORDER BY intent_event_id ASC LIMIT 1"
+            ).fetchone()
+            return dict(row) if row is not None else None
         finally:
             connection.close()
 
@@ -197,6 +236,129 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertIn("pending_limit_not_filled", report.items[0].reasons)
         self.assertEqual(client.algo_orders, [])
         self.assertEqual(self.exchange_response_count(), 0)
+
+    def test_expired_new_order_observe_mode_requests_cancel_without_mutating(self):
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:21Z",
+            execute=False,
+        )
+
+        self.assertEqual(report.items[0].status, "expired_cancel_pending")
+        self.assertEqual(report.items[0].action, "cancel_order_pending")
+        self.assertFalse(any(call[0] == "cancel_order" for call in client.calls))
+        self.assertEqual(self.pending_row()["status"], "pending")
+
+    def test_expired_new_order_execute_mode_cancels_and_resolves(self):
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:21Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.items[0].status, "expired_canceled")
+        self.assertEqual(report.items[0].action, "cancel_order")
+        self.assertEqual(sum(call[0] == "cancel_order" for call in client.calls), 1)
+        row = self.pending_row()
+        self.assertEqual(row["status"], "resolved")
+        self.assertEqual(row["resolution_status"], "entry_order_expired_canceled")
+
+    def test_partial_fill_cancels_remainder_before_protecting_executed_quantity(self):
+        client = FakePendingLimitClient(order_status="PARTIALLY_FILLED", executed_qty="0.1")
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:10Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.items[0].status, "partial_filled_protected")
+        call_names = [call[0] for call in client.calls]
+        self.assertLess(call_names.index("cancel_order"), call_names.index("new_algo_order"))
+        self.assertEqual(client.algo_orders[0]["order_type"], "STOP_MARKET")
+        self.assertEqual(self.pending_row()["status"], "resolved")
+
+    def test_cancel_failure_is_fail_closed_and_keeps_pending_unresolved(self):
+        client = FakePendingLimitClient(
+            order_status="NEW",
+            executed_qty="0",
+            active_position=False,
+            cancel_fails=True,
+        )
+
+        report = build_pending_limit_watchdog_report(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:21Z",
+            execute=True,
+        )
+
+        self.assertEqual(report.items[0].status, "expired_cancel_failed")
+        self.assertEqual(report.status, "pending_limit_watchdog_check_failed")
+        self.assertEqual(self.pending_row()["status"], "pending")
+
+    def test_max_items_processes_earliest_expiry_without_scanning_history(self):
+        connection = connect(self.db_path)
+        try:
+            store = EventStore(connection)
+            persist_order_intent(
+                store,
+                intent=OrderIntent(
+                    symbol="ETHUSDT",
+                    side="SELL",
+                    quantity=1,
+                    notional_usdt=100,
+                    entry_price=100,
+                    stop_price=102,
+                    target_price=96,
+                    leverage=10,
+                    mode="live",
+                    decided_at="2026-06-20T09:00:10Z",
+                    order_type="LIMIT",
+                    time_in_force="GTX",
+                    limit_wait_seconds=60,
+                    metadata={"client_order_id": "bfa-eth-pending-2"},
+                ),
+                status="entry_order_pending",
+                risk=RiskDecision(True, ["risk_accepted"]),
+            )
+            for index in range(100):
+                store.insert_artifact(
+                    "order_intents",
+                    occurred_at=f"2026-06-19T00:00:{index % 60:02d}Z",
+                    source="test",
+                    symbol="NOISEUSDT",
+                    ref_id=f"noise:{index}",
+                    payload={"status": "rejected", "intent": {}},
+                    event_type="order_intent",
+                )
+        finally:
+            connection.close()
+        client = FakePendingLimitClient(order_status="NEW", executed_qty="0", active_position=False)
+
+        report = execute_pending_limit_watchdog(
+            self.config(BFA_PENDING_LIMIT_WATCHDOG_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            signed_client=client,
+            checked_at="2026-06-20T09:00:15Z",
+            max_items=1,
+            execute_protective_orders=True,
+        )
+
+        self.assertEqual(report.checked_count, 1)
+        self.assertEqual(report.items[0].symbol, "BTCUSDT")
+        self.assertEqual(sum(call[0] == "query_order" for call in client.calls), 1)
 
 
 if __name__ == "__main__":

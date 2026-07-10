@@ -13,8 +13,11 @@ from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceFuturesSignedClient, BinanceSignedError
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import ExecutionResult, OrderIntent, RiskDecision, RiskState
-from bfa.execution.risk import evaluate_risk, intent_from_ai_decision
-from bfa.execution.store import persist_exchange_response, persist_order_intent
+from bfa.execution.risk import evaluate_risk, intent_from_ai_decision, required_available_balance_reserve_usdt
+from bfa.execution.store import (
+    persist_exchange_response,
+    persist_order_intent,
+)
 
 
 @dataclass
@@ -136,7 +139,7 @@ class ExecutionEngine:
                 exchange_response_type="test_order",
             )
 
-        balance_risk = self._check_live_available_balance(intent)
+        balance_risk = self._check_live_available_balance(intent, risk_state=state)
         if not balance_risk.accepted:
             return self._finish(
                 status="rejected",
@@ -181,7 +184,7 @@ class ExecutionEngine:
                     exchange_response={"margin_setup": margin_setup.response},
                     exchange_response_type="margin_setup_risk_reject",
                 )
-            balance_risk = self._check_live_available_balance(intent)
+            balance_risk = self._check_live_available_balance(intent, risk_state=state)
             if not balance_risk.accepted:
                 return self._finish(
                     status="rejected",
@@ -225,6 +228,15 @@ class ExecutionEngine:
             entry_order_latency=entry_submission.response.get("_bfa_latency"),
         )
         client_order_id = entry_submission.client_order_id
+        exchange_order_id = entry_submission.response.get("orderId")
+        intent = replace(
+            intent,
+            metadata={
+                **intent.metadata,
+                "client_order_id": client_order_id,
+                **({"exchange_order_id": exchange_order_id} if exchange_order_id is not None else {}),
+            },
+        )
         response = {"margin_setup": margin_setup.response, "entry_order": entry_submission.response}
         status = "submitted"
         active_intent = intent
@@ -469,7 +481,9 @@ class ExecutionEngine:
             headers={},
         )
 
-    def _check_live_available_balance(self, intent: OrderIntent) -> RiskDecision:
+    def _check_live_available_balance(self, intent: OrderIntent, *, risk_state: RiskState) -> RiskDecision:
+        if risk_state.account_available_balance_usdt is not None:
+            return RiskDecision(True, ["available_balance_snapshot_reused"])
         assert self.signed_client is not None
         try:
             account = self.signed_client.account()
@@ -484,6 +498,21 @@ class ExecutionEngine:
                 False,
                 ["insufficient_available_balance"],
                 [f"available_balance:{available:.8f}", f"required_initial_margin:{required:.8f}"],
+            )
+        balance_state = RiskState(
+            account_available_balance_usdt=available,
+            account_total_wallet_balance_usdt=_float(account.get("totalWalletBalance")),
+        )
+        reserve = required_available_balance_reserve_usdt(intent, balance_state, self.config)
+        if available - required < reserve:
+            return RiskDecision(
+                False,
+                ["available_balance_reserve_breached"],
+                [
+                    f"available_balance:{available:.8f}",
+                    f"required_initial_margin:{required:.8f}",
+                    f"required_balance_reserve:{reserve:.8f}",
+                ],
             )
         return RiskDecision(True, ["available_balance_ok"])
 

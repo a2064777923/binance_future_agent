@@ -35,6 +35,7 @@ class LocalSubmittedIntent:
     source_status: str = "submitted"
     original_event_id: int | None = None
     client_order_id: str | None = None
+    exchange_order_id: int | str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +49,7 @@ class LocalSubmittedIntent:
             "source_status": self.source_status,
             "original_event_id": self.original_event_id,
             "client_order_id": self.client_order_id,
+            "exchange_order_id": self.exchange_order_id,
         }
 
 
@@ -118,6 +120,7 @@ class TradeOutcomeSweepReport:
                 ),
                 "closed": sum(1 for item in self.items if item.status == "closed"),
                 "open_or_partial": sum(1 for item in self.items if item.status == "open_or_partial"),
+                "unreconciled": sum(1 for item in self.items if item.status == "unreconciled"),
                 "persisted_outcomes_inserted": sum(
                     int((item.outcome.persisted or {}).get("outcome_inserted", 0))
                     for item in self.items
@@ -185,8 +188,16 @@ def reconcile_submitted_trade_outcomes(
     max_intents: int | None = None,
 ) -> TradeOutcomeSweepReport:
     intents = load_submitted_intents(store.connection, symbol=symbol, max_intents=max_intents)
+    fetchable_intents = [
+        intent
+        for intent in intents
+        if include_reconciled or not _has_closed_outcome_for_intent(store.connection, intent)
+    ]
+    trade_batches, fetch_errors = _fetch_trade_batches(client, fetchable_intents, limit=limit)
+    used_trade_keys = _persisted_trade_keys(store.connection, trade_batches)
+    known_entry_order_ids = _known_entry_order_ids_by_symbol(fetchable_intents)
     items: list[TradeOutcomeSweepItem] = []
-    for index, intent in enumerate(intents):
+    for intent in intents:
         if _has_closed_outcome_for_intent(store.connection, intent) and not include_reconciled:
             items.append(
                 TradeOutcomeSweepItem(
@@ -197,24 +208,30 @@ def reconcile_submitted_trade_outcomes(
                 )
             )
             continue
-        start_time = _iso_to_epoch_ms(intent.occurred_at)
-        try:
-            trades = client.user_trades(
-                intent.symbol,
-                start_time=start_time,
-                end_time=_capped_user_trades_end_time(
-                    start_time,
-                    requested_end_time=_next_same_symbol_start_ms(intents, index),
-                ),
-                limit=limit,
-            )
-        except Exception as exc:
+        if intent.symbol in fetch_errors:
+            exc = fetch_errors[intent.symbol]
             items.append(
                 TradeOutcomeSweepItem(
                     intent=intent,
                     status="fetch_error",
                     fetched=False,
                     reason=f"{exc.__class__.__name__}:{exc}",
+                )
+            )
+            continue
+        trades = _trades_for_intent(
+            intent,
+            trade_batches.get(intent.symbol, []),
+            used_trade_keys=used_trade_keys,
+            known_entry_order_ids=known_entry_order_ids.get(intent.symbol, set()),
+        )
+        if trades is None:
+            items.append(
+                TradeOutcomeSweepItem(
+                    intent=intent,
+                    status="unreconciled",
+                    fetched=True,
+                    reason="ambiguous_trade_attribution",
                 )
             )
             continue
@@ -229,6 +246,7 @@ def reconcile_submitted_trade_outcomes(
                 outcome=outcome,
             )
         )
+        used_trade_keys.update(_trade_keys(intent.symbol, trades))
     return TradeOutcomeSweepReport(
         persist_closed=persist_closed,
         include_reconciled=include_reconciled,
@@ -257,10 +275,12 @@ def load_latest_submitted_intent(
     ).fetchall()
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
-        if str(payload.get("status") or "") not in {"submitted", "position_adjustment_submitted_cleanup_deferred"}:
+        if str(payload.get("status") or "") != "submitted":
             continue
         intent = payload.get("intent")
         if not isinstance(intent, Mapping):
+            continue
+        if not _is_entry_intent(intent):
             continue
         if _watchdog_submitted_intent_explicitly_unfilled(connection, intent):
             continue
@@ -301,10 +321,12 @@ def load_submitted_intents(
     for row in rows:
         payload = json.loads(str(row["payload_json"]))
         status = str(payload.get("status") or "")
-        if status not in {"submitted", "position_adjustment_submitted_cleanup_deferred"}:
+        if status != "submitted":
             continue
         intent = payload.get("intent")
         if not isinstance(intent, Mapping):
+            continue
+        if not _is_entry_intent(intent):
             continue
         if _watchdog_submitted_intent_explicitly_unfilled(connection, intent):
             continue
@@ -322,6 +344,7 @@ def _local_intent_from_payload(
         metadata = {}
     original_event_id = _int_or_none(metadata.get("pending_intent_event_id"))
     client_order_id = metadata.get("client_order_id") or metadata.get("pending_client_order_id")
+    exchange_order_id = metadata.get("exchange_order_id")
     occurred_at = str(row["occurred_at"])
     original_time = _original_pending_time(metadata, intent)
     if original_event_id is not None and original_time:
@@ -340,6 +363,7 @@ def _local_intent_from_payload(
         source_status=str(payload.get("status") or "submitted"),
         original_event_id=original_event_id,
         client_order_id=str(client_order_id) if client_order_id is not None else None,
+        exchange_order_id=exchange_order_id,
     )
 
 
@@ -361,6 +385,171 @@ def _original_pending_time(metadata: Mapping[str, Any], intent: Mapping[str, Any
             return str(value)
     decided_at = intent.get("decided_at")
     return str(decided_at) if decided_at else None
+
+
+def _is_entry_intent(intent: Mapping[str, Any]) -> bool:
+    metadata = intent.get("metadata")
+    if isinstance(metadata, Mapping) and metadata.get("position_adjustment"):
+        return False
+    if bool(intent.get("reduce_only")):
+        return False
+    order_type = str(intent.get("order_type") or "MARKET").upper()
+    return order_type in {"MARKET", "LIMIT"}
+
+
+def _fetch_trade_batches(
+    client: TradeHistoryClient,
+    intents: list[LocalSubmittedIntent],
+    *,
+    limit: int,
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Exception]]:
+    by_symbol: dict[str, list[LocalSubmittedIntent]] = {}
+    for intent in intents:
+        by_symbol.setdefault(intent.symbol, []).append(intent)
+    batches: dict[str, list[dict[str, Any]]] = {}
+    errors: dict[str, Exception] = {}
+    for symbol, symbol_intents in by_symbol.items():
+        start_time = min(_iso_to_epoch_ms(intent.occurred_at) for intent in symbol_intents)
+        try:
+            batches[symbol] = list(
+                client.user_trades(
+                    symbol,
+                    start_time=start_time,
+                    end_time=_capped_user_trades_end_time(start_time),
+                    limit=limit,
+                )
+            )
+        except Exception as exc:
+            errors[symbol] = exc
+    return batches, errors
+
+
+def _trades_for_intent(
+    intent: LocalSubmittedIntent,
+    trades: list[Mapping[str, Any]],
+    *,
+    used_trade_keys: set[tuple[str, str]],
+    known_entry_order_ids: set[str],
+) -> list[Mapping[str, Any]] | None:
+    available = [
+        trade
+        for trade in trades
+        if _trade_key(intent.symbol, trade) not in used_trade_keys
+        and int(trade.get("time") or 0) >= _iso_to_epoch_ms(intent.occurred_at)
+    ]
+    if intent.exchange_order_id is not None:
+        entries = [trade for trade in available if str(trade.get("orderId")) == str(intent.exchange_order_id)]
+        if not entries:
+            return []
+        return _round_trip_prefix(
+            intent,
+            available,
+            required_entry_order_id=intent.exchange_order_id,
+            known_entry_order_ids=known_entry_order_ids,
+        )
+    # No exchange order id means attribution cannot be made safely when the
+    # symbol has more than one possible entry-side order.
+    entry_order_ids = {
+        str(trade.get("orderId"))
+        for trade in available
+        if str(trade.get("side") or "").upper() == intent.side.upper()
+        and abs(_float(trade.get("realizedPnl"))) < 1e-12
+    }
+    if len(entry_order_ids) != 1:
+        return None if available else []
+    only_order_id = next(iter(entry_order_ids))
+    return _round_trip_prefix(
+        intent,
+        available,
+        required_entry_order_id=only_order_id,
+        known_entry_order_ids=known_entry_order_ids,
+    )
+
+
+def _round_trip_prefix(
+    intent: LocalSubmittedIntent,
+    trades: list[Mapping[str, Any]],
+    *,
+    required_entry_order_id: int | str,
+    known_entry_order_ids: set[str],
+) -> list[Mapping[str, Any]] | None:
+    ordered = sorted(trades, key=lambda item: int(item.get("time") or 0))
+    selected: list[Mapping[str, Any]] = []
+    net_quantity = 0.0
+    started = False
+    for trade in ordered:
+        if not started:
+            if str(trade.get("orderId")) != str(required_entry_order_id):
+                if (
+                    str(trade.get("side") or "").upper() == intent.side.upper()
+                    and str(trade.get("orderId")) in known_entry_order_ids
+                ):
+                    return None
+                continue
+            started = True
+        elif (
+            str(trade.get("side") or "").upper() == intent.side.upper()
+            and str(trade.get("orderId")) in known_entry_order_ids
+            and str(trade.get("orderId")) != str(required_entry_order_id)
+        ):
+            return None
+        quantity = _float(trade.get("qty"))
+        side = str(trade.get("side") or "").upper()
+        selected.append(trade)
+        net_quantity += quantity if side == "BUY" else -quantity
+        if len(selected) > 1 and abs(net_quantity) < 1e-12:
+            break
+    return selected
+
+
+def _known_entry_order_ids_by_symbol(
+    intents: list[LocalSubmittedIntent],
+) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
+    for intent in intents:
+        if intent.exchange_order_id is None:
+            continue
+        result.setdefault(intent.symbol, set()).add(str(intent.exchange_order_id))
+    return result
+
+
+def _persisted_trade_keys(
+    connection: sqlite3.Connection,
+    trade_batches: Mapping[str, list[Mapping[str, Any]]],
+) -> set[tuple[str, str]]:
+    ref_ids = sorted(
+        {
+            f"fill:{symbol.upper()}:{trade.get('id')}"
+            for symbol, trades in trade_batches.items()
+            for trade in trades
+        }
+    )
+    rows = []
+    for offset in range(0, len(ref_ids), 500):
+        batch = ref_ids[offset : offset + 500]
+        if not batch:
+            continue
+        placeholders = ",".join("?" for _ in batch)
+        rows.extend(
+            connection.execute(
+                f"SELECT symbol, ref_id FROM fills WHERE ref_id IN ({placeholders})",
+                batch,
+            ).fetchall()
+        )
+    keys: set[tuple[str, str]] = set()
+    for row in rows:
+        ref_id = str(row["ref_id"] or "")
+        trade_id = ref_id.rsplit(":", 1)[-1]
+        keys.add((str(row["symbol"] or "").upper(), trade_id))
+    return keys
+
+
+def _trade_keys(symbol: str, trades: list[Mapping[str, Any]]) -> set[tuple[str, str]]:
+    return {_trade_key(symbol, trade) for trade in trades}
+
+
+def _trade_key(symbol: str, trade: Mapping[str, Any]) -> tuple[str, str]:
+    return (str(symbol).upper(), str(trade.get("id")))
 
 
 def summarize_trade_outcome(

@@ -82,6 +82,67 @@ Current live micro-grid behavior is also documented in
 uses `RANGE` regime routing, and has corrected side selection that favors
 upper-edge shorts and lower-edge longs.
 
+Pending entries now consume the same portfolio slot, direction-notional, and
+margin budgets as filled positions. The available-balance reserve can also keep
+capital unavailable to the trend leg while still allowing the micro-grid leg:
+
+```bash
+BFA_MIN_AVAILABLE_BALANCE_RESERVE_USDT=0
+BFA_MIN_AVAILABLE_BALANCE_RESERVE_FRACTION=0
+BFA_MICRO_GRID_RESERVED_MARGIN_USDT=0
+BFA_MICRO_GRID_MAX_PENDING_ORDERS=0
+BFA_MICRO_GRID_MAX_PENDING_MARGIN_USDT=0
+BFA_TREND_MAX_PENDING_ORDERS=0
+```
+
+Zero preserves the legacy unlimited/disabled behavior. Set non-zero values only
+after checking the live wallet size, leverage, and existing manual-position
+margin pressure.
+
+## Pending Entry Lifecycle And Quality
+
+Deferred limits are registered in the indexed `pending_limit_entries` table.
+The watchdog reads only `status='pending'`, ordered by `expires_at`, with a SQL
+limit; it no longer scans and JSON-decodes the full order-intent and exchange-
+response history every ten seconds.
+
+- `NEW` before TTL remains pending.
+- `NEW` after TTL is canceled and resolved as `entry_order_expired_canceled`.
+- `PARTIALLY_FILLED` cancels the remainder before protecting executed quantity.
+- cancel or query failure leaves the row unresolved and blocks optimistic
+  cleanup.
+- filled entries are protected from the shared cycle position snapshot.
+
+When a fresh execution signal exists, an optional quality pass reuses the
+already-collected market context and the shared open-orders snapshot. It adds no
+per-order market API call. It marks an order for cancellation only when evidence
+is explicit: a fresh opposite-side signal, price beyond the original stop, a
+limit moving too far away while momentum continues away, or adverse micro-
+momentum and taker flow together.
+
+```bash
+BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED=false
+BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED=false
+BFA_PENDING_LIMIT_QUALITY_MAX_ITEMS=10
+BFA_PENDING_LIMIT_QUALITY_MIN_AGE_SECONDS=5
+BFA_PENDING_LIMIT_QUALITY_MAX_DISTANCE_PERCENT=0.35
+BFA_PENDING_LIMIT_QUALITY_MOMENTUM_PERCENT=0.08
+BFA_PENDING_LIMIT_QUALITY_TAKER_SELL_RATIO=0.85
+BFA_PENDING_LIMIT_QUALITY_TAKER_BUY_RATIO=1.18
+```
+
+Keep execute disabled for the first observation window. Missing context,
+partial fills, and ambiguous evidence always keep the order for the normal
+watchdog to reconcile.
+
+## Outcome Attribution
+
+Outcome reconciliation now fetches user trades once per symbol window, prefers
+the persisted exchange order ID, assigns every Binance trade ID to at most one
+intent, and excludes reduce-only/position-adjustment intents. Ambiguous layered
+entries remain `unreconciled` instead of guessing. This makes daily-loss and
+strategy-leg performance metrics conservative rather than double counted.
+
 ## Processed Live Cycle Statuses
 
 These statuses mean the live runner handled and recorded the exchange state for

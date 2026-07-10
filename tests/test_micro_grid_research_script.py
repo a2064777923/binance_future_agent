@@ -125,6 +125,36 @@ def tick_stream(symbol, pairs):
 
 
 class MicroGridResearchScriptTests(unittest.TestCase):
+    def test_wick_path_cannot_profit_before_entry_is_touched(self):
+        path = [
+            bar("TESTUSDT", 0, open_price=105, high=106, low=104, close=105),
+            bar("TESTUSDT", 1, open_price=105, high=111, low=104, close=110),
+        ]
+
+        net = research._wick_path_net_percent("long", 100, 95, 110, path, 0.1)
+
+        self.assertEqual(net, 0.0)
+
+    def test_wick_path_evaluates_target_only_after_entry_fill(self):
+        path = [
+            bar("TESTUSDT", 0, open_price=105, high=106, low=104, close=105),
+            bar("TESTUSDT", 1, open_price=101, high=102, low=99, close=100),
+            bar("TESTUSDT", 2, open_price=100, high=111, low=99, close=110),
+        ]
+
+        net = research._wick_path_net_percent("long", 100, 95, 110, path, 0.1)
+
+        self.assertAlmostEqual(net, 9.9)
+
+    def test_wick_path_same_bar_fill_and_stop_is_stop_first(self):
+        path = [
+            bar("TESTUSDT", 0, open_price=105, high=106, low=104, close=105),
+            bar("TESTUSDT", 1, open_price=101, high=111, low=94, close=100),
+        ]
+
+        net = research._wick_path_net_percent("long", 100, 95, 110, path, 0.1)
+
+        self.assertAlmostEqual(net, -5.1)
     def profile(self, **overrides):
         values = {
             "structure_lookback_seconds": 80,

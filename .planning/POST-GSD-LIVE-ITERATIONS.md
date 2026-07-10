@@ -229,6 +229,31 @@ The GitHub handoff now includes:
 These docs are newer than the GSD phase files. They are concise on purpose and
 should be read before starting implementation.
 
+### 11. Pending-Order Lifecycle, Risk, And Attribution Were Hardened
+
+The live audit on 2026-07-10 found that deferred `NEW` limit orders could remain
+open until their long strategy TTL, while the watchdog only observed them. It
+also found that pending orders were missing from risk state, daily realized PnL
+was not wired into live risk, and symbol/time-window outcome reconstruction
+could reuse the same exchange trades for more than one intent.
+
+The corrective implementation adds:
+
+- indexed `pending_limit_entries` state with expiry-ordered bounded reads;
+- TTL cancellation and partial-fill remainder cancellation before protection;
+- signal-time pending-order quality checks using shared market/exchange data;
+- pending slot, notional, direction, and initial-margin accounting;
+- independent available-balance and micro-grid margin reserves;
+- current-day outcome PnL in the live risk snapshot;
+- exchange-order-ID-first, trade-ID-unique outcome attribution;
+- a wick walk-forward fill prerequisite so unfilled paths cannot earn profit;
+- one shared live exchange snapshot for risk, watchdog, position review, and
+  signal-time quality checks.
+
+Quality execution and new reserve/cap values remain env controlled. A deploy
+must keep the kill switch in place until migration, watchdog, readiness,
+protection, and open-entry checks pass.
+
 ## Live Server Notes
 
 Known deployment shape:

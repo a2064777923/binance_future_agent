@@ -547,6 +547,216 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertFalse(risk.accepted)
         self.assertIn("portfolio_margin_cap_reached", risk.reason_codes)
 
+    def test_pending_entry_margin_is_included_in_portfolio_cap(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                pending_exposures=[
+                    {
+                        "symbol": "SOLUSDT",
+                        "direction": "SHORT",
+                        "notional_usdt": 20,
+                        "initial_margin_usdt": 5,
+                        "strategy_leg": "trend",
+                    }
+                ]
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MAX_PORTFOLIO_MARGIN_USDT="8",
+                BFA_MAX_PORTFOLIO_MARGIN_FRACTION="1",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("portfolio_margin_cap_reached", risk.reason_codes)
+
+    def test_pending_entry_consumes_open_position_slot(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                active_positions=1,
+                active_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}],
+                pending_exposures=[{"symbol": "SOLUSDT", "direction": "SHORT"}],
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("max_open_positions_reached", risk.reason_codes)
+
+    def test_pending_same_direction_notional_is_included_in_cap(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                pending_exposures=[
+                    {"symbol": "SOLUSDT", "direction": "LONG", "notional_usdt": 25}
+                ]
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT="40",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("same_direction_notional_cap_reached", risk.reason_codes)
+
+    def test_pending_entry_blocks_duplicate_symbol_direction(self):
+        validation = self.validation()
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                pending_exposures=[{"symbol": "BTCUSDT", "direction": "LONG"}]
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(BFA_MULTI_POSITION_ENABLED="true"),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("duplicate_symbol_direction_exposure", risk.reason_codes)
+
+    def test_trend_entry_preserves_micro_grid_reserved_margin(self):
+        validation = self.validation(reasons=["strategy_leg:trend", "regime_label:TREND"])
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                account_available_balance_usdt=12,
+                account_total_wallet_balance_usdt=100,
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MICRO_GRID_RESERVED_MARGIN_USDT="6",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("available_balance_reserve_breached", risk.reason_codes)
+
+    def test_micro_grid_entry_can_use_its_reserved_margin(self):
+        validation = self.validation(
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "entry_order_type:limit"]
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                account_available_balance_usdt=12,
+                account_total_wallet_balance_usdt=100,
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MICRO_GRID_RESERVED_MARGIN_USDT="6",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(risk.accepted)
+
+    def test_micro_grid_pending_order_cap_is_enforced(self):
+        validation = self.validation(
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "entry_order_type:limit"]
+        )
+        intent, _risk = intent_from_ai_decision(
+            symbol="ETHUSDT",
+            validation=validation,
+            risk_limits=self.limits(),
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+
+        risk = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=self.limits(),
+            risk_state=RiskState(
+                pending_exposures=[
+                    {"symbol": "SOLUSDT", "direction": "SHORT", "strategy_leg": "micro_grid"}
+                ]
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=self.config(
+                BFA_MULTI_POSITION_ENABLED="true",
+                BFA_MICRO_GRID_MAX_PENDING_ORDERS="1",
+            ),
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertFalse(risk.accepted)
+        self.assertIn("micro_grid_pending_order_cap_reached", risk.reason_codes)
+
     def test_manual_positions_do_not_consume_bot_portfolio_margin_cap(self):
         validation = self.validation()
         intent, _risk = intent_from_ai_decision(

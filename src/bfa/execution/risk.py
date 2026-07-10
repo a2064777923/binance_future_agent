@@ -113,33 +113,38 @@ def evaluate_risk(
         reasons.append("leverage_exceeds_cap")
     if risk_state.daily_loss_usdt >= risk_limits.max_daily_loss_usdt:
         reasons.append("daily_loss_cap_reached")
-    if not multi_position_enabled(config) and risk_state.active_positions >= 1:
+    occupied_slots = risk_state.total_bot_positions
+    if not multi_position_enabled(config) and occupied_slots >= 1:
         reasons.append("multi_position_disabled")
-    if risk_state.active_positions >= _effective_max_open_positions(intent, risk_limits, config):
+    if occupied_slots >= _effective_max_open_positions(intent, risk_limits, config):
         reasons.append("max_open_positions_reached")
     if _duplicate_exposure(intent, risk_state):
         reasons.append("duplicate_symbol_direction_exposure")
     if _same_symbol_opposite_exposure(intent, risk_state) and not _same_symbol_opposite_positions_enabled(config):
         reasons.append("same_symbol_opposite_exposure_blocked")
-    if _portfolio_margin_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_MARGIN_USDT"):
+    portfolio_margin_after_entry = _portfolio_margin_after_entry(intent, risk_state)
+    if portfolio_margin_after_entry > _float_config(config, "BFA_MAX_PORTFOLIO_MARGIN_USDT"):
         reasons.append("portfolio_margin_cap_reached")
     portfolio_margin_fraction_cap = _float_config(config, "BFA_ACCOUNT_CAPITAL_USDT") * _float_config(
         config,
         "BFA_MAX_PORTFOLIO_MARGIN_FRACTION",
     )
-    if _portfolio_margin_after_entry(intent, risk_state) > portfolio_margin_fraction_cap:
+    if portfolio_margin_after_entry > portfolio_margin_fraction_cap:
         reasons.append("portfolio_margin_fraction_reached")
     if (
         risk_state.account_available_balance_usdt is not None
         and intent.estimated_initial_margin_usdt > risk_state.account_available_balance_usdt
     ):
         reasons.append("account_available_balance_insufficient")
+    if _available_balance_reserve_breached(intent, risk_state, config):
+        reasons.append("available_balance_reserve_breached")
     if risk_state.manual_initial_margin_usdt > 0:
         warnings.append("manual_margin_pressure_included")
     if _portfolio_notional_after_entry(intent, risk_state) > _float_config(config, "BFA_MAX_PORTFOLIO_NOTIONAL_USDT"):
         reasons.append("portfolio_notional_cap_reached")
     if _same_direction_notional_after_entry(intent, risk_state) > _effective_same_direction_notional_cap(intent, config):
         reasons.append("same_direction_notional_cap_reached")
+    reasons.extend(_pending_leg_capacity_reasons(intent, risk_state, config))
     if risk_state.cooldown_until and now < risk_state.cooldown_until:
         reasons.append("cooldown_active")
 
@@ -229,7 +234,7 @@ def _route_metadata_from_reasons(reasons: list[str]) -> dict[str, str]:
 def _duplicate_exposure(intent: OrderIntent, risk_state: RiskState) -> bool:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
     intent_key = _stable_quote_equivalence_key(intent.symbol)
-    for exposure in risk_state.active_exposures:
+    for exposure in _bot_exposures(risk_state):
         symbol = str(exposure.get("symbol", "")).upper()
         direction = str(exposure.get("direction", "")).upper()
         if direction == intended_direction and _same_quote_equivalent_symbol(symbol, intent.symbol, intent_key=intent_key):
@@ -241,7 +246,7 @@ def _same_symbol_opposite_exposure(intent: OrderIntent, risk_state: RiskState) -
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
     opposite_direction = "SHORT" if intended_direction == "LONG" else "LONG"
     intent_key = _stable_quote_equivalence_key(intent.symbol)
-    for exposure in risk_state.active_exposures:
+    for exposure in _bot_exposures(risk_state):
         symbol = str(exposure.get("symbol", "")).upper()
         direction = str(exposure.get("direction", "")).upper()
         if direction == opposite_direction and _same_quote_equivalent_symbol(symbol, intent.symbol, intent_key=intent_key):
@@ -298,20 +303,90 @@ def _is_micro_grid_intent(intent: OrderIntent) -> bool:
 
 
 def _portfolio_margin_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
-    return risk_state.active_initial_margin_usdt + intent.estimated_initial_margin_usdt
+    return risk_state.committed_initial_margin_usdt + intent.estimated_initial_margin_usdt
 
 
 def _portfolio_notional_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
-    return risk_state.active_notional_usdt + intent.notional_usdt
+    return risk_state.active_notional_usdt + risk_state.pending_notional_usdt + intent.notional_usdt
 
 
 def _same_direction_notional_after_entry(intent: OrderIntent, risk_state: RiskState) -> float:
     intended_direction = "LONG" if intent.side.upper() == "BUY" else "SHORT"
     total = intent.notional_usdt
-    for exposure in risk_state.active_exposures:
+    for exposure in _bot_exposures(risk_state):
         if str(exposure.get("direction", "")).upper() == intended_direction:
             total += _float_or_zero(exposure.get("notional_usdt"))
     return total
+
+
+def _bot_exposures(risk_state: RiskState) -> tuple[dict, ...]:
+    return (*risk_state.active_exposures, *risk_state.pending_exposures)
+
+
+def _available_balance_reserve_breached(
+    intent: OrderIntent,
+    risk_state: RiskState,
+    config: AppConfig,
+) -> bool:
+    available = risk_state.account_available_balance_usdt
+    if available is None:
+        return False
+    reserve = required_available_balance_reserve_usdt(intent, risk_state, config)
+    return available - intent.estimated_initial_margin_usdt < reserve
+
+
+def required_available_balance_reserve_usdt(
+    intent: OrderIntent,
+    risk_state: RiskState,
+    config: AppConfig,
+) -> float:
+    absolute_reserve = max(_float_config(config, "BFA_MIN_AVAILABLE_BALANCE_RESERVE_USDT"), 0.0)
+    wallet = risk_state.account_total_wallet_balance_usdt
+    fractional_reserve = 0.0
+    if wallet is not None:
+        fractional_reserve = max(wallet, 0.0) * max(
+            _float_config(config, "BFA_MIN_AVAILABLE_BALANCE_RESERVE_FRACTION"),
+            0.0,
+        )
+    reserve = max(absolute_reserve, fractional_reserve)
+    if not _is_micro_grid_intent(intent):
+        reserve += max(_float_config(config, "BFA_MICRO_GRID_RESERVED_MARGIN_USDT"), 0.0)
+    return reserve
+
+
+def _pending_leg_capacity_reasons(
+    intent: OrderIntent,
+    risk_state: RiskState,
+    config: AppConfig,
+) -> list[str]:
+    reasons: list[str] = []
+    if _is_micro_grid_intent(intent):
+        max_orders = _int_config(config, "BFA_MICRO_GRID_MAX_PENDING_ORDERS")
+        micro_pending = [item for item in risk_state.pending_exposures if _exposure_is_micro_grid(item)]
+        if max_orders > 0 and len(micro_pending) >= max_orders:
+            reasons.append("micro_grid_pending_order_cap_reached")
+        margin_cap = _float_config(config, "BFA_MICRO_GRID_MAX_PENDING_MARGIN_USDT")
+        pending_margin = sum(_exposure_margin(item) for item in micro_pending)
+        if margin_cap > 0 and pending_margin + intent.estimated_initial_margin_usdt > margin_cap:
+            reasons.append("micro_grid_pending_margin_cap_reached")
+    else:
+        max_orders = _int_config(config, "BFA_TREND_MAX_PENDING_ORDERS")
+        trend_pending = sum(1 for item in risk_state.pending_exposures if not _exposure_is_micro_grid(item))
+        if max_orders > 0 and trend_pending >= max_orders:
+            reasons.append("trend_pending_order_cap_reached")
+    return reasons
+
+
+def _exposure_is_micro_grid(exposure: dict) -> bool:
+    return str(exposure.get("strategy_leg") or "").strip().lower() == "micro_grid"
+
+
+def _exposure_margin(exposure: dict) -> float:
+    explicit = _float_or_zero(exposure.get("initial_margin_usdt"))
+    if explicit > 0:
+        return explicit
+    leverage = _float_or_zero(exposure.get("leverage"))
+    return _float_or_zero(exposure.get("notional_usdt")) / leverage if leverage > 0 else 0.0
 
 
 def _float_config(config: AppConfig, key: str) -> float:
@@ -333,8 +408,11 @@ def _float_or_zero(value) -> float:
 
 
 def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
     deduped: list[str] = []
     for value in values:
-        if value not in deduped:
-            deduped.append(value)
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
     return deduped

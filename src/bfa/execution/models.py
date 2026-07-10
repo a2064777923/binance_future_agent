@@ -57,6 +57,7 @@ class OrderIntent:
 class RiskState:
     active_positions: int = 0
     active_exposures: list[dict[str, Any]] = field(default_factory=list)
+    pending_exposures: list[dict[str, Any]] = field(default_factory=list)
     manual_exposures: list[dict[str, Any]] = field(default_factory=list)
     account_available_balance_usdt: float | None = None
     account_total_wallet_balance_usdt: float | None = None
@@ -71,9 +72,14 @@ class RiskState:
         return {
             "active_positions": self.active_positions,
             "active_exposures": [dict(item) for item in self.active_exposures],
+            "pending_positions": self.pending_positions,
+            "pending_exposures": [dict(item) for item in self.pending_exposures],
             "manual_exposures": [dict(item) for item in self.manual_exposures],
             "active_notional_usdt": self.active_notional_usdt,
+            "pending_notional_usdt": self.pending_notional_usdt,
             "active_initial_margin_usdt": self.active_initial_margin_usdt,
+            "pending_initial_margin_usdt": self.pending_initial_margin_usdt,
+            "committed_initial_margin_usdt": self.committed_initial_margin_usdt,
             "manual_initial_margin_usdt": self.manual_initial_margin_usdt,
             "total_initial_margin_usdt": self.total_initial_margin_usdt,
             "account_available_balance_usdt": self.account_available_balance_usdt,
@@ -88,8 +94,28 @@ class RiskState:
         return sum(_float_or_zero(item.get("notional_usdt")) for item in self.active_exposures)
 
     @property
+    def pending_positions(self) -> int:
+        return len(self.pending_exposures)
+
+    @property
+    def total_bot_positions(self) -> int:
+        return self.active_positions + self.pending_positions
+
+    @property
+    def pending_notional_usdt(self) -> float:
+        return sum(_float_or_zero(item.get("notional_usdt")) for item in self.pending_exposures)
+
+    @property
     def active_initial_margin_usdt(self) -> float:
         return sum(_exposure_margin(item) for item in self.active_exposures)
+
+    @property
+    def pending_initial_margin_usdt(self) -> float:
+        return sum(_exposure_margin(item) for item in self.pending_exposures)
+
+    @property
+    def committed_initial_margin_usdt(self) -> float:
+        return self.active_initial_margin_usdt + self.pending_initial_margin_usdt
 
     @property
     def manual_initial_margin_usdt(self) -> float:
@@ -97,7 +123,7 @@ class RiskState:
 
     @property
     def total_initial_margin_usdt(self) -> float:
-        return self.active_initial_margin_usdt + self.manual_initial_margin_usdt
+        return self.committed_initial_margin_usdt + self.manual_initial_margin_usdt
 
 
 def _exposure_margin(item: dict[str, Any]) -> float:

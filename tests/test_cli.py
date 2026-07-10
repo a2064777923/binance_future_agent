@@ -1335,7 +1335,7 @@ class CliTests(unittest.TestCase):
                         "realizedPnl": "0",
                         "commission": "0.00748288",
                         "commissionAsset": "USDT",
-                        "time": 1781923762837,
+                        "time": 1781949605837,
                     },
                     {
                         "id": 11,
@@ -1348,7 +1348,7 @@ class CliTests(unittest.TestCase):
                         "realizedPnl": "0.12192",
                         "commission": "0.00754384",
                         "commissionAsset": "USDT",
-                        "time": 1781924000000,
+                        "time": 1781949840000,
                     },
                 ]
 
@@ -1610,7 +1610,7 @@ class CliTests(unittest.TestCase):
                         "realizedPnl": "0",
                         "commission": "0.002",
                         "commissionAsset": "USDT",
-                        "time": 1781923762837,
+                        "time": 1782018005837,
                     },
                     {
                         "id": 111,
@@ -1623,7 +1623,7 @@ class CliTests(unittest.TestCase):
                         "realizedPnl": "0.2",
                         "commission": "0.00208",
                         "commissionAsset": "USDT",
-                        "time": 1781924000000,
+                        "time": 1782018240000,
                     },
                 ]
 
@@ -1737,7 +1737,7 @@ class CliTests(unittest.TestCase):
                         "realizedPnl": "0",
                         "commission": "0.002",
                         "commissionAsset": "USDT",
-                        "time": 1781923762837,
+                        "time": 1782018005837,
                     },
                     {
                         "id": 211,
@@ -1750,7 +1750,7 @@ class CliTests(unittest.TestCase):
                         "realizedPnl": "0.2",
                         "commission": "0.00208",
                         "commissionAsset": "USDT",
-                        "time": 1781924000000,
+                        "time": 1782018240000,
                     },
                 ]
 

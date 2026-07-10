@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 SQLITE_CONNECT_TIMEOUT_SECONDS = SQLITE_BUSY_TIMEOUT_MS / 1000.0
 
@@ -66,6 +66,25 @@ def migrate(connection: sqlite3.Connection) -> None:
             ON events (symbol, occurred_at, id);
         CREATE INDEX IF NOT EXISTS idx_events_type_time
             ON events (event_type, occurred_at, id);
+
+        CREATE TABLE IF NOT EXISTS pending_limit_entries (
+            intent_event_id INTEGER PRIMARY KEY,
+            occurred_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            client_order_id TEXT NOT NULL UNIQUE,
+            strategy_leg TEXT,
+            status TEXT NOT NULL,
+            intent_json TEXT NOT NULL,
+            resolved_at TEXT,
+            resolution_status TEXT,
+            FOREIGN KEY(intent_event_id) REFERENCES events(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_pending_limit_entries_status_expiry
+            ON pending_limit_entries (status, expires_at, intent_event_id);
+        CREATE INDEX IF NOT EXISTS idx_pending_limit_entries_symbol_status
+            ON pending_limit_entries (symbol, status);
         """
     )
 
@@ -90,6 +109,8 @@ def migrate(connection: sqlite3.Connection) -> None:
         connection.execute(
             f"CREATE INDEX IF NOT EXISTS idx_{table}_symbol_time ON {table} (symbol, occurred_at, id)"
         )
+
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_fills_ref_id ON fills (ref_id)")
 
     connection.execute(
         "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",

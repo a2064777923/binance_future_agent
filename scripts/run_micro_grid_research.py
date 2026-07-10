@@ -4442,23 +4442,32 @@ def _wick_path_net_percent(
 ) -> float:
     """Simulate a single long/short edge-reversion outcome on a bar path."""
     if not path:
-        return -round_trip_cost_percent
+        return 0.0
+    filled = False
     for bar in path[1:]:
         high = getattr(bar, "high", None)
         low = getattr(bar, "low", None)
         if high is None or low is None:
             continue
         if side == "long":
+            if not filled:
+                if low > entry_price:
+                    continue
+                filled = True
             if low <= stop_price:
                 return -abs((entry_price - stop_price) / entry_price) * 100.0 - round_trip_cost_percent
             if high >= target_price:
                 return abs((target_price - entry_price) / entry_price) * 100.0 - round_trip_cost_percent
         else:
+            if not filled:
+                if high < entry_price:
+                    continue
+                filled = True
             if high >= stop_price:
                 return -abs((stop_price - entry_price) / entry_price) * 100.0 - round_trip_cost_percent
             if low <= target_price:
                 return abs((entry_price - target_price) / entry_price) * 100.0 - round_trip_cost_percent
-    return -round_trip_cost_percent
+    return -round_trip_cost_percent if filled else 0.0
 
 
 def quantile_wick_side_model(

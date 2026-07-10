@@ -16,6 +16,7 @@ from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import OrderIntent, RiskDecision
 from bfa.execution.store import persist_exchange_response, persist_order_intent
 from bfa.market.binance_rest import BinanceFuturesRestClient
+from bfa.ops.live_status import LiveStatusReport
 from bfa.ops.position_review import (
     PositionReviewItem,
     PositionReviewReport,
@@ -246,6 +247,7 @@ def build_position_adjustment_plan_report(
     exchange_info: Mapping[str, Any] | None = None,
     require_filters: bool = True,
     ignore_normal_open_orders: bool = False,
+    live_status_report: LiveStatusReport | None = None,
 ) -> PositionAdjustmentPlanReport:
     if not _truthy(config.get("BFA_POSITION_ADJUSTMENT_ENABLED", "true")):
         return PositionAdjustmentPlanReport(
@@ -259,6 +261,7 @@ def build_position_adjustment_plan_report(
         check_binance=check_binance,
         now=now,
         signed_client=signed_client,
+        live_status_report=live_status_report,
     )
     return position_adjustment_plan_from_review(
         review,

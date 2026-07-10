@@ -2,7 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from bfa.agent import (
@@ -18,7 +18,8 @@ from bfa.agent import (
 from bfa.ai.client import OpenAIAPIError, OpenAIResponse
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
-from bfa.execution.models import RiskState
+from bfa.execution.models import OrderIntent, RiskDecision, RiskState
+from bfa.execution.store import persist_order_intent
 from bfa.market.models import MarketDataResponse, NormalizedMarketSnapshot
 from bfa.narrative.models import NormalizedNarrativeRecord
 from bfa.strategy.candidates import CandidateSignal
@@ -1471,26 +1472,28 @@ class AgentRunnerTests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             try:
                 store = EventStore(connection)
-                store.insert_artifact(
-                    "order_intents",
-                    occurred_at="2026-06-20T09:00:00Z",
-                    source="execution.live",
-                    symbol="BTCUSDT",
-                    ref_id="order_intent:BTCUSDT:2026-06-20T09:00:00Z",
-                    payload={
-                        "status": "entry_order_pending",
-                        "intent": {
-                            "symbol": "BTCUSDT",
-                            "side": "BUY",
-                            "quantity": 0.2,
-                            "entry_price": 100,
-                            "stop_price": 96,
-                            "target_price": 108,
-                            "leverage": 10,
-                            "metadata": {"hold_time_minutes": 100000},
+                persist_order_intent(
+                    store,
+                    intent=OrderIntent(
+                        symbol="BTCUSDT",
+                        side="BUY",
+                        quantity=0.2,
+                        notional_usdt=20,
+                        entry_price=100,
+                        stop_price=96,
+                        target_price=108,
+                        leverage=10,
+                        mode="live",
+                        decided_at="2026-06-20T09:00:00Z",
+                        order_type="LIMIT",
+                        limit_wait_seconds=1800,
+                        metadata={
+                            "hold_time_minutes": 100000,
+                            "client_order_id": "bfa-btc-pending-test",
                         },
-                    },
-                    event_type="order_intent",
+                    ),
+                    status="entry_order_pending",
+                    risk=RiskDecision(True, ["risk_accepted"]),
                 )
             finally:
                 connection.close()
@@ -1618,6 +1621,151 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(result.selected_symbol, "BTCUSDT")
         self.assertGreaterEqual(result.market_snapshot_count, 1)
         self.assertEqual(ai_client.calls, 1)
+
+    def test_live_signal_quality_check_can_release_stale_pending_capacity(self):
+        class QualitySignedClient(FakeSignedClient):
+            def position_risk(self):
+                self.calls.append(("position_risk",))
+                return list(self.positions)
+
+            def query_order(self, **kwargs):
+                self.calls.append(("query_order", kwargs))
+                return {"status": "NEW", "executedQty": "0", "price": "90"}
+
+            def cancel_order(self, **kwargs):
+                self.calls.append(("cancel_order", kwargs))
+                return {"status": "CANCELED", **kwargs}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            decided_at = (datetime.now(tz=UTC) - timedelta(seconds=60)).isoformat().replace("+00:00", "Z")
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            store = EventStore(connection)
+            persist_order_intent(
+                store,
+                intent=OrderIntent(
+                    symbol="BTCUSDT",
+                    side="BUY",
+                    quantity=0.2,
+                    notional_usdt=18,
+                    entry_price=90,
+                    stop_price=85,
+                    target_price=100,
+                    leverage=10,
+                    mode="live",
+                    decided_at=decided_at,
+                    order_type="LIMIT",
+                    limit_wait_seconds=1800,
+                    metadata={"client_order_id": "bfa-btc-quality-live", "strategy_leg": "trend"},
+                ),
+                status="entry_order_pending",
+                risk=RiskDecision(True, ["risk_accepted"]),
+            )
+            connection.close()
+            signed_client = QualitySignedClient(
+                open_orders=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "clientOrderId": "bfa-btc-quality-live",
+                        "status": "NEW",
+                        "type": "LIMIT",
+                        "side": "BUY",
+                        "origQty": "0.2",
+                        "executedQty": "0",
+                        "price": "90",
+                    }
+                ]
+            )
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MAX_OPEN_POSITIONS": "1",
+                    "BFA_MULTI_POSITION_ENABLED": "true",
+                    "BFA_LIVE_REQUIRE_NARRATIVE_EVIDENCE": "false",
+                    "BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED": "true",
+                    "BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED": "true",
+                    "BFA_PENDING_LIMIT_QUALITY_MAX_DISTANCE_PERCENT": "0.1",
+                    "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "500",
+                    "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "400",
+                    "BFA_KILL_SWITCH_FILE": str(root / "KILL_SWITCH"),
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=MultiKlineMomentumCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+                signed_client=signed_client,
+            )
+
+        self.assertNotEqual(result.status, "entry_capacity_blocked")
+        self.assertEqual(result.source_health["pending_order_quality"]["canceled_count"], 1)
+        self.assertEqual(sum(call[0] == "cancel_order" for call in signed_client.calls), 1)
+        self.assertEqual(sum(call[0] == "position_risk" for call in signed_client.calls), 1)
+        self.assertEqual(sum(call[0] == "open_orders" for call in signed_client.calls), 1)
+        self.assertEqual(sum(call[0] == "open_algo_orders" for call in signed_client.calls), 1)
+        self.assertEqual(sum(call[0] == "account" for call in signed_client.calls), 1)
+
+    def test_live_daily_realized_loss_from_outcomes_blocks_new_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            occurred_at = datetime.now(tz=UTC).isoformat().replace("+00:00", "Z")
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            store = EventStore(connection)
+            store.insert_artifact(
+                "outcomes",
+                occurred_at=occurred_at,
+                source="binance_usdm",
+                symbol="ETHUSDT",
+                ref_id="outcome:daily-loss-test:closed",
+                payload={"status": "closed", "net_realized_pnl_usdt": -3.5},
+                event_type="outcome",
+            )
+            connection.close()
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_MAX_DAILY_LOSS_USDT": "3",
+                    "BFA_MULTI_POSITION_ENABLED": "true",
+                    "BFA_KILL_SWITCH_FILE": str(root / "KILL_SWITCH"),
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=FakeCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+                signed_client=FakeSignedClient(),
+            )
+
+        self.assertEqual(result.status, "rejected")
+        self.assertIn("daily_loss_cap_reached", result.risk_reasons)
 
     def test_live_run_once_ignores_manual_position_for_entry_capacity(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -7,6 +7,7 @@ from typing import Any
 
 from bfa.config import AppConfig
 from bfa.execution.binance_client import BinanceFuturesSignedClient
+from bfa.ops.live_status import LiveStatusReport
 from bfa.ops.position_hold_check import (
     PositionHoldCheckReport,
     PositionHoldItem,
@@ -97,6 +98,7 @@ def build_position_review_report(
     check_binance: bool = True,
     now: str | None = None,
     signed_client: BinanceFuturesSignedClient | None = None,
+    live_status_report: LiveStatusReport | None = None,
 ) -> PositionReviewReport:
     hold_check = build_position_hold_check_report(
         config,
@@ -104,6 +106,7 @@ def build_position_review_report(
         check_binance=check_binance,
         now=now,
         signed_client=signed_client,
+        live_status_report=live_status_report,
     )
     return position_review_from_hold_check(
         hold_check,

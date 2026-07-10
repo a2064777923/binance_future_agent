@@ -655,6 +655,56 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertIn("insufficient_available_balance", result.risk.reason_codes)
         self.assertEqual(fake_client.calls, [("account",)])
 
+    def test_live_reuses_risk_snapshot_balance_without_duplicate_account_request(self):
+        fake_client = FakeSignedClient(available_balance="100")
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_USE_TESTNET="false",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(
+                account_available_balance_usdt=100,
+                account_total_wallet_balance_usdt=100,
+            ),
+            filters=self.filters(),
+        )
+
+        self.assertTrue(result.submitted)
+        self.assertEqual(sum(call[0] == "account" for call in fake_client.calls), 0)
+
+    def test_live_fallback_balance_check_preserves_micro_grid_reserve(self):
+        fake_client = FakeSignedClient(available_balance="100")
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+                BFA_MICRO_GRID_RESERVED_MARGIN_USDT="95",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(reasons=["strategy_leg:trend", "regime_label:TREND"]),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertFalse(result.submitted)
+        self.assertIn("available_balance_reserve_breached", result.risk.reason_codes)
+        self.assertEqual(fake_client.calls, [("account",)])
+
     def test_live_account_balance_error_rejects_before_exchange_order_calls(self):
         fake_client = AccountFailingSignedClient()
         engine = ExecutionEngine(
