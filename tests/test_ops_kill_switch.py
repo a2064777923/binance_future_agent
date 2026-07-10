@@ -19,15 +19,15 @@ class FakeClient:
 
 
 class KillSwitchClearanceTests(unittest.TestCase):
-    def config(self, path: Path):
-        return load_config(
-            {
-                "BFA_MODE": "live",
-                "BFA_KILL_SWITCH_FILE": str(path),
-                "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
-                "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
-            }
-        )
+    def config(self, path: Path, **overrides):
+        env = {
+            "BFA_MODE": "live",
+            "BFA_KILL_SWITCH_FILE": str(path),
+            "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+            "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+        }
+        env.update(overrides)
+        return load_config(env)
 
     def test_execute_archives_kill_switch_when_all_positions_protected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,6 +89,29 @@ class KillSwitchClearanceTests(unittest.TestCase):
             self.assertFalse(report.executed)
             self.assertTrue(path.exists())
             self.assertIn("unprotected_open_positions", report.reason_codes)
+
+    def test_operator_confirmed_manual_positions_do_not_block_clearance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "KILL_SWITCH"
+            path.write_text("operator pause\n", encoding="utf-8")
+            client = FakeClient(
+                positions=[{"symbol": "BTCUSDT", "positionAmt": "0.2", "positionSide": "LONG"}],
+                algo_orders=[],
+            )
+
+            report = build_kill_switch_clearance_report(
+                self.config(path, BFA_MANUAL_POSITION_SYMBOLS="BTCUSDT"),
+                signed_client=client,
+                execute=True,
+                now_epoch=1782240000,
+            )
+
+            self.assertTrue(report.eligible)
+            self.assertTrue(report.executed)
+            self.assertFalse(path.exists())
+            self.assertEqual(report.position_checks, [])
+            self.assertEqual(report.manual_position_symbols, ["BTCUSDT"])
+            self.assertIn("manual_positions_excluded", report.reason_codes)
 
 
 if __name__ == "__main__":

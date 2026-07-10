@@ -120,6 +120,9 @@ active exchange position with no matching submitted intent, the pending-limit
 watchdog cannot help because it only reconciles unresolved pending entry
 intents. Classify the symbol as manual only after operator confirmation;
 otherwise handle protection or closure through the explicit confirmation flow.
+Once confirmed and listed in `BFA_MANUAL_POSITION_SYMBOLS`, the symbol is also
+excluded from kill-switch protection clearance and is reported separately as a
+manual position.
 
 ## Current Strategy Shape
 

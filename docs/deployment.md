@@ -132,6 +132,13 @@ orders:
 touch /opt/binance-futures-agent/runtime/KILL_SWITCH
 ```
 
+`ops kill-switch-clearance` checks protection only for non-manual positions.
+An active symbol is excluded only when the operator has explicitly added it to
+`BFA_MANUAL_POSITION_SYMBOLS`; excluded active symbols are returned in the
+report as `manual_position_symbols`. This allows a clean agent restart beside
+operator-owned positions without authorizing the agent, watchdog, or sentinel
+to manage them.
+
 ## Health Checks
 
 Dry-run local server check:

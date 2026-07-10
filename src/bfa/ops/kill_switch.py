@@ -52,6 +52,7 @@ class KillSwitchClearanceReport:
     executed: bool
     reason_codes: list[str] = field(default_factory=list)
     position_checks: list[PositionProtectionCheck] = field(default_factory=list)
+    manual_position_symbols: list[str] = field(default_factory=list)
     archived_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,6 +64,7 @@ class KillSwitchClearanceReport:
             "executed": self.executed,
             "reason_codes": list(self.reason_codes),
             "position_checks": [check.to_dict() for check in self.position_checks],
+            "manual_position_symbols": list(self.manual_position_symbols),
             "archived_path": self.archived_path,
         }
 
@@ -85,8 +87,13 @@ def build_kill_switch_clearance_report(
         api_key=config.get("BINANCE_API_KEY"),
         api_secret=config.get("BINANCE_API_SECRET"),
     )
-    position_checks = _position_protection_checks(client)
+    position_checks, manual_position_symbols = _position_protection_checks(
+        client,
+        excluded_symbols=set(config.get_list("BFA_MANUAL_POSITION_SYMBOLS")),
+    )
     unprotected = [check for check in position_checks if not check.protected]
+    if manual_position_symbols:
+        reasons.append("manual_positions_excluded")
     if unprotected:
         reasons.append("unprotected_open_positions")
     if active and not unprotected:
@@ -111,12 +118,30 @@ def build_kill_switch_clearance_report(
         executed=executed,
         reason_codes=_dedupe(reasons),
         position_checks=position_checks,
+        manual_position_symbols=manual_position_symbols,
         archived_path=archived_path,
     )
 
 
-def _position_protection_checks(client: KillSwitchSignedClient) -> list[PositionProtectionCheck]:
+def _position_protection_checks(
+    client: KillSwitchSignedClient,
+    *,
+    excluded_symbols: set[str] | None = None,
+) -> tuple[list[PositionProtectionCheck], list[str]]:
     positions = [row for row in client.position_risk() if _float(row.get("positionAmt")) != 0.0]
+    excluded = {str(symbol).upper() for symbol in (excluded_symbols or set()) if str(symbol).strip()}
+    manual_position_symbols = sorted(
+        {
+            str(position.get("symbol") or "").upper()
+            for position in positions
+            if str(position.get("symbol") or "").upper() in excluded
+        }
+    )
+    positions = [
+        position
+        for position in positions
+        if str(position.get("symbol") or "").upper() not in excluded
+    ]
     algo_orders = client.open_algo_orders()
     checks: list[PositionProtectionCheck] = []
     for position in positions:
@@ -144,7 +169,7 @@ def _position_protection_checks(client: KillSwitchSignedClient) -> list[Position
                 matching_algo_order_count=len(matching),
             )
         )
-    return checks
+    return checks, manual_position_symbols
 
 
 def _position_side(position: dict[str, Any], amount: float) -> str:
