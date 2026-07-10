@@ -140,6 +140,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_ENABLED"), "true")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_MIN_TOTAL_OUTCOMES"), "30")
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_MODE"), "block")
+        self.assertEqual(config.get("BFA_MICRO_GRID_MAX_PENDING_ORDERS"), "3")
+        self.assertEqual(config.get("BFA_TREND_MAX_PENDING_ORDERS"), "8")
 
     def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))

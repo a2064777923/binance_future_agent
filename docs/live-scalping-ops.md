@@ -87,17 +87,20 @@ margin budgets as filled positions. The available-balance reserve can also keep
 capital unavailable to the trend leg while still allowing the micro-grid leg:
 
 ```bash
-BFA_MIN_AVAILABLE_BALANCE_RESERVE_USDT=0
-BFA_MIN_AVAILABLE_BALANCE_RESERVE_FRACTION=0
-BFA_MICRO_GRID_RESERVED_MARGIN_USDT=0
-BFA_MICRO_GRID_MAX_PENDING_ORDERS=0
-BFA_MICRO_GRID_MAX_PENDING_MARGIN_USDT=0
-BFA_TREND_MAX_PENDING_ORDERS=0
+BFA_MIN_AVAILABLE_BALANCE_RESERVE_USDT=10
+BFA_MIN_AVAILABLE_BALANCE_RESERVE_FRACTION=0.05
+BFA_MICRO_GRID_RESERVED_MARGIN_USDT=20
+BFA_MICRO_GRID_MAX_PENDING_ORDERS=3
+BFA_MICRO_GRID_MAX_PENDING_MARGIN_USDT=40
+BFA_TREND_MAX_PENDING_ORDERS=8
 ```
 
-Zero preserves the legacy unlimited/disabled behavior. Set non-zero values only
-after checking the live wallet size, leverage, and existing manual-position
-margin pressure.
+These are the reviewed live values as of 2026-07-10. The order caps are maximum
+parallel pending counts, not reserved capacity: portfolio notional, same-side
+notional, available balance, open-position slots, and margin checks can still
+admit fewer orders. The 40 USDT micro-grid pending-margin cap also applies
+across its three pending slots. Setting an order cap to zero disables that cap
+and is not recommended for the live profile.
 
 ## Pending Entry Lifecycle And Quality
 
@@ -121,8 +124,8 @@ limit moving too far away while momentum continues away, or adverse micro-
 momentum and taker flow together.
 
 ```bash
-BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED=false
-BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED=false
+BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED=true
+BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED=true
 BFA_PENDING_LIMIT_QUALITY_MAX_ITEMS=10
 BFA_PENDING_LIMIT_QUALITY_MIN_AGE_SECONDS=5
 BFA_PENDING_LIMIT_QUALITY_MAX_DISTANCE_PERCENT=0.35
@@ -131,9 +134,10 @@ BFA_PENDING_LIMIT_QUALITY_TAKER_SELL_RATIO=0.85
 BFA_PENDING_LIMIT_QUALITY_TAKER_BUY_RATIO=1.18
 ```
 
-Keep execute disabled for the first observation window. Missing context,
-partial fills, and ambiguous evidence always keep the order for the normal
-watchdog to reconcile.
+The reviewed live profile enables both flags after kill-switch deployment
+validation. A new environment should begin observe-only until cancellation
+reasons are reviewed. Missing context, partial fills, and ambiguous evidence
+always keep the order for the normal watchdog to reconcile.
 
 ## Outcome Attribution
 

@@ -757,6 +757,64 @@ class ExecutionRiskTests(unittest.TestCase):
         self.assertFalse(risk.accepted)
         self.assertIn("micro_grid_pending_order_cap_reached", risk.reason_codes)
 
+    def test_default_trend_pending_cap_allows_eight_and_blocks_ninth(self):
+        limits = RiskLimits(
+            account_capital_usdt=100,
+            max_leverage=3,
+            max_position_notional_usdt=20,
+            max_risk_per_trade_usdt=1,
+            max_daily_loss_usdt=3,
+            max_open_positions=20,
+        )
+        validation = self.validation(reasons=["strategy_leg:trend", "entry_order_type:limit"])
+        intent, _risk = intent_from_ai_decision(
+            symbol="BTCUSDT",
+            validation=validation,
+            risk_limits=limits,
+            mode=RuntimeMode.DRY_RUN,
+            decided_at="2026-06-20T10:00:00Z",
+        )
+        config = self.config(
+            BFA_MULTI_POSITION_ENABLED="true",
+            BFA_MAX_PORTFOLIO_MARGIN_USDT="1000",
+            BFA_MAX_PORTFOLIO_MARGIN_FRACTION="10",
+            BFA_MAX_PORTFOLIO_NOTIONAL_USDT="1000",
+            BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT="1000",
+        )
+
+        allowed = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=limits,
+            risk_state=RiskState(
+                pending_exposures=[
+                    {"symbol": f"ALT{index}USDT", "strategy_leg": "trend"}
+                    for index in range(7)
+                ]
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=config,
+            now="2026-06-20T10:00:00Z",
+        )
+        blocked = evaluate_risk(
+            intent=intent,
+            validation=validation,
+            risk_limits=limits,
+            risk_state=RiskState(
+                pending_exposures=[
+                    {"symbol": f"ALT{index}USDT", "strategy_leg": "trend"}
+                    for index in range(8)
+                ]
+            ),
+            mode=RuntimeMode.DRY_RUN,
+            config=config,
+            now="2026-06-20T10:00:00Z",
+        )
+
+        self.assertTrue(allowed.accepted)
+        self.assertFalse(blocked.accepted)
+        self.assertIn("trend_pending_order_cap_reached", blocked.reason_codes)
+
     def test_manual_positions_do_not_consume_bot_portfolio_margin_cap(self):
         validation = self.validation()
         intent, _risk = intent_from_ai_decision(

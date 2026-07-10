@@ -254,6 +254,12 @@ Quality execution and new reserve/cap values remain env controlled. A deploy
 must keep the kill switch in place until migration, watchdog, readiness,
 protection, and open-entry checks pass.
 
+The reviewed server profile deployed on 2026-07-10 enables signal-time quality
+checking/cancellation and uses `BFA_MICRO_GRID_MAX_PENDING_ORDERS=3` plus
+`BFA_TREND_MAX_PENDING_ORDERS=8`. These are leg-specific upper bounds only;
+portfolio, direction, balance, position-slot, and margin guards remain in
+force. Micro-grid pending initial margin is additionally capped at 40 USDT.
+
 ## Live Server Notes
 
 Known deployment shape:

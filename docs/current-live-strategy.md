@@ -30,6 +30,25 @@ Current fix:
 - this preserves the trend 30-minute wait contract without letting it block
   micro-grid or the next live scan.
 
+## 2026-07-10 Pending Capacity And Quality Controls
+
+The pending-order lifecycle now uses an indexed state table, cancels expired
+entries, protects partial fills after canceling their remainder, and performs a
+bounded signal-time quality check without adding per-order market API calls.
+The reviewed live pending limits are:
+
+- `BFA_TREND_MAX_PENDING_ORDERS=8`;
+- `BFA_MICRO_GRID_MAX_PENDING_ORDERS=3`;
+- `BFA_MICRO_GRID_MAX_PENDING_MARGIN_USDT=40`.
+
+Eight and three are maximum parallel pending counts, not guaranteed capacity.
+All ordinary portfolio, same-direction, available-balance, position-slot, and
+margin checks still apply. The live profile also reserves 20 USDT of margin for
+micro-grid entries and keeps 10 USDT or 5% of wallet balance available,
+whichever is larger. Quality checking and quality cancellation are enabled on
+the reviewed server profile; ambiguous evidence remains fail-closed and keeps
+the order for watchdog reconciliation.
+
 On the same reset, existing account positions were classified as manual by
 symbol in `BFA_MANUAL_POSITION_SYMBOLS`, including `SKHYNIXUSDT`. Sentinel
 dry-run evidence showed every current position as `manual_position_ignored`
