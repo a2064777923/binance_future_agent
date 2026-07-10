@@ -185,6 +185,14 @@ def run_agent_once(
         )
 
     mode = RuntimeMode(config.get("BFA_MODE"))
+    if mode is RuntimeMode.LIVE and _kill_switch_active(config):
+        return AgentRunResult(
+            status="rejected",
+            mode=mode.value,
+            started_at=started_at,
+            risk_reasons=["kill_switch_active"],
+            source_health=_pre_collection_source_health(config, reason="kill_switch_active"),
+        )
     backoff = _openai_backoff(config)
     if backoff.active and not quant_fallback_enabled:
         return AgentRunResult(
@@ -940,6 +948,16 @@ def _pre_collection_source_health(config: AppConfig, *, reason: str) -> dict[str
         },
         "configured_narrative_sources": _configured_narrative_sources(config),
     }
+
+
+def _kill_switch_active(config: AppConfig) -> bool:
+    path = config.get("BFA_KILL_SWITCH_FILE").strip()
+    if not path:
+        return True
+    try:
+        return Path(path).exists()
+    except OSError:
+        return True
 
 
 def _live_source_health_base(

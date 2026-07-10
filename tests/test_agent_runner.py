@@ -699,6 +699,37 @@ class PassThenTradeAiClient(FakeAiClient):
 
 
 class AgentRunnerTests(unittest.TestCase):
+    def test_live_run_once_stops_before_exchange_reads_when_kill_switch_is_active(self):
+        class ExplodingSignedClient:
+            def __getattr__(self, name):
+                raise AssertionError(f"exchange access before kill-switch gate: {name}")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kill_switch = root / "runtime" / "KILL_SWITCH"
+            kill_switch.parent.mkdir(parents=True)
+            kill_switch.write_text("stop", encoding="utf-8")
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_KILL_SWITCH_FILE": str(kill_switch),
+                    "BFA_DB_PATH": str(root / "agent.sqlite"),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(config=config, signed_client=ExplodingSignedClient())
+
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.submitted)
+        self.assertEqual(result.risk_reasons, ["kill_switch_active"])
+
     def test_run_once_collects_decides_and_executes_dry_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
