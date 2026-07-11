@@ -60,6 +60,8 @@ class DbMaintenanceReport:
     deleted: dict[str, int]
     batch_size: int
     max_delete_rows: int
+    high_frequency_batch_size: int
+    high_frequency_max_delete_rows: int
     raw_feed: RawFeedMaintenanceReport | None = None
     reasons: list[str] = field(default_factory=list)
 
@@ -80,6 +82,8 @@ class DbMaintenanceReport:
             "deleted": dict(self.deleted),
             "batch_size": self.batch_size,
             "max_delete_rows": self.max_delete_rows,
+            "high_frequency_batch_size": self.high_frequency_batch_size,
+            "high_frequency_max_delete_rows": self.high_frequency_max_delete_rows,
             "raw_feed": self.raw_feed.to_dict() if self.raw_feed else None,
             "reasons": list(self.reasons),
         }
@@ -191,6 +195,16 @@ def build_db_maintenance_report(
     )
     if resolved_max_delete_rows <= 0:
         raise ValueError("max_delete_rows must be positive")
+    high_frequency_batch_size = int(
+        float(config.get("BFA_DB_HIGH_FREQUENCY_RETENTION_BATCH_SIZE", "50"))
+    )
+    high_frequency_max_delete_rows = int(
+        float(config.get("BFA_DB_HIGH_FREQUENCY_RETENTION_MAX_DELETE_ROWS", "100"))
+    )
+    if high_frequency_batch_size <= 0:
+        raise ValueError("BFA_DB_HIGH_FREQUENCY_RETENTION_BATCH_SIZE must be positive")
+    if high_frequency_max_delete_rows <= 0:
+        raise ValueError("BFA_DB_HIGH_FREQUENCY_RETENTION_MAX_DELETE_ROWS must be positive")
     parsed_now = _parse_now(now)
     cutoff = parsed_now - timedelta(hours=retention)
     cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -236,18 +250,23 @@ def build_db_maintenance_report(
                 max_delete_rows=resolved_max_delete_rows,
             )
             remaining = max(resolved_max_delete_rows - deleted["market_snapshots"], 0)
+            high_frequency_budget = min(high_frequency_max_delete_rows, remaining)
+            decision_budget = (high_frequency_budget + 1) // 2
             decision_deleted = _delete_old_decision_snapshots(
                 connection,
                 decision_cutoff_iso,
-                batch_size=resolved_batch_size,
-                max_delete_rows=remaining,
+                batch_size=min(resolved_batch_size, high_frequency_batch_size),
+                max_delete_rows=decision_budget,
             )
-            remaining = max(remaining - decision_deleted["decision_snapshots"], 0)
+            sentinel_budget = max(
+                high_frequency_budget - decision_deleted["decision_snapshots"],
+                0,
+            )
             sentinel_deleted = _delete_old_sentinel_events(
                 connection,
                 sentinel_cutoff_iso,
-                batch_size=resolved_batch_size,
-                max_delete_rows=remaining,
+                batch_size=min(resolved_batch_size, high_frequency_batch_size),
+                max_delete_rows=sentinel_budget,
             )
             deleted = {
                 "market_snapshots": deleted["market_snapshots"],
@@ -303,6 +322,8 @@ def build_db_maintenance_report(
         deleted=deleted,
         batch_size=resolved_batch_size,
         max_delete_rows=resolved_max_delete_rows,
+        high_frequency_batch_size=high_frequency_batch_size,
+        high_frequency_max_delete_rows=high_frequency_max_delete_rows,
         raw_feed=raw_feed_report,
         reasons=reasons,
     )

@@ -310,6 +310,56 @@ class DbMaintenanceTests(unittest.TestCase):
         self.assertEqual(sentinel_count, 1)
         self.assertEqual(latest_count, 1)
 
+    def test_high_frequency_retention_has_separate_small_fair_delete_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                store = EventStore(connection)
+                for index in range(12):
+                    store.insert_artifact(
+                        "decision_snapshots",
+                        occurred_at="2026-06-20T00:00:00Z",
+                        ref_id=f"decision:{index}",
+                        event_type="decision_snapshot",
+                        payload={"index": index, "padding": "x" * 5000},
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO events (event_type, occurred_at, ref_id, payload_json)
+                        VALUES ('position_sentinel', '2026-06-20T00:00:00Z', ?, ?)
+                        """,
+                        (f"sentinel:{index}", '{"padding":"' + ("x" * 5000) + '"}'),
+                    )
+                connection.commit()
+            finally:
+                connection.close()
+
+            applied = build_db_maintenance_report(
+                load_config(
+                    {
+                        "BFA_DB_PATH": str(db_path),
+                        "BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS": "6",
+                        "BFA_DB_SENTINEL_EVENT_RETENTION_HOURS": "6",
+                        "BFA_DB_HIGH_FREQUENCY_RETENTION_BATCH_SIZE": "2",
+                        "BFA_DB_HIGH_FREQUENCY_RETENTION_MAX_DELETE_ROWS": "6",
+                    }
+                ),
+                retention_hours=6,
+                now="2026-06-23T12:00:00Z",
+                execute=True,
+                max_delete_rows=1000,
+            )
+
+        high_frequency_deleted = (
+            applied.deleted["decision_snapshots"]
+            + applied.deleted["position_sentinel_events"]
+        )
+        self.assertLessEqual(high_frequency_deleted, 6)
+        self.assertGreater(applied.deleted["decision_snapshots"], 0)
+        self.assertGreater(applied.deleted["position_sentinel_events"], 0)
+
     def test_vacuum_is_noop_in_preview_and_runs_with_execute(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "agent.sqlite"

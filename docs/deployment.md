@@ -196,6 +196,8 @@ sentinel full/delta history for 168 hours:
 BFA_DECISION_SNAPSHOT_COMPACT_UNCHANGED=true
 BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS=72
 BFA_DB_SENTINEL_EVENT_RETENTION_HOURS=168
+BFA_DB_HIGH_FREQUENCY_RETENTION_BATCH_SIZE=50
+BFA_DB_HIGH_FREQUENCY_RETENTION_MAX_DELETE_ROWS=100
 ```
 
 Preview retention before deleting rows:
@@ -220,6 +222,11 @@ The normal hourly unit is intentionally incremental: it reports the full stale
 market/decision/sentinel backlog, but only deletes up to
 `BFA_DB_MAINTENANCE_MAX_DELETE_ROWS` rows per run across those categories in
 batches of `BFA_DB_MAINTENANCE_BATCH_SIZE`.
+Historical decision/sentinel payloads can be much larger than ordinary rows,
+so their combined per-run work is separately capped by
+`BFA_DB_HIGH_FREQUENCY_RETENTION_MAX_DELETE_ROWS` and uses the smaller
+high-frequency batch size. The budget is split fairly between decision and
+sentinel history, with unused decision capacity passed to sentinel cleanup.
 This avoids multi-million-row deletes creating huge WAL files beside live
 trading. Re-run maintenance or let the timer catch up gradually.
 The controlled retention transaction removes category rows first, temporarily
