@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 SQLITE_CONNECT_TIMEOUT_SECONDS = SQLITE_BUSY_TIMEOUT_MS / 1000.0
 
@@ -85,6 +85,26 @@ def migrate(connection: sqlite3.Connection) -> None:
             ON pending_limit_entries (status, expires_at, intent_event_id);
         CREATE INDEX IF NOT EXISTS idx_pending_limit_entries_symbol_status
             ON pending_limit_entries (symbol, status);
+
+        CREATE TABLE IF NOT EXISTS position_excursions (
+            position_key TEXT PRIMARY KEY,
+            intent_event_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            position_side TEXT,
+            entry_price REAL,
+            stop_price REAL,
+            target_price REAL,
+            best_favorable_price REAL,
+            worst_adverse_price REAL,
+            max_favorable_r REAL NOT NULL DEFAULT 0,
+            max_adverse_r REAL NOT NULL DEFAULT 0,
+            max_target_progress REAL NOT NULL DEFAULT 0,
+            first_observed_at TEXT NOT NULL,
+            last_observed_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_position_excursions_last_observed
+            ON position_excursions (last_observed_at, position_key);
         """
     )
 

@@ -10,6 +10,8 @@ from bfa.execution.binance_client import BinanceSignedError
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.ops.live_status import LiveStatusReport, OpenAiBackoffStatus, ProtectiveEvidence
 from bfa.ops.position_adjustment import (
+    PositionAdjustmentOrderPlan,
+    _replace_protective_orders,
     build_position_adjustment_execute_report,
     build_position_adjustment_plan_report,
     position_adjustment_plan_from_review,
@@ -166,6 +168,20 @@ class FakeSignedClient:
         return {"code": 200, "msg": "success", "symbol": symbol}
 
 
+class TimelineSignedClient(FakeSignedClient):
+    def __init__(self):
+        super().__init__()
+        self.timeline = []
+
+    def new_algo_order(self, **kwargs):
+        self.timeline.append(("new", kwargs["order_type"], kwargs.get("working_type")))
+        return super().new_algo_order(**kwargs)
+
+    def cancel_algo_order(self, **kwargs):
+        self.timeline.append(("cancel", kwargs.get("algo_id"), None))
+        return super().cancel_algo_order(**kwargs)
+
+
 class PositionAdjustmentTests(unittest.TestCase):
     def setUp(self):
         self.connection = sqlite3.connect(":memory:")
@@ -174,6 +190,64 @@ class PositionAdjustmentTests(unittest.TestCase):
 
     def tearDown(self):
         self.connection.close()
+
+    def test_protective_replacement_is_noop_when_exchange_plan_already_matches(self):
+        fake = TimelineSignedClient()
+        plan = PositionAdjustmentOrderPlan(
+            symbol="BTCUSDT",
+            action="trail_protective_orders",
+            side="SELL",
+            order_type="ALGO",
+            quantity=0.2,
+            position_side="LONG",
+            stop_price=96.0,
+            target_price=108.0,
+            cancel_algo_orders=protective_algo_orders(),
+            reason_codes=["strategy_leg:micro_grid"],
+        )
+
+        response = _replace_protective_orders(
+            fake,
+            config=load_config({}),
+            order_plan=plan,
+            checked_at="2026-06-20T04:00:00Z",
+        )
+
+        self.assertTrue(response["no_op"])
+        self.assertEqual(fake.timeline, [])
+
+    def test_protective_replacement_keeps_one_leg_active_and_splits_working_types(self):
+        fake = TimelineSignedClient()
+        plan = PositionAdjustmentOrderPlan(
+            symbol="BTCUSDT",
+            action="trail_protective_orders",
+            side="SELL",
+            order_type="ALGO",
+            quantity=0.2,
+            position_side="LONG",
+            stop_price=97.0,
+            target_price=109.0,
+            cancel_algo_orders=protective_algo_orders(),
+            reason_codes=["strategy_leg:micro_grid"],
+        )
+
+        response = _replace_protective_orders(
+            fake,
+            config=load_config({}),
+            order_plan=plan,
+            checked_at="2026-06-20T04:00:00Z",
+        )
+
+        self.assertNotIn("no_op", response)
+        self.assertEqual(
+            fake.timeline,
+            [
+                ("cancel", 11, None),
+                ("new", "STOP_MARKET", "MARK_PRICE"),
+                ("cancel", 12, None),
+                ("new", "TAKE_PROFIT_MARKET", "CONTRACT_PRICE"),
+            ],
+        )
 
     def insert_submitted_intent(
         self,
@@ -688,10 +762,15 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
 
         self.assertEqual(report.status, "position_adjustment_submitted_cleanup_deferred")
         self.assertTrue(report.adjustment_executed)
-        self.assertEqual(len(fake.algo_orders), 2)
+        self.assertEqual(len(fake.algo_orders), 3)
         self.assertEqual(fake.algo_orders[0]["order_type"], "STOP_MARKET")
+        self.assertEqual(fake.algo_orders[2]["order_type"], "TAKE_PROFIT_MARKET")
         self.assertEqual(report.executions[0].error["message"], "protective order replacement needs follow-up")
         self.assertIn("take_profit_error", report.executions[0].order_response)
+        self.assertEqual(
+            report.executions[0].order_response["take_profit_fallback"]["action"],
+            "fail_closed_tp_failed",
+        )
 
     def test_trailing_replacement_continues_when_old_algo_cancel_is_stale_unknown_order(self):
         fake = FakeSignedClient(mark_price="107", fail_cancel_algo=True)
@@ -762,13 +841,14 @@ class PositionAdjustmentExecuteTests(unittest.TestCase):
         self.assertEqual(report.status, "position_adjustment_failed")
         self.assertFalse(report.adjustment_executed)
         self.assertEqual(len(fake.algo_orders), 0)
-        self.assertEqual(len(fake.cancelled_algo_orders), 2)
+        self.assertEqual(len(fake.cancelled_algo_orders), 1)
         self.assertEqual(
             report.executions[0].error["message"],
             "protective order replacement was not attempted after old order cancel failed",
         )
         cancel_results = report.executions[0].order_response["cancel_replaced_algo_orders"]
-        self.assertTrue(all("error" in item for item in cancel_results))
+        self.assertEqual(len(cancel_results), 1)
+        self.assertIn("error", cancel_results[0])
 
     def test_partial_reduce_defers_cleanup_when_post_amount_does_not_reduce_enough(self):
         fake = FakeSignedClient(mark_price="107", partial_reduce_sets_expected=False)

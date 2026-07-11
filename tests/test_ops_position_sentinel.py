@@ -164,6 +164,7 @@ class PositionSentinelTests(unittest.TestCase):
                 "schema": "bfa_position_sentinel_v1",
                 "status": "sentinel_executed",
                 "checked_at": occurred_at,
+                "execution": {"adjustment_executed": True},
                 "reversal_signals": [
                     {
                         "symbol": symbol,
@@ -312,6 +313,34 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertEqual(report.reversal_signals[0].decision, "trail_or_backfill")
         self.assertIn("protective_backfill_required", report.reversal_signals[0].reasons)
         self.assertNotIn("trend_protection_cooldown_active", report.reversal_signals[0].reasons)
+
+    def test_micro_grid_protection_uses_short_confirmed_execution_cooldown(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(
+            metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
+        )
+        self._insert_sentinel_signal(
+            occurred_at="2026-06-20T03:59:55Z",
+            profile="micro_grid",
+        )
+        fake_signed = FakeSignedClient(mark_price="102")
+
+        report = build_position_sentinel_report(
+            self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=FakeMarketClient(),
+            execute=True,
+        )
+
+        self.assertEqual(report.reversal_signals[0].decision, "observe")
+        self.assertIn("micro_grid_protection_cooldown_active", report.reversal_signals[0].reasons)
+        self.assertEqual(report.status, "sentinel_no_allowed_action")
+        self.assertEqual(fake_signed.algo_orders, [])
 
     def test_sentinel_does_not_trail_tiny_profit_before_minimum_progress(self):
         fake_signed = FakeSignedClient(mark_price="100.4")
@@ -678,6 +707,85 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertNotIn("recent_mfe_threshold_met", report.reversal_signals[0].reasons)
         self.assertEqual(report.status, "sentinel_no_allowed_action")
         self.assertEqual(fake_signed.algo_orders, [])
+
+    def test_waiting_loss_control_does_not_override_profitable_trailing_mode(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(
+            occurred_at="2026-06-20T03:59:10Z",
+            metadata={"strategy_leg": "micro_grid", "regime_label": "RANGE", "route_decision": "allow"},
+            reasons=["strategy_leg:micro_grid", "regime_label:RANGE", "route_decision:allow"],
+        )
+        fake_signed = FakeSignedClient(mark_price="102.0")
+        market = FakeMarketClient(
+            closes=[103.0, 102.8, 102.4, 102.0, 101.4, 100.8, 100.2, 99.6],
+            volumes=[10, 11, 12, 13, 20, 25, 30, 36],
+            high_offset=0.3,
+            low_offset=0.5,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        signal = report.reversal_signals[0]
+        self.assertEqual(signal.decision, "trail_or_backfill")
+        self.assertIn("setup_invalidated_exit_pressure", signal.reasons)
+        self.assertIn("loss_control_waiting_for_confirmation", signal.reasons)
+        order_plan = report.execution.executions[0].order_plan
+        self.assertIn("sentinel_profit_protection", order_plan.reason_codes)
+        self.assertNotIn("sentinel_loss_control", order_plan.reason_codes)
+        self.assertNotIn("trailing_activated_by_loss_control", order_plan.reason_codes)
+
+    def test_lifetime_excursion_survives_when_peak_rolls_out_of_recent_klines(self):
+        first = build_position_sentinel_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=FakeSignedClient(mark_price="103.0"),
+            market_client=FakeMarketClient(
+                closes=[100.2, 101.0, 102.0, 103.0, 102.8, 102.5, 102.2, 102.0],
+                volumes=[20, 22, 24, 26, 22, 20, 18, 16],
+                high_offset=0.4,
+                low_offset=0.1,
+            ),
+        )
+        first_peak = first.reversal_signals[0].metrics["lifetime_max_stop_r_multiple"]
+        self.assertGreaterEqual(first_peak, 0.8)
+
+        second = build_position_sentinel_report(
+            self.config(),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:30:00Z",
+            signed_client=FakeSignedClient(mark_price="100.8"),
+            market_client=FakeMarketClient(
+                closes=[100.4, 100.5, 100.6, 100.7, 100.8, 100.8, 100.8, 100.8],
+                volumes=[20, 20, 19, 18, 17, 16, 15, 14],
+                high_offset=0.05,
+                low_offset=0.05,
+            ),
+        )
+
+        metrics = second.reversal_signals[0].metrics
+        self.assertLess(metrics["recent_max_stop_r_multiple"], 0.25)
+        self.assertEqual(metrics["lifetime_max_stop_r_multiple"], first_peak)
+        self.assertIn("recent_mfe_threshold_met", second.reversal_signals[0].reasons)
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT max_favorable_r, max_adverse_r FROM position_excursions"
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertIsNotNone(row)
+        self.assertGreaterEqual(row[0], 0.8)
+        self.assertGreaterEqual(row[1], 0.0)
 
     def test_micro_grid_invalidated_hard_adverse_without_profit_only_observes(self):
         self.tmp.cleanup()

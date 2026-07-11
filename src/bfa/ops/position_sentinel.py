@@ -9,7 +9,7 @@ import sqlite3
 from typing import Any, Mapping
 
 from bfa.config import AppConfig, RuntimeMode
-from bfa.event_store.migrations import connect
+from bfa.event_store.migrations import connect, migrate
 from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.ops.position_adjustment import (
@@ -123,12 +123,36 @@ def build_position_sentinel_report(
         require_filters=True,
         ignore_normal_open_orders=True,
     )
-    cooldowns = _trend_cooldowns_from_store(
+    cooldowns = _protection_cooldowns_from_store(
         resolved_db_path,
         checked_at=checked_at,
-        cooldown_seconds=_float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS"), 180.0),
+        cooldown_seconds_by_profile={
+            "trend": _float_or_default(
+                config.get("BFA_POSITION_SENTINEL_TREND_COOLDOWN_SECONDS"),
+                180.0,
+            ),
+            "micro_grid": _float_or_default(
+                config.get("BFA_POSITION_SENTINEL_MICRO_COOLDOWN_SECONDS"),
+                15.0,
+            ),
+        },
     )
-    signals = _reversal_signals_from_plan(config, plan, market_client=market, cooldowns=cooldowns)
+    excursion_states = _position_excursions_from_store(resolved_db_path, plan)
+    signals = _reversal_signals_from_plan(
+        config,
+        plan,
+        market_client=market,
+        cooldowns=cooldowns,
+        excursion_states=excursion_states,
+    )
+    _persist_position_excursions(
+        config,
+        resolved_db_path,
+        plan,
+        signals,
+        prior_states=excursion_states,
+        checked_at=checked_at,
+    )
     plan = _plan_with_sentinel_trailing_requests(
         config,
         plan,
@@ -172,12 +196,19 @@ def _reversal_signals_from_plan(
     *,
     market_client,
     cooldowns: Mapping[tuple[str, str | None], dict[str, Any]] | None = None,
+    excursion_states: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[ReversalRiskSignal]:
     review = plan.position_review
     if review is None:
         return []
     return [
-        _reversal_signal(config, item, market_client=market_client, cooldowns=cooldowns or {})
+        _reversal_signal(
+            config,
+            item,
+            market_client=market_client,
+            cooldowns=cooldowns or {},
+            excursion_state=(excursion_states or {}).get(_position_key(item) or ""),
+        )
         for item in review.positions
         if item.recommendation != "manual_hold" and item.position_amt != 0
     ]
@@ -189,6 +220,7 @@ def _reversal_signal(
     *,
     market_client,
     cooldowns: Mapping[tuple[str, str | None], dict[str, Any]],
+    excursion_state: Mapping[str, Any] | None = None,
 ) -> ReversalRiskSignal:
     side = "LONG" if item.position_amt > 0 else "SHORT"
     profile = _protection_profile(config, item)
@@ -206,9 +238,16 @@ def _reversal_signal(
     )
     elapsed_seconds = round((item.elapsed_minutes or 0.0) * 60.0, 3) if item.elapsed_minutes is not None else None
     entry_klines = _entry_scoped_klines(klines, elapsed_seconds=elapsed_seconds)
+    recent_excursion = _position_excursion_metrics(item, entry_klines, side=side)
     metrics = {
         **_micro_path_metrics(klines, side=side),
-        **_position_excursion_metrics(item, entry_klines, side=side),
+        **recent_excursion,
+        **_lifetime_excursion_metrics(
+            item,
+            recent_excursion,
+            prior_state=excursion_state,
+            side=side,
+        ),
         "elapsed_seconds": elapsed_seconds,
         "entry_scoped_sample_count": len(entry_klines),
         "current_stop_r_multiple": item.stop_r_multiple,
@@ -275,18 +314,23 @@ def _reversal_signal(
     )
 
 
-def _trend_cooldowns_from_store(
+def _protection_cooldowns_from_store(
     db_path: str,
     *,
     checked_at: str,
-    cooldown_seconds: float,
+    cooldown_seconds_by_profile: Mapping[str, float],
 ) -> dict[tuple[str, str | None], dict[str, Any]]:
-    if cooldown_seconds <= 0:
+    enabled_cooldowns = {
+        str(profile).lower(): max(float(seconds), 0.0)
+        for profile, seconds in cooldown_seconds_by_profile.items()
+        if float(seconds) > 0
+    }
+    if not enabled_cooldowns:
         return {}
     checked = _parse_iso(checked_at)
     if checked is None:
         return {}
-    since = checked - timedelta(seconds=cooldown_seconds)
+    since = checked - timedelta(seconds=max(enabled_cooldowns.values()))
     result: dict[tuple[str, str | None], dict[str, Any]] = {}
     try:
         connection = connect(db_path)
@@ -321,13 +365,18 @@ def _trend_cooldowns_from_store(
         if occurred is None:
             continue
         elapsed = (checked - occurred).total_seconds()
-        if elapsed < 0 or elapsed >= cooldown_seconds:
+        if elapsed < 0:
+            continue
+        execution = payload.get("execution")
+        if not isinstance(execution, Mapping) or not bool(execution.get("adjustment_executed")):
             continue
         for signal in payload.get("reversal_signals") or []:
             if not isinstance(signal, Mapping):
                 continue
             metrics = signal.get("metrics") if isinstance(signal.get("metrics"), Mapping) else {}
-            if str(metrics.get("protection_profile") or "").lower() != "trend":
+            profile_name = str(metrics.get("protection_profile") or "").lower()
+            cooldown_seconds = enabled_cooldowns.get(profile_name)
+            if cooldown_seconds is None or elapsed >= cooldown_seconds:
                 continue
             if str(signal.get("decision") or "").lower() != "trail_or_backfill":
                 continue
@@ -340,6 +389,7 @@ def _trend_cooldowns_from_store(
             result[key] = {
                 "last_decision_at": occurred_at,
                 "remaining_seconds": max(cooldown_seconds - elapsed, 0.0),
+                "profile": profile_name,
             }
     return result
 
@@ -350,27 +400,32 @@ def _cooldown_for_item(
     profile: Mapping[str, Any],
     cooldowns: Mapping[tuple[str, str | None], dict[str, Any]],
 ) -> dict[str, Any] | None:
-    if str(profile.get("name") or "") != "trend":
+    profile_name = str(profile.get("name") or "")
+    if not profile_name:
         return None
-    return cooldowns.get((str(item.symbol).upper(), str(item.position_side or "").upper() or None))
+    cooldown = cooldowns.get((str(item.symbol).upper(), str(item.position_side or "").upper() or None))
+    if cooldown is None or str(cooldown.get("profile") or "") != profile_name:
+        return None
+    return cooldown
 
 
 def _cooldown_signal(item, *, profile: Mapping[str, Any], cooldown: Mapping[str, Any]) -> ReversalRiskSignal:
     remaining_seconds = int(max(_float_or_none(cooldown.get("remaining_seconds")) or 0.0, 0.0))
+    profile_name = str(profile["name"])
     return ReversalRiskSignal(
         symbol=item.symbol,
         position_side=item.position_side,
         score=0.0,
         decision="observe",
         reasons=[
-            f"protection_profile:{profile['name']}",
-            "trend_protection_cooldown_active",
-            f"trend_protection_cooldown_remaining_seconds:{remaining_seconds}",
+            f"protection_profile:{profile_name}",
+            f"{profile_name}_protection_cooldown_active",
+            f"{profile_name}_protection_cooldown_remaining_seconds:{remaining_seconds}",
         ],
         metrics={
-            "protection_profile": profile["name"],
-            "trend_protection_cooldown_remaining_seconds": remaining_seconds,
-            "trend_protection_last_decision_at": cooldown.get("last_decision_at"),
+            "protection_profile": profile_name,
+            f"{profile_name}_protection_cooldown_remaining_seconds": remaining_seconds,
+            f"{profile_name}_protection_last_decision_at": cooldown.get("last_decision_at"),
         },
     )
 
@@ -463,13 +518,13 @@ def _position_excursion_metrics(item, klines: list[Any], *, side: str) -> dict[s
     if side == "LONG":
         best_price = max(highs)
         worst_price = min(lows)
-        favorable_move = best_price - entry
-        adverse_move = entry - worst_price
+        favorable_move = max(best_price - entry, 0.0)
+        adverse_move = max(entry - worst_price, 0.0)
     else:
         best_price = min(lows)
         worst_price = max(highs)
-        favorable_move = entry - best_price
-        adverse_move = worst_price - entry
+        favorable_move = max(entry - best_price, 0.0)
+        adverse_move = max(worst_price - entry, 0.0)
     payload: dict[str, Any] = {
         "recent_best_favorable_price": round(best_price, 8),
         "recent_worst_adverse_price": round(worst_price, 8),
@@ -495,12 +550,232 @@ def _position_excursion_metrics(item, klines: list[Any], *, side: str) -> dict[s
     return payload
 
 
+def _lifetime_excursion_metrics(
+    item,
+    recent: Mapping[str, Any],
+    *,
+    prior_state: Mapping[str, Any] | None,
+    side: str,
+) -> dict[str, Any]:
+    prior = dict(prior_state or {})
+    current_r = _float_or_none(item.stop_r_multiple) or 0.0
+    current_progress = _float_or_none(item.target_progress) or 0.0
+    max_favorable_r = max(
+        _float_or_none(prior.get("max_favorable_r")) or 0.0,
+        _float_or_none(recent.get("recent_max_stop_r_multiple")) or 0.0,
+        current_r,
+        0.0,
+    )
+    max_adverse_r = max(
+        _float_or_none(prior.get("max_adverse_r")) or 0.0,
+        _float_or_none(recent.get("recent_max_adverse_r_multiple")) or 0.0,
+        -current_r,
+        0.0,
+    )
+    max_target_progress = max(
+        _float_or_none(prior.get("max_target_progress")) or 0.0,
+        _float_or_none(recent.get("recent_max_target_progress")) or 0.0,
+        current_progress,
+        0.0,
+    )
+    entry = _float_or_none(item.entry_price)
+    mark = _float_or_none(item.mark_price)
+    favorable_candidates = [
+        _float_or_none(prior.get("best_favorable_price")),
+        _float_or_none(recent.get("recent_best_favorable_price")),
+        mark,
+        entry,
+    ]
+    adverse_candidates = [
+        _float_or_none(prior.get("worst_adverse_price")),
+        _float_or_none(recent.get("recent_worst_adverse_price")),
+        mark,
+        entry,
+    ]
+    favorable_prices = [value for value in favorable_candidates if value is not None and value > 0]
+    adverse_prices = [value for value in adverse_candidates if value is not None and value > 0]
+    if side == "LONG":
+        best_price = max(favorable_prices) if favorable_prices else None
+        worst_price = min(adverse_prices) if adverse_prices else None
+    else:
+        best_price = min(favorable_prices) if favorable_prices else None
+        worst_price = max(adverse_prices) if adverse_prices else None
+    giveback = max(max_target_progress - current_progress, 0.0)
+    return {
+        "lifetime_best_favorable_price": round(best_price, 8) if best_price is not None else None,
+        "lifetime_worst_adverse_price": round(worst_price, 8) if worst_price is not None else None,
+        "lifetime_max_stop_r_multiple": round(max_favorable_r, 5),
+        "lifetime_max_adverse_r_multiple": round(max_adverse_r, 5),
+        "lifetime_max_target_progress": round(max_target_progress, 5),
+        "target_progress_giveback": round(giveback, 5),
+        "target_progress_giveback_ratio": round(giveback / max_target_progress, 5)
+        if max_target_progress > 0
+        else 0.0,
+    }
+
+
+def _position_key(item) -> str | None:
+    intent_event_id = getattr(item, "matching_intent_event_id", None)
+    if intent_event_id is None:
+        return None
+    side = str(getattr(item, "position_side", "") or "").upper()
+    if not side:
+        amount = _float_or_none(getattr(item, "position_amt", None)) or 0.0
+        side = "LONG" if amount > 0 else "SHORT" if amount < 0 else ""
+    symbol = str(getattr(item, "symbol", "") or "").upper()
+    if not symbol or not side:
+        return None
+    return f"{int(intent_event_id)}:{symbol}:{side}"
+
+
+def _position_excursions_from_store(
+    db_path: str,
+    plan: PositionAdjustmentPlanReport,
+) -> dict[str, dict[str, Any]]:
+    review = plan.position_review
+    keys = [_position_key(item) for item in review.positions] if review is not None else []
+    keys = [key for key in keys if key]
+    if not keys:
+        return {}
+    try:
+        connection = connect(db_path)
+        try:
+            migrate(connection)
+            placeholders = ",".join("?" for _ in keys)
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM position_excursions
+                WHERE position_key IN ({placeholders})
+                """,
+                keys,
+            ).fetchall()
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error):
+        return {}
+    return {str(row["position_key"]): dict(row) for row in rows}
+
+
+def _persist_position_excursions(
+    config: AppConfig,
+    db_path: str,
+    plan: PositionAdjustmentPlanReport,
+    signals: list[ReversalRiskSignal],
+    *,
+    prior_states: Mapping[str, Mapping[str, Any]],
+    checked_at: str,
+) -> None:
+    review = plan.position_review
+    if review is None or not signals:
+        return
+    items = {
+        (str(item.symbol).upper(), str(item.position_side or "").upper() or None): item
+        for item in review.positions
+    }
+    heartbeat_seconds = _float_or_default(
+        config.get("BFA_POSITION_EXCURSION_HEARTBEAT_SECONDS"),
+        300.0,
+    )
+    updates: list[tuple[Any, ...]] = []
+    for signal in signals:
+        item = items.get((signal.symbol.upper(), str(signal.position_side or "").upper() or None))
+        if item is None:
+            continue
+        position_key = _position_key(item)
+        if position_key is None:
+            continue
+        prior = dict(prior_states.get(position_key) or {})
+        metrics = signal.metrics
+        state = {
+            "best_favorable_price": _float_or_none(metrics.get("lifetime_best_favorable_price")),
+            "worst_adverse_price": _float_or_none(metrics.get("lifetime_worst_adverse_price")),
+            "max_favorable_r": _float_or_none(metrics.get("lifetime_max_stop_r_multiple")) or 0.0,
+            "max_adverse_r": _float_or_none(metrics.get("lifetime_max_adverse_r_multiple")) or 0.0,
+            "max_target_progress": _float_or_none(metrics.get("lifetime_max_target_progress")) or 0.0,
+        }
+        changed = not prior or any(
+            abs((state[key] or 0.0) - (_float_or_none(prior.get(key)) or 0.0)) > 1e-10
+            for key in state
+        )
+        last_observed = _parse_iso(str(prior.get("last_observed_at") or ""))
+        checked = _parse_iso(checked_at)
+        heartbeat_due = (
+            last_observed is None
+            or checked is None
+            or (checked - last_observed).total_seconds() >= max(heartbeat_seconds, 1.0)
+        )
+        if not changed and not heartbeat_due:
+            continue
+        updates.append(
+            (
+                position_key,
+                int(item.matching_intent_event_id),
+                item.symbol.upper(),
+                str(item.position_side or "").upper() or None,
+                _float_or_none(item.entry_price),
+                _float_or_none(item.stop_price),
+                _float_or_none(item.target_price),
+                state["best_favorable_price"],
+                state["worst_adverse_price"],
+                state["max_favorable_r"],
+                state["max_adverse_r"],
+                state["max_target_progress"],
+                str(prior.get("first_observed_at") or checked_at),
+                checked_at,
+            )
+        )
+    if not updates:
+        return
+    try:
+        connection = connect(db_path)
+        try:
+            migrate(connection)
+            connection.executemany(
+                """
+                INSERT INTO position_excursions (
+                    position_key,
+                    intent_event_id,
+                    symbol,
+                    position_side,
+                    entry_price,
+                    stop_price,
+                    target_price,
+                    best_favorable_price,
+                    worst_adverse_price,
+                    max_favorable_r,
+                    max_adverse_r,
+                    max_target_progress,
+                    first_observed_at,
+                    last_observed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(position_key) DO UPDATE SET
+                    entry_price = excluded.entry_price,
+                    stop_price = excluded.stop_price,
+                    target_price = excluded.target_price,
+                    best_favorable_price = excluded.best_favorable_price,
+                    worst_adverse_price = excluded.worst_adverse_price,
+                    max_favorable_r = excluded.max_favorable_r,
+                    max_adverse_r = excluded.max_adverse_r,
+                    max_target_progress = excluded.max_target_progress,
+                    last_observed_at = excluded.last_observed_at
+                """,
+                updates,
+            )
+            connection.commit()
+        finally:
+            connection.close()
+    except (OSError, sqlite3.Error):
+        return
+
+
 def _score_reversal_risk(item, metrics: Mapping[str, Any], *, side: str, profile: Mapping[str, Any]) -> float:
     score = 0.0
     target_progress = _float_or_none(item.target_progress) or 0.0
     stop_r = _float_or_none(item.stop_r_multiple) or 0.0
-    recent_target_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
-    recent_stop_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
+    recent_target_progress = _max_target_progress(metrics)
+    recent_stop_r = _max_favorable_r(metrics)
     score += min(max(target_progress, 0.0), 1.25) * 0.28
     score += min(max(stop_r, 0.0), 1.5) * 0.18
     score += min(max(recent_target_progress - target_progress, 0.0), 1.0) * 0.12
@@ -626,9 +901,30 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
     }
 
 
+def _max_favorable_r(metrics: Mapping[str, Any]) -> float:
+    return max(
+        _float_or_none(metrics.get("lifetime_max_stop_r_multiple")) or 0.0,
+        _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0,
+    )
+
+
+def _max_target_progress(metrics: Mapping[str, Any]) -> float:
+    return max(
+        _float_or_none(metrics.get("lifetime_max_target_progress")) or 0.0,
+        _float_or_none(metrics.get("recent_max_target_progress")) or 0.0,
+    )
+
+
+def _max_adverse_r(metrics: Mapping[str, Any]) -> float:
+    return max(
+        _float_or_none(metrics.get("lifetime_max_adverse_r_multiple")) or 0.0,
+        _float_or_none(metrics.get("recent_max_adverse_r_multiple")) or 0.0,
+    )
+
+
 def _recent_mfe_threshold_met(metrics: Mapping[str, Any], *, min_profit_r: float, min_progress: float) -> bool:
-    recent_stop_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
-    recent_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
+    recent_stop_r = _max_favorable_r(metrics)
+    recent_progress = _max_target_progress(metrics)
     return recent_stop_r >= min_profit_r or recent_progress >= min_progress
 
 
@@ -644,10 +940,7 @@ def _micro_loss_control_ready(item, metrics: Mapping[str, Any], *, profile: Mapp
     if _micro_stagnation_detected(item, metrics, profile=profile):
         return True
     current_r = _float_or_none(metrics.get("current_stop_r_multiple")) or 0.0
-    adverse_r = max(
-        _float_or_none(metrics.get("recent_max_adverse_r_multiple")) or 0.0,
-        -current_r,
-    )
+    adverse_r = max(_max_adverse_r(metrics), -current_r)
     hard_adverse_r = _float_or_default(profile.get("loss_control_hard_adverse_r"), 0.55)
     return adverse_r >= hard_adverse_r and _micro_setup_invalidated(item, metrics, profile=profile)
 
@@ -672,8 +965,8 @@ def _micro_first_wave_profit_capture_ready(item, metrics: Mapping[str, Any], *, 
         return False
     current_r = _float_or_none(item.stop_r_multiple) or 0.0
     current_progress = _float_or_none(item.target_progress) or 0.0
-    recent_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
-    recent_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
+    recent_r = _max_favorable_r(metrics)
+    recent_progress = _max_target_progress(metrics)
     return max(current_r, recent_r) >= _float_or_default(profile.get("first_wave_min_r"), 0.65) or max(
         current_progress,
         recent_progress,
@@ -718,8 +1011,8 @@ def _profit_protection_layer(item, metrics: Mapping[str, Any], *, profile: Mappi
         return {"layer": "standard", "reasons": [], "lock_r": profile.get("lock_r"), "giveback_r": profile.get("giveback_r")}
     current_r = _float_or_none(item.stop_r_multiple) or 0.0
     current_progress = _float_or_none(item.target_progress) or 0.0
-    recent_r = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
-    recent_progress = _float_or_none(metrics.get("recent_max_target_progress")) or 0.0
+    recent_r = _max_favorable_r(metrics)
+    recent_progress = _max_target_progress(metrics)
     best_r = max(current_r, recent_r)
     best_progress = max(current_progress, recent_progress)
     strong_ready = best_r >= _float_or_default(profile.get("strong_min_profit_r"), 1.0) or best_progress >= _float_or_default(
@@ -794,7 +1087,7 @@ def _micro_stagnation_detected(item, metrics: Mapping[str, Any], *, profile: Map
     if elapsed is None or elapsed < _float_or_default(profile.get("stagnation_seconds"), 150.0):
         return False
     current_r = _float_or_none(metrics.get("current_stop_r_multiple"))
-    recent_mfe = _float_or_none(metrics.get("recent_max_stop_r_multiple")) or 0.0
+    recent_mfe = _max_favorable_r(metrics)
     max_abs_r = abs(_float_or_default(profile.get("stagnation_max_abs_r"), 0.12))
     max_mfe_r = _float_or_default(profile.get("stagnation_max_mfe_r"), 0.18)
     if current_r is None or abs(current_r) > max_abs_r or recent_mfe > max_mfe_r:
@@ -806,10 +1099,7 @@ def _micro_setup_invalidated(item, metrics: Mapping[str, Any], *, profile: Mappi
     if str(profile.get("name") or "") != "micro_grid":
         return False
     current_r = _float_or_none(metrics.get("current_stop_r_multiple")) or 0.0
-    adverse_r = max(
-        _float_or_none(metrics.get("recent_max_adverse_r_multiple")) or 0.0,
-        -current_r,
-    )
+    adverse_r = max(_max_adverse_r(metrics), -current_r)
     if adverse_r < _float_or_default(profile.get("invalidation_adverse_r"), 0.18):
         return False
     alignment = _float_or_none(metrics.get("direction_alignment")) or 0.0
@@ -923,10 +1213,7 @@ def _sentinel_item_reason_codes(config: AppConfig, item, signal: ReversalRiskSig
     if signal is None:
         return []
     profile = _protection_profile(config, item)
-    loss_control = any(
-        reason in {"stagnation_exit_pressure", "setup_invalidated_exit_pressure"}
-        for reason in signal.reasons
-    )
+    loss_control = "loss_control_ready" in signal.reasons
     layer = str(signal.metrics.get("profit_protection_layer") or "standard")
     layer_lock = _float_or_none(signal.metrics.get("profit_protection_lock_r"))
     layer_giveback = _float_or_none(signal.metrics.get("profit_protection_giveback_r"))
@@ -1025,6 +1312,8 @@ def _status(
     allowed_actions: list[str],
 ) -> str:
     if execution is not None:
+        if execution.status == "position_adjustment_noop":
+            return "sentinel_observing"
         return "sentinel_executed" if execution.adjustment_executed else "sentinel_execution_blocked"
     if execution_enabled and not allowed_actions:
         return "sentinel_no_allowed_action"

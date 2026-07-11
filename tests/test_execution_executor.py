@@ -391,6 +391,42 @@ class ExecutionEngineTests(unittest.TestCase):
             "waiting_for_fill",
         )
 
+    def test_micro_grid_limit_at_defer_threshold_resolves_inline_and_is_protected(self):
+        fake_client = LimitFilledSignedClient()
+        engine = ExecutionEngine(
+            config=self.config(
+                BFA_MODE="live",
+                BFA_LIMIT_ENTRY_DEFER_ENABLED="true",
+                BFA_LIMIT_ENTRY_DEFER_MIN_WAIT_SECONDS="20",
+                BINANCE_API_KEY="synthetic-binance-key-abcdef",
+                BINANCE_API_SECRET="synthetic-binance-secret-abcdef",
+            ),
+            signed_client=fake_client,
+        )
+
+        result = engine.run(
+            symbol="BTCUSDT",
+            validation=self.validation(
+                reasons=[
+                    "strategy_leg:micro_grid",
+                    "entry_order_type:limit",
+                    "entry_time_in_force:GTX",
+                    "limit_entry_max_wait_seconds:20",
+                ]
+            ),
+            decided_at="2026-06-20T10:00:00Z",
+            risk_state=RiskState(),
+            filters=self.filters(),
+        )
+
+        self.assertEqual(result.status, "submitted")
+        call_names = [call[0] for call in fake_client.calls]
+        self.assertIn("query_order", call_names)
+        self.assertEqual(call_names.count("new_algo_order"), 2)
+        protective = [call[1] for call in fake_client.calls if call[0] == "new_algo_order"]
+        self.assertEqual(protective[0]["working_type"], "MARK_PRICE")
+        self.assertEqual(protective[1]["working_type"], "CONTRACT_PRICE")
+
     def validation(self, **overrides):
         payload = {
             "decision": "trade",
@@ -854,6 +890,9 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual(entry_call["time_in_force"], "GTX")
         self.assertEqual(result.intent.quantity, 0.2)
         self.assertEqual(result.intent.entry_price, 100.0)
+        protective = [call[1] for call in fake_client.calls if call[0] == "new_algo_order"]
+        self.assertEqual(protective[0]["working_type"], "MARK_PRICE")
+        self.assertEqual(protective[1]["working_type"], "CONTRACT_PRICE")
 
     def test_intent_metadata_preserves_regime_route_fields(self):
         engine = ExecutionEngine(config=self.config())

@@ -142,6 +142,25 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.get("BFA_FORWARD_PAPER_GUARD_FACTOR_MODE"), "block")
         self.assertEqual(config.get("BFA_MICRO_GRID_MAX_PENDING_ORDERS"), "3")
         self.assertEqual(config.get("BFA_TREND_MAX_PENDING_ORDERS"), "8")
+        self.assertEqual(config.get("BFA_PROTECTIVE_STOP_WORKING_TYPE"), "MARK_PRICE")
+        self.assertEqual(config.get("BFA_PROTECTIVE_TARGET_WORKING_TYPE"), "MARK_PRICE")
+        self.assertEqual(config.get("BFA_MICRO_GRID_STOP_WORKING_TYPE"), "MARK_PRICE")
+        self.assertEqual(config.get("BFA_MICRO_GRID_TARGET_WORKING_TYPE"), "CONTRACT_PRICE")
+
+    def test_protective_working_types_must_be_supported(self):
+        result = validate_config(
+            load_config(
+                base_env(
+                    BFA_MICRO_GRID_TARGET_WORKING_TYPE="LAST_PRICE",
+                )
+            )
+        )
+
+        self.assertFalse(result.valid)
+        self.assertIn(
+            "BFA_MICRO_GRID_TARGET_WORKING_TYPE must be MARK_PRICE or CONTRACT_PRICE",
+            result.errors,
+        )
 
     def test_market_symbols_are_trimmed_uppercased_and_ordered(self):
         config = load_config(base_env(BFA_MARKET_SYMBOLS=" btcusdt, ethusdt,,solusdt "))

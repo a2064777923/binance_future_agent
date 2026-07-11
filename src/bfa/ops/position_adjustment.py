@@ -14,6 +14,7 @@ from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceFuturesSignedClient, BinanceSignedError
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import OrderIntent, RiskDecision
+from bfa.execution.protection import protective_working_type, strategy_leg_from_context
 from bfa.execution.store import persist_exchange_response, persist_order_intent
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.ops.live_status import LiveStatusReport
@@ -221,7 +222,14 @@ def execute_position_adjustment_plan_report(
     ]
     statuses = [execution.status for execution in executions]
     adjustment_executed = any(status.startswith("position_adjustment_submitted") for status in statuses)
-    status = "position_adjustment_submitted" if adjustment_executed else "position_adjustment_failed"
+    all_noop = bool(statuses) and all(status == "position_adjustment_noop" for status in statuses)
+    status = (
+        "position_adjustment_noop"
+        if all_noop
+        else "position_adjustment_submitted"
+        if adjustment_executed
+        else "position_adjustment_failed"
+    )
     if any(status.endswith("_cleanup_deferred") for status in statuses):
         status = "position_adjustment_submitted_cleanup_deferred"
     if any(status.endswith("_failed") for status in statuses):
@@ -456,7 +464,14 @@ def build_position_adjustment_execute_report(
     ]
     statuses = [execution.status for execution in executions]
     adjustment_executed = any(status.startswith("position_adjustment_submitted") for status in statuses)
-    status = "position_adjustment_submitted" if adjustment_executed else "position_adjustment_failed"
+    all_noop = bool(statuses) and all(status == "position_adjustment_noop" for status in statuses)
+    status = (
+        "position_adjustment_noop"
+        if all_noop
+        else "position_adjustment_submitted"
+        if adjustment_executed
+        else "position_adjustment_failed"
+    )
     if any(status.endswith("_cleanup_deferred") for status in statuses):
         status = "position_adjustment_submitted_cleanup_deferred"
     if any(status.endswith("_failed") for status in statuses):
@@ -1137,13 +1152,13 @@ def _current_protective_prices(item: PositionReviewItem, *, side: str | None) ->
     stop_price = None
     target_price = None
     for order in item.algo_orders:
-        order_type = str(order.get("type") or order.get("orderType") or "").upper()
-        trigger = _positive_float(order.get("triggerPrice") or order.get("stopPrice"))
+        order_kind = _algo_order_kind(order)
+        trigger = _protective_order_price(order)
         if trigger is None:
             continue
-        if "TAKE_PROFIT" in order_type:
+        if order_kind == "TAKE_PROFIT":
             target_price = trigger
-        elif "STOP" in order_type:
+        elif order_kind == "STOP":
             stop_price = trigger
     return stop_price, target_price
 
@@ -1354,9 +1369,19 @@ def _execute_plan_item(
     status = "position_adjustment_submitted"
     try:
         if order_plan.action == "trail_protective_orders":
-            response = _replace_protective_orders(client, order_plan=order_plan, checked_at=checked_at)
+            response = _replace_protective_orders(
+                client,
+                config=config,
+                order_plan=order_plan,
+                checked_at=checked_at,
+            )
         elif order_plan.action == "backfill_protective_orders":
-            response = _backfill_protective_orders(client, order_plan=order_plan, checked_at=checked_at)
+            response = _backfill_protective_orders(
+                client,
+                config=config,
+                order_plan=order_plan,
+                checked_at=checked_at,
+            )
         else:
             response = client.new_order(
                 symbol=order_plan.symbol,
@@ -1375,7 +1400,9 @@ def _execute_plan_item(
             "message": exc.binance_message,
         }
 
-    if response is not None:
+    if response is not None and response.get("no_op"):
+        status = "position_adjustment_noop"
+    elif response is not None:
         if order_plan.action == "trail_protective_orders" and _protective_replace_not_attempted(response):
             status = "position_adjustment_failed"
             error = {
@@ -1425,6 +1452,15 @@ def _execute_plan_item(
                 status = cleanup_status
                 error = cleanup_error
 
+    if status == "position_adjustment_noop":
+        return PositionAdjustmentExecution(
+            symbol=order_plan.symbol,
+            status=status,
+            order_plan=order_plan,
+            order_response=response,
+            persisted={},
+        )
+
     persisted: dict[str, int] = {}
     connection = connect(db_path)
     try:
@@ -1467,35 +1503,50 @@ def _execute_plan_item(
 def _replace_protective_orders(
     client: BinanceFuturesSignedClient,
     *,
+    config: AppConfig,
     order_plan: PositionAdjustmentOrderPlan,
     checked_at: str,
 ) -> dict[str, Any]:
     if order_plan.stop_price is None or order_plan.target_price is None:
         raise ValueError("trail protective order plan requires stop and target prices")
-    cancel_responses = _cancel_replaced_algo_orders(client, order_plan)
-    if any(isinstance(item, Mapping) and ("error" in item or item.get("skipped")) for item in cancel_responses):
+    strategy_leg = strategy_leg_from_context(reason_codes=order_plan.reason_codes)
+    stop_working_type = protective_working_type(
+        config,
+        order_kind="STOP",
+        strategy_leg=strategy_leg,
+    )
+    target_working_type = protective_working_type(
+        config,
+        order_kind="TAKE_PROFIT",
+        strategy_leg=strategy_leg,
+    )
+    stop_orders = _protective_orders_for_kind(order_plan, "STOP")
+    target_orders = _protective_orders_for_kind(order_plan, "TAKE_PROFIT")
+    stop_matches = _protective_leg_matches(stop_orders, order_plan.stop_price, stop_working_type)
+    target_matches = _protective_leg_matches(target_orders, order_plan.target_price, target_working_type)
+    if stop_matches and target_matches:
+        return {
+            "no_op": True,
+            "status": "protective_plan_already_active",
+            "stop_price": order_plan.stop_price,
+            "target_price": order_plan.target_price,
+        }
+    cancel_responses = _cancel_replaced_algo_orders(
+        client,
+        order_plan,
+        order_kind="STOP",
+    )
+    if _cancel_responses_failed(cancel_responses):
         return {
             "cancel_replaced_algo_orders": cancel_responses,
             "stop_loss_order": None,
             "take_profit_order": None,
         }
-    # Bug fix: the old code cancelled both old SL+TP, then tried to place new
-    # SL then new TP. If the new SL or TP placement failed (e.g. -4509 "GTE can
-    # only be used with open positions" during a partial-fill race), the
-    # position was left with NO protective orders at all (裸奔). Now we place
-    # the new SL first, and if that fails we do NOT proceed to TP — instead we
-    # re-place the original SL as a fail-closed fallback so the position is
-    # never unprotected. The same guard wraps the TP placement.
-    original_sl_price = next(
-        (_float_or_default(o.get("stopPrice") or o.get("stop_price"), None) for o in order_plan.cancel_algo_orders
-         if str(o.get("algoType", "")).upper() in ("STOP_MARKET", "STOP", "CONDITIONAL") and "tp" not in str(o.get("clientAlgoId", "")).lower()),
-        None,
-    )
-    original_tp_price = next(
-        (_float_or_default(o.get("stopPrice") or o.get("stop_price"), None) for o in order_plan.cancel_algo_orders
-         if str(o.get("algoType", "")).upper() in ("TAKE_PROFIT_MARKET", "TAKE_PROFIT") or "tp" in str(o.get("clientAlgoId", "")).lower()),
-        None,
-    )
+    # Replace the stop while the old target remains live. Only after the new
+    # stop is accepted do we cancel and replace the target, avoiding the
+    # previous full-protection gap.
+    original_sl_price = _first_protective_price(stop_orders)
+    original_tp_price = _first_protective_price(target_orders)
     try:
         stop_response = client.new_algo_order(
             symbol=order_plan.symbol,
@@ -1505,14 +1556,34 @@ def _replace_protective_orders(
             close_position=True,
             position_side=order_plan.position_side,
             client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="trail-sl"),
+            working_type=stop_working_type,
         )
     except BinanceSignedError as exc:
         # Fail-closed: re-place the original SL so the position is protected.
-        fallback = _fail_closed_reprotect(client, order_plan, checked_at, "sl", original_sl_price)
+        fallback = _fail_closed_reprotect(
+            client,
+            config,
+            order_plan,
+            checked_at,
+            "sl",
+            original_sl_price,
+        )
         return {
             "stop_loss_order": None,
             "stop_loss_error": _signed_error_payload(exc),
             "stop_loss_fallback": fallback,
+            "cancel_replaced_algo_orders": cancel_responses,
+        }
+    target_cancel_responses = _cancel_replaced_algo_orders(
+        client,
+        order_plan,
+        order_kind="TAKE_PROFIT",
+    )
+    cancel_responses.extend(target_cancel_responses)
+    if _cancel_responses_failed(target_cancel_responses):
+        return {
+            "stop_loss_order": stop_response,
+            "take_profit_order": None,
             "cancel_replaced_algo_orders": cancel_responses,
         }
     try:
@@ -1524,13 +1595,21 @@ def _replace_protective_orders(
             close_position=True,
             position_side=order_plan.position_side,
             client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="trail-tp"),
+            working_type=target_working_type,
         )
     except BinanceSignedError as exc:
         return {
             "stop_loss_order": stop_response,
             "take_profit_order": None,
             "take_profit_error": _signed_error_payload(exc),
-            "take_profit_fallback": _fail_closed_reprotect(client, order_plan, checked_at, "tp", original_tp_price),
+            "take_profit_fallback": _fail_closed_reprotect(
+                client,
+                config,
+                order_plan,
+                checked_at,
+                "tp",
+                original_tp_price,
+            ),
             "cancel_replaced_algo_orders": cancel_responses,
         }
     return {
@@ -1542,6 +1621,7 @@ def _replace_protective_orders(
 
 def _fail_closed_reprotect(
     client: BinanceFuturesSignedClient,
+    config: AppConfig,
     order_plan: PositionAdjustmentOrderPlan,
     checked_at: str,
     kind: str,
@@ -1557,6 +1637,8 @@ def _fail_closed_reprotect(
     if original_price is None or original_price <= 0:
         return {"action": f"fail_closed_{kind}_skipped", "reason": "no_original_price"}
     order_type = "STOP_MARKET" if kind == "sl" else "TAKE_PROFIT_MARKET"
+    order_kind = "STOP" if kind == "sl" else "TAKE_PROFIT"
+    strategy_leg = strategy_leg_from_context(reason_codes=order_plan.reason_codes)
     suffix = f"fail-closed-{kind}"
     try:
         response = client.new_algo_order(
@@ -1567,6 +1649,11 @@ def _fail_closed_reprotect(
             close_position=True,
             position_side=order_plan.position_side,
             client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action=suffix),
+            working_type=protective_working_type(
+                config,
+                order_kind=order_kind,
+                strategy_leg=strategy_leg,
+            ),
         )
         return {"action": f"fail_closed_{kind}_replaced", "order": response}
     except BinanceSignedError as exc:
@@ -1576,10 +1663,12 @@ def _fail_closed_reprotect(
 def _backfill_protective_orders(
     client: BinanceFuturesSignedClient,
     *,
+    config: AppConfig,
     order_plan: PositionAdjustmentOrderPlan,
     checked_at: str,
 ) -> dict[str, Any]:
     missing = set(order_plan.missing_protective_order_types or ["STOP", "TAKE_PROFIT"])
+    strategy_leg = strategy_leg_from_context(reason_codes=order_plan.reason_codes)
     response: dict[str, Any] = {"cancel_replaced_algo_orders": []}
     if "STOP" in missing:
         if order_plan.stop_price is None:
@@ -1593,6 +1682,11 @@ def _backfill_protective_orders(
                 close_position=True,
                 position_side=order_plan.position_side,
                 client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="backfill-sl"),
+                working_type=protective_working_type(
+                    config,
+                    order_kind="STOP",
+                    strategy_leg=strategy_leg,
+                ),
             )
         except BinanceSignedError as exc:
             response["stop_loss_error"] = _signed_error_payload(exc)
@@ -1608,6 +1702,11 @@ def _backfill_protective_orders(
                 close_position=True,
                 position_side=order_plan.position_side,
                 client_algo_id=_client_algo_id(order_plan.symbol, checked_at, action="backfill-tp"),
+                working_type=protective_working_type(
+                    config,
+                    order_kind="TAKE_PROFIT",
+                    strategy_leg=strategy_leg,
+                ),
             )
         except BinanceSignedError as exc:
             response["take_profit_error"] = _signed_error_payload(exc)
@@ -1617,10 +1716,14 @@ def _backfill_protective_orders(
 def _cancel_replaced_algo_orders(
     client: BinanceFuturesSignedClient,
     order_plan: PositionAdjustmentOrderPlan,
+    *,
+    order_kind: str | None = None,
 ) -> list[dict[str, Any]]:
     responses: list[dict[str, Any]] = []
     for order in order_plan.cancel_algo_orders:
         if not _same_side_algo_order(order, order_plan=order_plan):
+            continue
+        if order_kind is not None and _algo_order_kind(order) != order_kind:
             continue
         algo_id = order.get("algoId")
         client_algo_id = order.get("clientAlgoId") or order.get("clientAlgoID")
@@ -1650,6 +1753,79 @@ def _cancel_replaced_algo_orders(
                 continue
             responses.append({"error": _signed_error_payload(exc), "order": dict(order)})
     return responses
+
+
+def _protective_orders_for_kind(
+    order_plan: PositionAdjustmentOrderPlan,
+    order_kind: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(order)
+        for order in order_plan.cancel_algo_orders
+        if _same_side_algo_order(order, order_plan=order_plan)
+        and _algo_order_kind(order) == order_kind
+    ]
+
+
+def _algo_order_kind(order: Mapping[str, Any]) -> str | None:
+    order_type = str(
+        order.get("type")
+        or order.get("orderType")
+        or order.get("origType")
+        or ""
+    ).upper()
+    if "TAKE_PROFIT" in order_type:
+        return "TAKE_PROFIT"
+    if "STOP" in order_type:
+        return "STOP"
+    client_id = str(order.get("clientAlgoId") or order.get("clientAlgoID") or "").lower()
+    if "tp" in client_id:
+        return "TAKE_PROFIT"
+    if "sl" in client_id:
+        return "STOP"
+    return None
+
+
+def _protective_leg_matches(
+    orders: list[dict[str, Any]],
+    desired_price: float,
+    desired_working_type: str,
+) -> bool:
+    if len(orders) != 1:
+        return False
+    current_price = _protective_order_price(orders[0])
+    if current_price is None or not _prices_equal(current_price, desired_price):
+        return False
+    current_working_type = str(orders[0].get("workingType") or "").strip().upper()
+    return not current_working_type or current_working_type == desired_working_type
+
+
+def _protective_order_price(order: Mapping[str, Any]) -> float | None:
+    return _positive_float(
+        order.get("triggerPrice")
+        or order.get("stopPrice")
+        or order.get("stop_price")
+    )
+
+
+def _first_protective_price(orders: list[dict[str, Any]]) -> float | None:
+    for order in orders:
+        price = _protective_order_price(order)
+        if price is not None:
+            return price
+    return None
+
+
+def _prices_equal(left: float, right: float) -> bool:
+    tolerance = max(abs(left), abs(right), 1.0) * 1e-10
+    return abs(left - right) <= tolerance
+
+
+def _cancel_responses_failed(responses: list[dict[str, Any]]) -> bool:
+    return any(
+        isinstance(item, Mapping) and ("error" in item or item.get("skipped"))
+        for item in responses
+    )
 
 
 def _protective_replace_needs_attention(response: Mapping[str, Any]) -> bool:

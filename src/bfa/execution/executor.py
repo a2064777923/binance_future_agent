@@ -13,6 +13,7 @@ from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceFuturesSignedClient, BinanceSignedError
 from bfa.execution.filters import SymbolExecutionFilters
 from bfa.execution.models import ExecutionResult, OrderIntent, RiskDecision, RiskState
+from bfa.execution.protection import protective_working_type, strategy_leg_from_context
 from bfa.execution.risk import evaluate_risk, intent_from_ai_decision, required_available_balance_reserve_usdt
 from bfa.execution.store import (
     persist_exchange_response,
@@ -634,6 +635,7 @@ class ExecutionEngine:
         assert self.signed_client is not None
         close_side = _opposite_side(intent.side)
         position_side = _position_side(intent, self.config)
+        strategy_leg = strategy_leg_from_context(intent.metadata, intent.reason_codes)
         return {
             "stop_loss_order": self.signed_client.new_algo_order(
                 symbol=intent.symbol,
@@ -643,6 +645,11 @@ class ExecutionEngine:
                 close_position=True,
                 position_side=position_side,
                 client_algo_id=_client_order_id(intent, suffix="sl"),
+                working_type=protective_working_type(
+                    self.config,
+                    order_kind="STOP",
+                    strategy_leg=strategy_leg,
+                ),
             ),
             "take_profit_order": self.signed_client.new_algo_order(
                 symbol=intent.symbol,
@@ -652,6 +659,11 @@ class ExecutionEngine:
                 close_position=True,
                 position_side=position_side,
                 client_algo_id=_client_order_id(intent, suffix="tp"),
+                working_type=protective_working_type(
+                    self.config,
+                    order_kind="TAKE_PROFIT",
+                    strategy_leg=strategy_leg,
+                ),
             ),
         }
 
@@ -804,6 +816,7 @@ class ExecutionEngine:
     ) -> dict[str, Any]:
         assert self.signed_client is not None
         close_side = _opposite_side(intent.side)
+        strategy_leg = strategy_leg_from_context(intent.metadata, intent.reason_codes)
         stop_price = _fallback_stop_price(intent, position)
         target_price = _fallback_target_price(intent, position)
         response: dict[str, Any] = {
@@ -821,6 +834,11 @@ class ExecutionEngine:
                     close_position=True,
                     position_side=position_side,
                     client_algo_id=_client_order_id(intent, suffix="fbsl"),
+                    working_type=protective_working_type(
+                        self.config,
+                        order_kind="STOP",
+                        strategy_leg=strategy_leg,
+                    ),
                 )
                 response["submitted_types"].append("STOP")
             except BinanceSignedError as exc:
@@ -835,6 +853,11 @@ class ExecutionEngine:
                     close_position=True,
                     position_side=position_side,
                     client_algo_id=_client_order_id(intent, suffix="fbtp"),
+                    working_type=protective_working_type(
+                        self.config,
+                        order_kind="TAKE_PROFIT",
+                        strategy_leg=strategy_leg,
+                    ),
                 )
                 response["submitted_types"].append("TAKE_PROFIT")
             except BinanceSignedError as exc:
@@ -1194,6 +1217,8 @@ def _limit_wait_seconds(intent: OrderIntent) -> float:
 
 def _defer_limit_entry_resolution(config: AppConfig, intent: OrderIntent) -> bool:
     if not _truthy(config.get("BFA_LIMIT_ENTRY_DEFER_ENABLED", "false")):
+        return False
+    if _is_micro_grid_intent(intent):
         return False
     try:
         minimum = float(config.get("BFA_LIMIT_ENTRY_DEFER_MIN_WAIT_SECONDS", "60") or 60)

@@ -13,6 +13,7 @@ from bfa.event_store.migrations import connect, migrate
 from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceSignedError
 from bfa.execution.models import OrderIntent, RiskDecision
+from bfa.execution.protection import protective_working_type, strategy_leg_from_context
 from bfa.execution.store import (
     load_pending_limit_entry_rows,
     order_intent_from_mapping,
@@ -693,6 +694,7 @@ def _place_missing_protective_orders(
     }
     reason_codes = []
     close_side = _opposite_side(intent.side)
+    strategy_leg = strategy_leg_from_context(intent.metadata, intent.reason_codes)
     if "STOP" in missing:
         try:
             response["stop_loss_order"] = client.new_algo_order(
@@ -703,6 +705,11 @@ def _place_missing_protective_orders(
                 close_position=True,
                 position_side=position_side,
                 client_algo_id=_client_order_id(intent, checked_at=checked_at, suffix="wd-sl"),
+                working_type=protective_working_type(
+                    config,
+                    order_kind="STOP",
+                    strategy_leg=strategy_leg,
+                ),
             )
             reason_codes.append("stop_loss_backfilled")
         except BinanceSignedError as exc:
@@ -718,6 +725,11 @@ def _place_missing_protective_orders(
                 close_position=True,
                 position_side=position_side,
                 client_algo_id=_client_order_id(intent, checked_at=checked_at, suffix="wd-tp"),
+                working_type=protective_working_type(
+                    config,
+                    order_kind="TAKE_PROFIT",
+                    strategy_leg=strategy_leg,
+                ),
             )
             reason_codes.append("take_profit_backfilled")
         except BinanceSignedError as exc:

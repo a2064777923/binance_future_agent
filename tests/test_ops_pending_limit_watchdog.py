@@ -108,7 +108,10 @@ class PendingLimitWatchdogTests(unittest.TestCase):
                     order_type="LIMIT",
                     time_in_force="GTX",
                     limit_wait_seconds=20,
-                    metadata={"client_order_id": "bfa-btc-pending-1"},
+                    metadata={
+                        "client_order_id": "bfa-btc-pending-1",
+                        "strategy_leg": "micro_grid",
+                    },
                 ),
                 status="entry_order_pending",
                 risk=RiskDecision(True, ["risk_accepted"]),
@@ -183,6 +186,7 @@ class PendingLimitWatchdogTests(unittest.TestCase):
         self.assertEqual(report.protected_count, 1)
         self.assertEqual(report.items[0].status, "position_reconciled_protected")
         self.assertEqual([order["order_type"] for order in client.algo_orders], ["STOP_MARKET", "TAKE_PROFIT_MARKET"])
+        self.assertEqual([order["working_type"] for order in client.algo_orders], ["MARK_PRICE", "CONTRACT_PRICE"])
         self.assertGreaterEqual(self.exchange_response_count(), 1)
 
     def test_execute_flag_without_env_permission_stays_observe_only(self):
