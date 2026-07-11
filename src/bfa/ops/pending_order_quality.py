@@ -42,6 +42,9 @@ class PendingOrderQualityItem:
     entry_distance_percent: float | None = None
     micro_momentum_percent: float | None = None
     taker_buy_sell_ratio: float | None = None
+    adverse_flow_window_count: int | None = None
+    volume_expansion_ratio: float | None = None
+    price_acceptance: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +57,9 @@ class PendingOrderQualityItem:
             "entry_distance_percent": self.entry_distance_percent,
             "micro_momentum_percent": self.micro_momentum_percent,
             "taker_buy_sell_ratio": self.taker_buy_sell_ratio,
+            "adverse_flow_window_count": self.adverse_flow_window_count,
+            "volume_expansion_ratio": self.volume_expansion_ratio,
+            "price_acceptance": self.price_acceptance,
         }
 
 
@@ -102,7 +108,15 @@ def execute_pending_order_quality_check(
     execution_enabled = execute and _truthy(
         config.get("BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED", "false")
     )
-    max_items = _positive_int(config.get("BFA_PENDING_LIMIT_QUALITY_MAX_ITEMS", "10"), 10)
+    configured_max = _positive_int(config.get("BFA_PENDING_LIMIT_QUALITY_MAX_ITEMS", "11"), 11)
+    configured_capacity = _positive_int(
+        config.get("BFA_MICRO_GRID_MAX_PENDING_ORDERS", "3"),
+        3,
+    ) + _positive_int(
+        config.get("BFA_TREND_MAX_PENDING_ORDERS", "8"),
+        8,
+    )
+    max_items = max(configured_max, configured_capacity)
     open_by_client_id = {
         str(order.get("clientOrderId") or order.get("origClientOrderId") or ""): order
         for order in open_orders
@@ -204,6 +218,11 @@ def _check_item(
             reasons=["reference_or_entry_price_missing"],
         )
     distance = _entry_distance_percent(intent.side, current_price=current_price, entry_price=intent.entry_price)
+    second_quality = _second_quality_diagnostics(
+        config,
+        context,
+        side=intent.side,
+    )
     reasons = _quality_reasons(
         config,
         side=intent.side,
@@ -214,11 +233,15 @@ def _check_item(
         momentum_percent=momentum,
         taker_ratio=taker_ratio,
         signal_side=signal_side,
+        second_quality=second_quality,
     )
     metrics = {
         "entry_distance_percent": round(distance, 8),
         "micro_momentum_percent": momentum,
         "taker_buy_sell_ratio": taker_ratio,
+        "adverse_flow_window_count": second_quality.get("adverse_flow_window_count"),
+        "volume_expansion_ratio": second_quality.get("volume_expansion_ratio"),
+        "price_acceptance": second_quality.get("price_acceptance"),
     }
     if not reasons:
         return PendingOrderQualityItem(
@@ -328,6 +351,7 @@ def _quality_reasons(
     momentum_percent: float | None,
     taker_ratio: float | None,
     signal_side: str | None,
+    second_quality: Mapping[str, Any],
 ) -> list[str]:
     buy = side.upper() == "BUY"
     reasons: list[str] = []
@@ -357,9 +381,82 @@ def _quality_reasons(
         or (not buy and momentum_percent >= momentum_threshold)
     )
     adverse_flow = taker_ratio is not None and ((buy and taker_ratio <= sell_ratio) or (not buy and taker_ratio >= buy_ratio))
-    if adverse_momentum and adverse_flow:
+    second_available = bool(second_quality.get("available"))
+    if (
+        second_available
+        and bool(second_quality.get("adverse_flow_persistent"))
+        and bool(second_quality.get("volume_expanding"))
+        and bool(second_quality.get("price_acceptance"))
+    ):
+        reasons.append("pending_order_adverse_flow_volume_price_acceptance")
+    elif not second_available and adverse_momentum and adverse_flow:
         reasons.append("pending_order_trend_and_flow_deteriorated")
     return _dedupe(reasons)
+
+
+def _second_quality_diagnostics(
+    config: AppConfig,
+    context: Mapping[str, Any],
+    *,
+    side: str,
+) -> dict[str, Any]:
+    fractions = context.get("second_taker_buy_fractions")
+    returns = context.get("second_returns_percent")
+    if not isinstance(fractions, Mapping) or not isinstance(returns, Mapping):
+        return {"available": False}
+    buy = side.upper() == "BUY"
+    flow_limit = _positive_float(
+        config.get("BFA_PENDING_LIMIT_QUALITY_ADVERSE_TAKER_BUY_FRACTION", "0.35"),
+        0.35,
+    )
+    return_limit = _positive_float(
+        config.get("BFA_PENDING_LIMIT_QUALITY_PRICE_ACCEPTANCE_RETURN_PERCENT", "0.03"),
+        0.03,
+    )
+    adverse_windows = 0
+    parsed_returns: list[float] = []
+    for window in sorted(set(fractions) & set(returns), key=lambda value: _positive_int(value, 0)):
+        fraction = _float_or_none(fractions.get(window))
+        window_return = _float_or_none(returns.get(window))
+        if fraction is None or window_return is None:
+            continue
+        parsed_returns.append(window_return)
+        flow_adverse = fraction <= flow_limit if buy else fraction >= 1.0 - flow_limit
+        return_adverse = window_return <= -return_limit if buy else window_return >= return_limit
+        if flow_adverse and return_adverse:
+            adverse_windows += 1
+    min_windows = _positive_int(
+        config.get("BFA_PENDING_LIMIT_QUALITY_ADVERSE_MIN_WINDOWS", "2"),
+        2,
+    )
+    volume_ratio = _float_or_none(context.get("second_volume_expansion_ratio"))
+    min_volume_ratio = _positive_float(
+        config.get("BFA_PENDING_LIMIT_QUALITY_VOLUME_EXPANSION_RATIO", "1.5"),
+        1.5,
+    )
+    closes = context.get("second_closes")
+    vwap = _float_or_none(context.get("second_vwap"))
+    parsed_closes = [
+        value
+        for value in (_float_or_none(item) for item in closes or [])
+        if value is not None and value > 0
+    ]
+    accepted_by_vwap = False
+    if vwap is not None and len(parsed_closes) >= 3:
+        tail = parsed_closes[-3:]
+        accepted_by_vwap = all(value < vwap for value in tail) if buy else all(value > vwap for value in tail)
+    accepted_by_return = any(
+        value <= -return_limit if buy else value >= return_limit
+        for value in parsed_returns
+    )
+    return {
+        "available": True,
+        "adverse_flow_window_count": adverse_windows,
+        "adverse_flow_persistent": adverse_windows >= min_windows,
+        "volume_expansion_ratio": volume_ratio,
+        "volume_expanding": volume_ratio is not None and volume_ratio >= min_volume_ratio,
+        "price_acceptance": accepted_by_vwap and accepted_by_return,
+    }
 
 
 def _entry_distance_percent(side: str, *, current_price: float, entry_price: float) -> float:

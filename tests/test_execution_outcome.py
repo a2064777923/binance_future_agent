@@ -929,6 +929,81 @@ class TradeOutcomeTests(unittest.TestCase):
         self.assertEqual(report.items[0].status, "unreconciled")
         self.assertEqual(report.items[0].reason, "ambiguous_trade_attribution")
 
+    def test_entry_fill_quantity_mismatch_stays_unreconciled(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T00:00:00Z",
+            source="execution.live",
+            symbol="BTCUSDT",
+            ref_id="quantity-mismatch",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "quantity": 1,
+                    "entry_price": 100,
+                    "leverage": 10,
+                    "metadata": {"exchange_order_id": 100},
+                },
+            },
+            event_type="order_intent",
+        )
+        client = FakeTradeMapClient(
+            {
+                "BTCUSDT": [
+                    {"id": 1, "orderId": 100, "symbol": "BTCUSDT", "side": "BUY", "qty": "0.8", "price": "100", "realizedPnl": "0", "commission": "0", "time": 1783209601000},
+                    {"id": 2, "orderId": 101, "symbol": "BTCUSDT", "side": "SELL", "qty": "0.8", "price": "101", "realizedPnl": "0.8", "commission": "0", "time": 1783209660000},
+                ]
+            }
+        )
+
+        report = reconcile_submitted_trade_outcomes(store, client)
+
+        self.assertEqual(report.items[0].status, "unreconciled")
+        self.assertEqual(report.items[0].reason, "ambiguous_trade_attribution")
+
+    def test_manual_same_side_fill_cannot_be_folded_into_agent_round_trip(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        store = EventStore(connection)
+        store.insert_artifact(
+            "order_intents",
+            occurred_at="2026-07-05T00:00:00Z",
+            source="execution.live",
+            symbol="BTCUSDT",
+            ref_id="manual-scale-in",
+            payload={
+                "status": "submitted",
+                "intent": {
+                    "symbol": "BTCUSDT",
+                    "side": "BUY",
+                    "quantity": 1,
+                    "entry_price": 100,
+                    "leverage": 10,
+                    "metadata": {"exchange_order_id": 100},
+                },
+            },
+            event_type="order_intent",
+        )
+        client = FakeTradeMapClient(
+            {
+                "BTCUSDT": [
+                    {"id": 1, "orderId": 100, "symbol": "BTCUSDT", "side": "BUY", "qty": "1", "price": "100", "realizedPnl": "0", "commission": "0", "time": 1783209601000},
+                    {"id": 2, "orderId": 999, "symbol": "BTCUSDT", "side": "BUY", "qty": "0.2", "price": "99", "realizedPnl": "0", "commission": "0", "time": 1783209610000},
+                    {"id": 3, "orderId": 101, "symbol": "BTCUSDT", "side": "SELL", "qty": "1.2", "price": "101", "realizedPnl": "1.2", "commission": "0", "time": 1783209660000},
+                ]
+            }
+        )
+
+        report = reconcile_submitted_trade_outcomes(store, client)
+
+        self.assertEqual(report.items[0].status, "unreconciled")
+        self.assertEqual(report.items[0].reason, "ambiguous_trade_attribution")
+
     def test_overlapping_order_ids_with_combined_exit_are_not_guessed(self):
         connection = sqlite3.connect(":memory:")
         connection.row_factory = sqlite3.Row

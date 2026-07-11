@@ -42,8 +42,15 @@ def main() -> int:
     parser.add_argument("--max-risk-per-trade-usdt", type=float, default=None)
     parser.add_argument("--max-daily-loss-usdt", type=float, default=None)
     parser.add_argument("--max-open-positions", type=int, default=None)
+    parser.add_argument(
+        "--trend-climax-guard-mode",
+        choices=("profile", "on", "off"),
+        default="profile",
+        help="override the selected profile's trend climax entry guard",
+    )
     parser.add_argument("--cache-dir", default="runtime/aggTrades-cache")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
@@ -76,6 +83,14 @@ def main() -> int:
         variant_overrides["max_open_positions"] = args.max_open_positions
     if variant_overrides:
         variant_config = replace(variant_config, **variant_overrides)
+    if args.trend_climax_guard_mode != "profile":
+        variant_config = replace(
+            variant_config,
+            setup_profile={
+                **variant_config.setup_profile,
+                "require_trend_climax_guard": args.trend_climax_guard_mode == "on",
+            },
+        )
 
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +152,7 @@ def main() -> int:
         },
         "symbols": symbols,
         "variant": args.variant,
+        "trend_climax_guard_mode": args.trend_climax_guard_mode,
         "config": variant_config.to_dict(),
         "coverage": coverage,
         "candidate_trade_count": len(all_candidates),
@@ -150,7 +166,22 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    print(json.dumps(payload, indent=2, sort_keys=True))
+    if args.quiet:
+        print(
+            json.dumps(
+                {
+                    "window": payload["window"],
+                    "symbols": symbols,
+                    "variant": args.variant,
+                    "trend_climax_guard_mode": args.trend_climax_guard_mode,
+                    "candidate_trade_count": len(all_candidates),
+                    "compound_summary": compound["summary"],
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 

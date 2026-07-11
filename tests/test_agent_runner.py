@@ -1751,6 +1751,104 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(sum(call[0] == "open_algo_orders" for call in signed_client.calls), 1)
         self.assertEqual(sum(call[0] == "account" for call in signed_client.calls), 1)
 
+    def test_live_pending_quality_runs_even_when_current_scan_has_no_candidate(self):
+        class NoCandidateCollector(MultiKlineMomentumCollector):
+            def collect_rest_snapshots(self):
+                snapshots = super().collect_rest_snapshots()
+                for snapshot in snapshots:
+                    if "quote_volume" in snapshot.payload:
+                        snapshot.payload["quote_volume"] = "1000"
+                return snapshots
+
+        class QualitySignedClient(FakeSignedClient):
+            def position_risk(self):
+                self.calls.append(("position_risk",))
+                return []
+
+            def query_order(self, **kwargs):
+                self.calls.append(("query_order", kwargs))
+                return {"status": "NEW", "executedQty": "0", "price": "90"}
+
+            def cancel_order(self, **kwargs):
+                self.calls.append(("cancel_order", kwargs))
+                return {"status": "CANCELED", **kwargs}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            decided_at = (datetime.now(tz=UTC) - timedelta(seconds=60)).isoformat().replace("+00:00", "Z")
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            store = EventStore(connection)
+            persist_order_intent(
+                store,
+                intent=OrderIntent(
+                    symbol="BTCUSDT",
+                    side="BUY",
+                    quantity=0.2,
+                    notional_usdt=18,
+                    entry_price=90,
+                    stop_price=85,
+                    target_price=100,
+                    leverage=10,
+                    mode="live",
+                    decided_at=decided_at,
+                    order_type="LIMIT",
+                    limit_wait_seconds=1800,
+                    metadata={"client_order_id": "bfa-btc-quality-no-candidate", "strategy_leg": "trend"},
+                ),
+                status="entry_order_pending",
+                risk=RiskDecision(True, ["risk_accepted"]),
+            )
+            connection.close()
+            signed_client = QualitySignedClient(
+                open_orders=[
+                    {
+                        "symbol": "BTCUSDT",
+                        "clientOrderId": "bfa-btc-quality-no-candidate",
+                        "status": "NEW",
+                        "type": "LIMIT",
+                        "side": "BUY",
+                        "origQty": "0.2",
+                        "executedQty": "0",
+                        "price": "90",
+                    }
+                ]
+            )
+            config = load_config(
+                {
+                    "BFA_MODE": "live",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BINANCE_API_KEY": "synthetic-binance-key-abcdef",
+                    "BINANCE_API_SECRET": "synthetic-binance-secret-abcdef",
+                    "BFA_MARKET_SYMBOLS": "ETHUSDT",
+                    "BFA_MAX_POSITION_NOTIONAL_USDT": "20",
+                    "BFA_LIVE_REQUIRE_NARRATIVE_EVIDENCE": "false",
+                    "BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED": "true",
+                    "BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED": "true",
+                    "BFA_PENDING_LIMIT_QUALITY_MAX_DISTANCE_PERCENT": "0.1",
+                    "BFA_KILL_SWITCH_FILE": str(root / "KILL_SWITCH"),
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+
+            result = run_agent_once(
+                config=config,
+                db_path=str(db_path),
+                market_client=FakeMarketClient(),
+                collector=NoCandidateCollector(),
+                narrative_runner=FakeNarrativeRunner(),
+                ai_client=FakeAiClient(),
+                signed_client=signed_client,
+            )
+
+        self.assertEqual(result.status, "no_candidate")
+        self.assertEqual(result.source_health["pending_order_quality"]["canceled_count"], 1)
+        self.assertEqual(sum(call[0] == "cancel_order" for call in signed_client.calls), 1)
+
     def test_live_daily_realized_loss_from_outcomes_blocks_new_entry(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

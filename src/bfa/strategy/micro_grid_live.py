@@ -32,6 +32,10 @@ class MicroGridLiveConfig:
     max_hold_seconds: int | None
     model_horizon_seconds: int
     max_signal_age_seconds: float
+    cost_quality_shadow_enabled: bool
+    cost_quality_enforce_enabled: bool
+    min_net_reward_percent: float
+    max_reversal_response_rate: float
     dynamic_entry_base_edge_fraction: float
     dynamic_entry_max_push_fraction: float
     dynamic_entry_flow_push_fraction: float
@@ -70,6 +74,20 @@ class MicroGridLiveConfig:
             max_signal_age_seconds=max(
                 _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MAX_SIGNAL_AGE_SECONDS"), 12.0),
                 1.0,
+            ),
+            cost_quality_shadow_enabled=_truthy(
+                config.get("BFA_LIVE_MICRO_GRID_COST_QUALITY_SHADOW_ENABLED")
+            ),
+            cost_quality_enforce_enabled=_truthy(
+                config.get("BFA_LIVE_MICRO_GRID_COST_QUALITY_ENFORCE_ENABLED")
+            ),
+            min_net_reward_percent=max(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MIN_NET_REWARD_PERCENT"), 0.30),
+                0.0,
+            ),
+            max_reversal_response_rate=max(
+                _float_or_default(config.get("BFA_LIVE_MICRO_GRID_MAX_REVERSAL_RESPONSE_RATE"), 0.90),
+                0.0,
             ),
             dynamic_entry_base_edge_fraction=_float_or_default(
                 config.get("BFA_LIVE_MICRO_GRID_DYNAMIC_ENTRY_BASE_EDGE_FRACTION"),
@@ -141,6 +159,8 @@ def build_micro_grid_live_candidates(
     generated_at: str,
     max_position_notional_usdt: float | None,
     market_context_by_symbol: Mapping[str, Mapping[str, Any]] | None = None,
+    seconds_cache_payload: Mapping[str, Any] | None = None,
+    seconds_cache_error: str | None = None,
 ) -> tuple[list[CandidateSignal], dict[str, Any]]:
     live_config = MicroGridLiveConfig.from_app(config)
     health: dict[str, Any] = {
@@ -156,7 +176,11 @@ def build_micro_grid_live_candidates(
     }
     if not live_config.enabled:
         return [], health
-    cache_payload, cache_error = _read_seconds_cache(live_config.seconds_cache_path)
+    if seconds_cache_payload is None:
+        cache_payload, cache_error = _read_seconds_cache(live_config.seconds_cache_path)
+    else:
+        cache_payload = dict(seconds_cache_payload)
+        cache_error = seconds_cache_error
     if cache_error:
         health.update({"status": "cache_unavailable", "error": cache_error})
         return [], health
@@ -223,6 +247,12 @@ def build_micro_grid_live_candidates(
         selected = ranked[0]
         score = _order_score(selected, research)
         quality_scale, quality_reasons = research.micro_trade_quality_scale_from_reason_codes(selected.reason_codes)
+        reason_values = research.reason_code_map(selected.reason_codes)
+        cost_quality_gate = _micro_cost_quality_gate(
+            live_config,
+            net_reward_percent=_float_or_none(reason_values.get("net_notional_reward_percent")),
+            reversal_response_rate=_float_or_none(state.reversal_response_rate),
+        )
         signal_time_ms = _iso_to_epoch_ms(selected.signal_time)
         candidate_generated_at_ms = int(time.time() * 1000)
         signal_age_seconds = (
@@ -235,6 +265,7 @@ def build_micro_grid_live_candidates(
                 "signal_age_seconds": round(signal_age_seconds, 3) if signal_age_seconds is not None else None,
                 "trade_quality_scale": round(float(quality_scale), 6),
                 "trade_quality_reasons": list(quality_reasons),
+                "cost_quality_gate": dict(cost_quality_gate),
                 "order_count": len(orders),
                 "selected_side": selected.side,
                 "entry_price": selected.entry_price,
@@ -250,6 +281,11 @@ def build_micro_grid_live_candidates(
         if score < live_config.min_score:
             rejection_counts["micro_grid_score_below_min"] = rejection_counts.get("micro_grid_score_below_min", 0) + 1
             continue
+        if cost_quality_gate["enforced"] and not cost_quality_gate["passed"]:
+            reason = "micro_grid_cost_quality_gate_blocked"
+            symbol_health.update({"status": "rejected", "reasons": [reason]})
+            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            continue
         candidates.append(
             _candidate_from_order(
                 selected,
@@ -261,6 +297,7 @@ def build_micro_grid_live_candidates(
                 live_config=live_config,
                 cache_updated_at_ms=updated_at_ms,
                 market_context=context,
+                cost_quality_gate=cost_quality_gate,
             )
         )
 
@@ -275,6 +312,95 @@ def build_micro_grid_live_candidates(
         }
     )
     return selected_candidates, health
+
+
+def read_micro_grid_seconds_cache(config: AppConfig) -> tuple[dict[str, Any], str | None]:
+    live_config = MicroGridLiveConfig.from_app(config)
+    return _read_seconds_cache(live_config.seconds_cache_path)
+
+
+def pending_quality_contexts_from_seconds_cache(
+    cache_payload: Mapping[str, Any],
+    symbols: list[str],
+) -> dict[str, dict[str, Any]]:
+    symbols_payload = cache_payload.get("symbols")
+    if not isinstance(symbols_payload, Mapping):
+        return {}
+    contexts: dict[str, dict[str, Any]] = {}
+    for raw_symbol in dict.fromkeys(symbol.upper() for symbol in symbols if symbol):
+        raw_bars = symbols_payload.get(raw_symbol) or symbols_payload.get(raw_symbol.lower())
+        if not isinstance(raw_bars, list):
+            continue
+        rows = [_second_context_row(item) for item in raw_bars[-90:]]
+        rows = [row for row in rows if row is not None]
+        if len(rows) < 5:
+            continue
+        rows.sort(key=lambda row: row["open_time"])
+        closes = [row["close"] for row in rows]
+        fractions: dict[str, float] = {}
+        returns: dict[str, float] = {}
+        for window in (5, 15, 30):
+            sample = rows[-window:]
+            if len(sample) < min(window, 5):
+                continue
+            first = sample[0]["close"]
+            last = sample[-1]["close"]
+            returns[str(window)] = round((last - first) / first * 100.0, 8) if first > 0 else 0.0
+            quote_volume = sum(row["quote_volume"] for row in sample)
+            if quote_volume > 0:
+                fractions[str(window)] = round(
+                    sum(row["taker_buy_quote_volume"] for row in sample) / quote_volume,
+                    8,
+                )
+        recent_volume = _mean([row["quote_volume"] for row in rows[-10:]])
+        prior_volume = _mean([row["quote_volume"] for row in rows[-30:-10]])
+        volume_expansion = (
+            recent_volume / prior_volume
+            if recent_volume is not None and prior_volume is not None and prior_volume > 0
+            else None
+        )
+        vwap_rows = rows[-30:]
+        base_volume = sum(row["volume"] for row in vwap_rows)
+        second_vwap = (
+            sum(row["close"] * row["volume"] for row in vwap_rows) / base_volume
+            if base_volume > 0
+            else _mean([row["close"] for row in vwap_rows])
+        )
+        contexts[raw_symbol] = {
+            "reference_price": closes[-1],
+            "second_taker_buy_fractions": fractions,
+            "second_returns_percent": returns,
+            "second_volume_expansion_ratio": round(volume_expansion, 8)
+            if volume_expansion is not None
+            else None,
+            "second_vwap": round(second_vwap, 8) if second_vwap is not None else None,
+            "second_closes": [round(value, 8) for value in closes[-5:]],
+            "second_context_sample_count": len(rows),
+        }
+    return contexts
+
+
+def _second_context_row(item: Any) -> dict[str, float] | None:
+    if not isinstance(item, Mapping):
+        return None
+    open_time = _int_or_none(item.get("open_time"))
+    close = _positive_float(item.get("close"))
+    if open_time is None or close is None:
+        return None
+    return {
+        "open_time": float(open_time),
+        "close": close,
+        "volume": max(_float_or_default(item.get("volume"), 0.0), 0.0),
+        "quote_volume": max(_float_or_default(item.get("quote_volume"), 0.0), 0.0),
+        "taker_buy_quote_volume": max(
+            _float_or_default(item.get("taker_buy_quote_volume"), 0.0),
+            0.0,
+        ),
+    }
+
+
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
 
 
 def micro_grid_setup_from_candidate(
@@ -402,10 +528,12 @@ def _candidate_from_order(
     live_config: MicroGridLiveConfig,
     cache_updated_at_ms: int | None,
     market_context: Mapping[str, Any] | None = None,
+    cost_quality_gate: Mapping[str, Any] | None = None,
 ) -> CandidateSignal:
     state = order.state
     side = order.side
     context = dict(market_context or {})
+    cost_gate = dict(cost_quality_gate or {})
     signal_time_ms = _iso_to_epoch_ms(state.signal_time)
     candidate_generated_at_ms = int(time.time() * 1000)
     latency = {
@@ -439,6 +567,7 @@ def _candidate_from_order(
         "micro_grid_size_weight": float(order.size_weight),
         "micro_grid_quality_scale": float(quality_scale),
         "micro_grid_quality_reasons": list(quality_reasons),
+        "micro_grid_cost_quality_gate": cost_gate,
         "micro_grid_score": round(score, 8),
         "micro_grid_order_type": live_config.order_type,
         "micro_grid_order_wait_seconds": int(live_config.order_wait_seconds),
@@ -505,6 +634,15 @@ def _candidate_from_order(
             f"micro_grid_quality_scale:{round(float(quality_scale), 6)}",
             *(f"micro_grid_{reason}" for reason in quality_reasons),
             *order.reason_codes,
+            *(
+                [
+                    "micro_grid_cost_quality_shadow_pass"
+                    if cost_gate.get("passed")
+                    else "micro_grid_cost_quality_shadow_block"
+                ]
+                if cost_gate.get("enabled")
+                else []
+            ),
             *data_quality_notes,
         ]
     )
@@ -520,6 +658,38 @@ def _candidate_from_order(
         generated_at=generated_at,
         features=features,
     )
+
+
+def _micro_cost_quality_gate(
+    live_config: MicroGridLiveConfig,
+    *,
+    net_reward_percent: float | None,
+    reversal_response_rate: float | None,
+) -> dict[str, Any]:
+    enabled = bool(
+        live_config.cost_quality_shadow_enabled
+        or live_config.cost_quality_enforce_enabled
+    )
+    reward_passed = (
+        net_reward_percent is not None
+        and net_reward_percent >= live_config.min_net_reward_percent
+    )
+    reversal_passed = (
+        reversal_response_rate is not None
+        and reversal_response_rate <= live_config.max_reversal_response_rate
+    )
+    return {
+        "enabled": enabled,
+        "shadow_only": enabled and not live_config.cost_quality_enforce_enabled,
+        "enforced": bool(live_config.cost_quality_enforce_enabled),
+        "passed": True if not enabled else reward_passed and reversal_passed,
+        "net_reward_percent": net_reward_percent,
+        "min_net_reward_percent": live_config.min_net_reward_percent,
+        "reversal_response_rate": reversal_response_rate,
+        "max_reversal_response_rate": live_config.max_reversal_response_rate,
+        "reward_passed": reward_passed,
+        "reversal_passed": reversal_passed,
+    }
 
 
 def _market_context_status(context: Mapping[str, Any]) -> str:

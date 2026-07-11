@@ -762,6 +762,40 @@ class StrategySetupTests(unittest.TestCase):
         self.assertIn("fresh_trend_confirmation", setup.price_basis)
         self.assertFalse(setup.price_basis["fresh_trend_confirmation"]["passed"])
 
+    def test_trend_climax_guard_rejects_high_range_position_with_expanding_flow(self):
+        setup = build_trade_setup(
+            self.candidate(
+                reference_price=100.0,
+                support_price=95.0,
+                resistance_price=100.2,
+                kline_close_position_percent=96.0,
+                kline_quote_volume_change_percent=180.0,
+                kline_momentum_percent=2.2,
+                kline_micro_momentum_percent=0.45,
+                taker_buy_sell_ratio=2.1,
+                taker_buy_sell_ratio_change=0.5,
+                rsi=78.0,
+            ),
+            risk_limits=self.risk_limits(),
+            profile={
+                "name": "climax_guard",
+                "min_edge": 5,
+                "entry_order_type": "market",
+                "require_trend_climax_guard": True,
+                "trend_climax_max_directional_position": 0.50,
+                "trend_climax_min_confirmations": 2,
+                "trend_climax_min_volume_expansion_percent": 60.0,
+                "trend_climax_taker_ratio": 1.35,
+                "trend_climax_min_momentum_percent": 0.8,
+            },
+        )
+
+        self.assertEqual(setup.decision, "pass")
+        self.assertIn("trend_long_climax_entry", setup.reasons)
+        diagnostics = setup.price_basis["trend_climax_guard"]
+        self.assertGreater(diagnostics["directional_position"], 0.5)
+        self.assertGreaterEqual(diagnostics["confirmation_count"], 2)
+
     def test_limit_entry_quality_gate_rejects_chasing_without_structure(self):
         setup = build_trade_setup(
             self.candidate(

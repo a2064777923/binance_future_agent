@@ -9,14 +9,61 @@ from bfa.strategy.micro_grid_live import (
     _candidate_from_order,
     _live_profile,
     _market_context_rejections,
+    _micro_cost_quality_gate,
     _order_score,
     micro_grid_setup_from_candidate,
+    pending_quality_contexts_from_seconds_cache,
 )
 
 from scripts import run_micro_grid_research as research
 
 
 class MicroGridLiveAdapterTests(unittest.TestCase):
+    def test_cost_quality_gate_defaults_to_shadow_and_flags_uneconomic_order(self):
+        live_config = MicroGridLiveConfig.from_app(load_config({}))
+
+        blocked = _micro_cost_quality_gate(
+            live_config,
+            net_reward_percent=0.12,
+            reversal_response_rate=0.95,
+        )
+        passed = _micro_cost_quality_gate(
+            live_config,
+            net_reward_percent=0.35,
+            reversal_response_rate=0.72,
+        )
+
+        self.assertTrue(blocked["shadow_only"])
+        self.assertFalse(blocked["enforced"])
+        self.assertFalse(blocked["passed"])
+        self.assertTrue(passed["passed"])
+
+    def test_pending_quality_seconds_context_computes_flow_volume_and_acceptance_inputs(self):
+        bars = []
+        for index in range(40):
+            close = 101.0 - index * 0.02
+            quote_volume = 10.0 if index < 30 else 30.0
+            bars.append(
+                {
+                    "open_time": 1_700_000_000_000 + index * 1000,
+                    "close": close,
+                    "volume": quote_volume / close,
+                    "quote_volume": quote_volume,
+                    "taker_buy_quote_volume": quote_volume * 0.2,
+                }
+            )
+
+        contexts = pending_quality_contexts_from_seconds_cache(
+            {"symbols": {"BTCUSDT": bars}},
+            ["BTCUSDT"],
+        )
+
+        context = contexts["BTCUSDT"]
+        self.assertLess(context["second_returns_percent"]["15"], 0)
+        self.assertLess(context["second_taker_buy_fractions"]["15"], 0.35)
+        self.assertGreater(context["second_volume_expansion_ratio"], 1.5)
+        self.assertEqual(len(context["second_closes"]), 5)
+
     def risk_limits(self) -> RiskLimits:
         return RiskLimits(
             account_capital_usdt=100.0,

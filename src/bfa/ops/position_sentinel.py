@@ -253,10 +253,14 @@ def _reversal_signal(
         "current_stop_r_multiple": item.stop_r_multiple,
         "current_target_progress": item.target_progress,
     }
+    early_failure = _trend_early_failure_diagnostics(item, metrics, profile=profile)
+    metrics["trend_early_failure_shadow"] = early_failure
     score = _score_reversal_risk(item, metrics, side=side, profile=profile)
     reasons: list[str] = []
     if profile["name"]:
         reasons.append(f"protection_profile:{profile['name']}")
+    if early_failure.get("triggered"):
+        reasons.append("trend_early_failure_shadow")
     if item.algo_protection_count < 2:
         reasons.append("protective_backfill_required")
     if item.stop_r_multiple is not None and item.stop_r_multiple >= min_profit_r:
@@ -898,6 +902,33 @@ def _protection_profile(config: AppConfig, item) -> dict[str, Any]:
         "strong_min_progress": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_MIN_TARGET_PROGRESS"), 0.55),
         "strong_lock_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_LOCK_R"), 0.35),
         "strong_giveback_r": _float_or_default(config.get("BFA_POSITION_SENTINEL_TREND_STRONG_GIVEBACK_R"), 0.65),
+        "early_failure_shadow_enabled": _truthy(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_SHADOW_ENABLED")
+        ),
+        "early_failure_min_seconds": _float_or_default(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_MIN_SECONDS"),
+            90.0,
+        ),
+        "early_failure_max_seconds": _float_or_default(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_MAX_SECONDS"),
+            900.0,
+        ),
+        "early_failure_max_mfe_r": _float_or_default(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_MAX_MFE_R"),
+            0.20,
+        ),
+        "early_failure_min_adverse_r": _float_or_default(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_MIN_ADVERSE_R"),
+            0.25,
+        ),
+        "early_failure_min_votes": _int_or_default(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_MIN_VOTES"),
+            3,
+        ),
+        "early_failure_volume_expansion_ratio": _float_or_default(
+            config.get("BFA_POSITION_SENTINEL_TREND_EARLY_FAILURE_VOLUME_EXPANSION_RATIO"),
+            1.30,
+        ),
     }
 
 
@@ -920,6 +951,77 @@ def _max_adverse_r(metrics: Mapping[str, Any]) -> float:
         _float_or_none(metrics.get("lifetime_max_adverse_r_multiple")) or 0.0,
         _float_or_none(metrics.get("recent_max_adverse_r_multiple")) or 0.0,
     )
+
+
+def _trend_early_failure_diagnostics(
+    item,
+    metrics: Mapping[str, Any],
+    *,
+    profile: Mapping[str, Any],
+) -> dict[str, Any]:
+    enabled = (
+        str(profile.get("name") or "") == "trend"
+        and bool(profile.get("early_failure_shadow_enabled"))
+    )
+    if not enabled:
+        return {"enabled": False, "triggered": False, "votes": 0}
+    elapsed = _float_or_none(metrics.get("elapsed_seconds"))
+    min_seconds = _float_or_default(profile.get("early_failure_min_seconds"), 90.0)
+    max_seconds = _float_or_default(profile.get("early_failure_max_seconds"), 900.0)
+    in_window = elapsed is not None and min_seconds <= elapsed <= max_seconds
+    favorable_r = _max_favorable_r(metrics)
+    adverse_r = max(
+        _max_adverse_r(metrics),
+        -(_float_or_none(item.stop_r_multiple) or 0.0),
+    )
+    low_followthrough = favorable_r <= _float_or_default(
+        profile.get("early_failure_max_mfe_r"),
+        0.20,
+    )
+    adverse_excursion = adverse_r >= _float_or_default(
+        profile.get("early_failure_min_adverse_r"),
+        0.25,
+    )
+    signed_return = _float_or_none(metrics.get("signed_short_return_percent")) or 0.0
+    adverse_return = signed_return <= -abs(
+        _float_or_default(profile.get("adverse_return_percent"), 0.10)
+    )
+    alignment = _float_or_none(metrics.get("direction_alignment"))
+    adverse_alignment = alignment is not None and alignment <= 0.25
+    volume_ratio = _float_or_none(metrics.get("volume_ratio"))
+    volume_expanding = volume_ratio is not None and volume_ratio >= _float_or_default(
+        profile.get("early_failure_volume_expansion_ratio"),
+        1.30,
+    )
+    votes = sum(
+        1
+        for value in (
+            adverse_excursion,
+            adverse_return,
+            adverse_alignment,
+            volume_expanding,
+        )
+        if value
+    )
+    min_votes = max(_int_or_default(profile.get("early_failure_min_votes"), 3), 1)
+    triggered = in_window and low_followthrough and adverse_excursion and votes >= min_votes
+    return {
+        "enabled": True,
+        "triggered": triggered,
+        "elapsed_seconds": elapsed,
+        "in_window": in_window,
+        "max_favorable_r": round(favorable_r, 5),
+        "max_adverse_r": round(adverse_r, 5),
+        "low_followthrough": low_followthrough,
+        "adverse_excursion": adverse_excursion,
+        "adverse_return": adverse_return,
+        "adverse_alignment": adverse_alignment,
+        "volume_expanding": volume_expanding,
+        "volume_ratio": volume_ratio,
+        "votes": votes,
+        "min_votes": min_votes,
+        "shadow_only": True,
+    }
 
 
 def _recent_mfe_threshold_met(metrics: Mapping[str, Any], *, min_profit_r: float, min_progress: float) -> bool:

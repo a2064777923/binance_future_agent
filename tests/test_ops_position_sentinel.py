@@ -787,6 +787,35 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertGreaterEqual(row[0], 0.8)
         self.assertGreaterEqual(row[1], 0.0)
 
+    def test_trend_early_failure_is_recorded_as_shadow_without_forcing_exit(self):
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmp.name) / "agent.sqlite"
+        self._insert_intent(occurred_at="2026-06-20T03:55:00Z")
+        fake_signed = FakeSignedClient(mark_price="98.8")
+        market = FakeMarketClient(
+            closes=[100.2, 100.1, 100.0, 99.9, 99.6, 99.3, 99.0, 98.8],
+            volumes=[10, 10, 11, 10, 22, 26, 30, 35],
+            high_offset=0.05,
+            low_offset=0.30,
+        )
+
+        report = build_position_sentinel_report(
+            self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+            execute=True,
+        )
+
+        signal = report.reversal_signals[0]
+        self.assertIn("trend_early_failure_shadow", signal.reasons)
+        self.assertTrue(signal.metrics["trend_early_failure_shadow"]["triggered"])
+        self.assertTrue(signal.metrics["trend_early_failure_shadow"]["shadow_only"])
+        self.assertEqual(signal.decision, "observe")
+        self.assertEqual(fake_signed.algo_orders, [])
+
     def test_micro_grid_invalidated_hard_adverse_without_profit_only_observes(self):
         self.tmp.cleanup()
         self.tmp = tempfile.TemporaryDirectory()

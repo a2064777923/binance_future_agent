@@ -193,6 +193,13 @@ class TradeSetupProfile:
     fresh_trend_micro_momentum_percent: float = 0.08
     fresh_trend_taker_flow_edge: float = 0.04
     fresh_trend_taker_acceleration_edge: float = 0.04
+    require_trend_climax_guard: bool = False
+    trend_climax_max_directional_position: float = 0.50
+    trend_climax_min_confirmations: int = 2
+    trend_climax_min_volume_expansion_percent: float = 60.0
+    trend_climax_taker_ratio: float = 1.35
+    trend_climax_min_momentum_percent: float = 0.8
+    trend_climax_min_pullback_offset_percent: float = 0.12
     allow_counter_signal: bool = False
     min_counter_signal_score: int = 0
     enable_orderly_range: bool = False
@@ -390,6 +397,18 @@ def build_trade_setup(
     if fresh_trend["rejections"]:
         decision = "pass"
         reasons = _dedupe([*reasons, *fresh_trend["rejections"]])
+    climax_guard = _trend_climax_guard_diagnostics(
+        entry,
+        entry_basis,
+        features,
+        side,
+        signal_diagnostics,
+        setup_profile,
+    )
+    price_basis["trend_climax_guard"] = climax_guard
+    if climax_guard["rejections"]:
+        decision = "pass"
+        reasons = _dedupe([*reasons, *climax_guard["rejections"]])
     crowding_risk, crowding_warnings = _high_crowding(features, side)
     warnings.extend(crowding_warnings)
     reasons = _dedupe([*reasons, *crowding_warnings])
@@ -1691,6 +1710,122 @@ def _fresh_trend_confirmation_diagnostics(
                 {"name": "taker_acceleration_not_adverse", "passed": not acceleration_adverse, "value": taker_change},
             ]
         ),
+    }
+
+
+def _trend_climax_guard_diagnostics(
+    entry_price: float,
+    entry_basis: Mapping[str, Any],
+    features: Mapping[str, Any],
+    side: str,
+    signal_diagnostics: Mapping[str, Any],
+    profile: TradeSetupProfile,
+) -> dict[str, Any]:
+    mode = str(signal_diagnostics.get("mode") or "trend_follow")
+    if not profile.require_trend_climax_guard or mode != "trend_follow" or side not in {"long", "short"}:
+        return {"enabled": False, "passed": True, "rejections": [], "checks": []}
+    support = _positive_float(features.get("support_price"))
+    resistance = _positive_float(features.get("resistance_price"))
+    directional_position = None
+    position_source = None
+    if support is not None and resistance is not None and resistance > support:
+        raw_position = (
+            (entry_price - support) / (resistance - support)
+            if side == "long"
+            else (resistance - entry_price) / (resistance - support)
+        )
+        directional_position = min(max(raw_position, 0.0), 1.0)
+        position_source = "support_resistance_entry"
+    else:
+        close_position = _float(features.get("kline_close_position_percent"))
+        if close_position is not None:
+            directional_position = (
+                close_position / 100.0
+                if side == "long"
+                else (100.0 - close_position) / 100.0
+            )
+            directional_position = min(max(directional_position, 0.0), 1.0)
+            position_source = "kline_close_position"
+    max_position = min(
+        max(_float(profile.trend_climax_max_directional_position) or 0.50, 0.0),
+        1.0,
+    )
+    offset = _float(entry_basis.get("offset_percent")) or 0.0
+    min_pullback = max(
+        _float(profile.trend_climax_min_pullback_offset_percent) or 0.0,
+        0.0,
+    )
+    late_position = directional_position is not None and directional_position > max_position
+    enough_pullback = offset >= min_pullback
+    structure_guard = entry_basis.get("trend_near_structure_guard")
+    breakout = structure_guard.get("breakout") if isinstance(structure_guard, Mapping) else None
+    confirmed_breakout = bool(
+        isinstance(breakout, Mapping)
+        and breakout.get("passed")
+    )
+    volume_change = _float(features.get("kline_quote_volume_change_percent"))
+    momentum = _float(features.get("kline_momentum_percent"))
+    micro_momentum = _float(features.get("kline_micro_momentum_percent"))
+    taker_ratio = _float(features.get("taker_buy_sell_ratio"))
+    taker_change = _float(features.get("taker_buy_sell_ratio_change"))
+    volume_climax = (
+        volume_change is not None
+        and volume_change >= max(_float(profile.trend_climax_min_volume_expansion_percent) or 0.0, 0.0)
+    )
+    ratio_limit = max(_float(profile.trend_climax_taker_ratio) or 1.0, 1.0)
+    flow_climax = taker_ratio is not None and (
+        taker_ratio >= ratio_limit if side == "long" else taker_ratio <= 1.0 / ratio_limit
+    )
+    momentum_limit = max(_float(profile.trend_climax_min_momentum_percent) or 0.0, 0.0)
+    momentum_climax = momentum is not None and micro_momentum is not None and (
+        momentum >= momentum_limit and micro_momentum > 0
+        if side == "long"
+        else momentum <= -momentum_limit and micro_momentum < 0
+    )
+    flow_acceleration_climax = taker_change is not None and (
+        taker_change >= 0.20 if side == "long" else taker_change <= -0.20
+    )
+    confirmations = sum(
+        1
+        for value in (
+            volume_climax,
+            flow_climax,
+            momentum_climax,
+            flow_acceleration_climax,
+        )
+        if value
+    )
+    required = max(int(_float(profile.trend_climax_min_confirmations) or 2), 1)
+    rejected = (
+        late_position
+        and not enough_pullback
+        and not confirmed_breakout
+        and confirmations >= required
+    )
+    rejections = [f"trend_{side}_climax_entry"] if rejected else []
+    checks = [
+        {"name": "directional_position_not_late", "passed": not late_position, "value": directional_position},
+        {"name": "pullback_offset_sufficient", "passed": enough_pullback, "value": offset},
+        {"name": "confirmed_breakout", "passed": confirmed_breakout, "value": confirmed_breakout},
+        {"name": "volume_not_climactic", "passed": not volume_climax, "value": volume_change},
+        {"name": "taker_flow_not_climactic", "passed": not flow_climax, "value": taker_ratio},
+        {"name": "momentum_not_climactic", "passed": not momentum_climax, "value": momentum},
+        {"name": "flow_acceleration_not_climactic", "passed": not flow_acceleration_climax, "value": taker_change},
+    ]
+    return {
+        "enabled": True,
+        "side": side,
+        "passed": not rejected,
+        "rejections": rejections,
+        "directional_position": round(directional_position, 6) if directional_position is not None else None,
+        "directional_position_source": position_source,
+        "max_directional_position": max_position,
+        "entry_offset_percent": round(offset, 6),
+        "min_pullback_offset_percent": min_pullback,
+        "confirmed_breakout": confirmed_breakout,
+        "confirmation_count": confirmations,
+        "min_confirmations": required,
+        "checks": _normalised_checks(checks),
     }
 
 

@@ -50,6 +50,8 @@ from bfa.strategy.micro_grid_live import (
     build_micro_grid_live_candidates,
     is_micro_grid_candidate,
     micro_grid_setup_from_candidate,
+    pending_quality_contexts_from_seconds_cache,
+    read_micro_grid_seconds_cache,
 )
 from bfa.strategy.paper_guard import (
     ForwardPaperGuard,
@@ -419,6 +421,12 @@ def run_agent_once(
             replay_packet,
             config=config,
         )
+        seconds_cache_payload: dict[str, Any] | None = None
+        seconds_cache_error: str | None = None
+        if _truthy(config.get("BFA_LIVE_MICRO_GRID_ENABLED")) or _truthy(
+            config.get("BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED")
+        ):
+            seconds_cache_payload, seconds_cache_error = read_micro_grid_seconds_cache(config)
         base_sizing = compute_position_sizing(
             sizing_input_from_config(config),
             enabled=dynamic_sizing_enabled(config),
@@ -446,6 +454,8 @@ def run_agent_once(
             generated_at=started_at,
             max_position_notional_usdt=base_sizing.max_position_notional_usdt,
             market_context_by_symbol=micro_market_context,
+            seconds_cache_payload=seconds_cache_payload,
+            seconds_cache_error=seconds_cache_error,
         )
         source_health["micro_grid"] = micro_health
         normal_candidates = candidates.candidates
@@ -486,13 +496,31 @@ def run_agent_once(
             micro_fast_lane=micro_fast_lane_enabled,
         )
         pending_quality_report = None
-        if mode is RuntimeMode.LIVE and evaluation_candidates and ops_snapshot is not None:
+        if mode is RuntimeMode.LIVE and ops_snapshot is not None:
+            pending_symbols = [
+                str(order.get("symbol") or "").upper()
+                for order in ops_snapshot.open_orders
+                if str(order.get("status") or "").upper() in {"NEW", "PARTIALLY_FILLED"}
+            ]
+            second_contexts = pending_quality_contexts_from_seconds_cache(
+                seconds_cache_payload or {},
+                pending_symbols,
+            )
+            pending_market_context = {
+                symbol: {
+                    **dict(micro_market_context.get(symbol) or {}),
+                    **dict(second_contexts.get(symbol) or {}),
+                }
+                for symbol in dict.fromkeys(
+                    [*micro_market_context, *second_contexts, *pending_symbols]
+                )
+            }
             pending_quality_report = execute_pending_order_quality_check(
                 config,
                 db_path=db_path or config.get("BFA_DB_PATH"),
                 signed_client=signed_client,
                 checked_at=started_at,
-                market_context_by_symbol=micro_market_context,
+                market_context_by_symbol=pending_market_context,
                 open_orders=ops_snapshot.open_orders,
                 signal_sides_by_symbol=_candidate_signal_sides(evaluation_candidates),
                 execute=True,

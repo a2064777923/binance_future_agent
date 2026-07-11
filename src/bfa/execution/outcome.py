@@ -476,6 +476,7 @@ def _round_trip_prefix(
     ordered = sorted(trades, key=lambda item: int(item.get("time") or 0))
     selected: list[Mapping[str, Any]] = []
     net_quantity = 0.0
+    entry_quantity = 0.0
     started = False
     for trade in ordered:
         if not started:
@@ -487,18 +488,23 @@ def _round_trip_prefix(
                     return None
                 continue
             started = True
-        elif (
-            str(trade.get("side") or "").upper() == intent.side.upper()
-            and str(trade.get("orderId")) in known_entry_order_ids
-            and str(trade.get("orderId")) != str(required_entry_order_id)
-        ):
-            return None
+        elif str(trade.get("side") or "").upper() == intent.side.upper():
+            if str(trade.get("orderId")) != str(required_entry_order_id):
+                # A same-side fill from any other order can be a manual scale-in
+                # or a sibling agent intent. Folding it into this round trip
+                # would fabricate both size and PnL attribution.
+                return None
         quantity = _float(trade.get("qty"))
         side = str(trade.get("side") or "").upper()
         selected.append(trade)
+        if side == intent.side.upper():
+            entry_quantity += quantity
         net_quantity += quantity if side == "BUY" else -quantity
         if len(selected) > 1 and abs(net_quantity) < 1e-12:
             break
+    quantity_tolerance = max(abs(intent.quantity) * 1e-6, 1e-8)
+    if selected and abs(entry_quantity - intent.quantity) > quantity_tolerance:
+        return None
     return selected
 
 
