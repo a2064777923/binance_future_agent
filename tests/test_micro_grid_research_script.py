@@ -315,6 +315,113 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertTrue(orders)
         self.assertEqual(confirmation.call_count, 2)
 
+    def test_live_best_execution_submits_only_highest_ranked_generated_order(self):
+        seconds = oscillating_seconds(count=80)
+        state = self.state()
+        long_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=99.0,
+            stop_price=98.0,
+            target_price=100.0,
+            state=state,
+            reason_codes=[],
+        )
+        short_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="short",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=101.0,
+            stop_price=102.0,
+            target_price=100.0,
+            state=state,
+            reason_codes=[],
+        )
+        profile = self.profile(
+            structure_lookback_seconds=20,
+            band_lookback_seconds=20,
+            entry_lookback_seconds=10,
+            signal_stride_seconds=3,
+            order_wait_seconds=2,
+            max_hold_seconds=2,
+            side_flow_filter_enabled=False,
+        )
+
+        with (
+            mock.patch.object(research, "build_micro_grid_state", return_value=(state, [])),
+            mock.patch.object(research, "build_grid_orders", return_value=[long_order, short_order]),
+            mock.patch.object(
+                research,
+                "live_order_selection_key",
+                side_effect=lambda order: (0 if order.side == "short" else 1, 0),
+            ),
+            mock.patch.object(research, "simulate_grid_basket", return_value=(None, "expired", None)) as simulate,
+        ):
+            _trades, _diagnostics, order_stats = research.generate_symbol_candidate_trades(
+                "TESTUSDT",
+                seconds,
+                profile=profile,
+                signal_start_ms=seconds[30].open_time,
+                signal_end_ms=seconds[30].open_time,
+                execution_order_mode="live_best",
+            )
+
+        self.assertEqual(order_stats["orders_generated"], 2)
+        self.assertEqual(order_stats["orders_created"], 1)
+        submitted_orders = simulate.call_args.args[1]
+        self.assertEqual([order.side for order in submitted_orders], ["short"])
+
+    def test_live_best_waits_for_pending_expiry_and_does_not_cross_schedule_boundary(self):
+        seconds = oscillating_seconds(count=80)
+        state = self.state()
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=99.0,
+            stop_price=98.0,
+            target_price=100.0,
+            state=state,
+            reason_codes=[],
+        )
+        profile = self.profile(
+            structure_lookback_seconds=20,
+            band_lookback_seconds=20,
+            entry_lookback_seconds=10,
+            signal_stride_seconds=1,
+            order_wait_seconds=5,
+            max_hold_seconds=2,
+            side_flow_filter_enabled=False,
+        )
+
+        with (
+            mock.patch.object(research, "build_micro_grid_state", return_value=(state, [])),
+            mock.patch.object(research, "build_grid_orders", return_value=[order]),
+            mock.patch.object(research, "simulate_grid_basket", return_value=(None, "expired", None)) as simulate,
+        ):
+            _trades, diagnostics, order_stats = research.generate_symbol_candidate_trades(
+                "TESTUSDT",
+                seconds,
+                profile=profile,
+                signal_intervals_ms=[(seconds[30].open_time, seconds[45].open_time)],
+                execution_order_mode="live_best",
+            )
+
+        self.assertEqual(simulate.call_count, 3)
+        self.assertEqual(order_stats["orders_created"], 3)
+        self.assertEqual(diagnostics["cooldown_windows"], 8)
+        self.assertEqual(
+            research.trim_intervals_for_pending_expiry(
+                [(seconds[30].open_time, seconds[45].open_time)],
+                5,
+            ),
+            [(seconds[30].open_time, seconds[40].open_time)],
+        )
+
     def test_passive_limit_requires_matching_aggressor_direction(self):
         state = self.state()
         long_order = research.GridOrder(
@@ -777,6 +884,39 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         )
 
         self.assertAlmostEqual(stop, 98.8)
+
+    def test_target_progress_cost_floor_waits_for_cost_then_locks_breakeven_after_cost(self):
+        state = self.state()
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=state.signal_index,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=100.1,
+            state=state,
+            reason_codes=[],
+            max_hold_seconds=120,
+            size_weight=1.0,
+        )
+        profile = self.profile(
+            target_progress_trailing_enabled=True,
+            target_progress_activate_fraction=0.50,
+            target_progress_lock_fraction=0.10,
+            target_progress_giveback_fraction=0.35,
+            target_progress_cost_floor_enabled=True,
+            maker_fee_bps=2.0,
+            taker_fee_bps=4.0,
+            exit_slippage_bps=1.0,
+            entry_maker_cost=False,
+        )
+
+        before_cost = research.update_trailing_stop(order, profile, best_price=100.06, current_stop=98.0)
+        after_cost = research.update_trailing_stop(order, profile, best_price=100.08, current_stop=98.0)
+
+        self.assertEqual(before_cost, 98.0)
+        self.assertAlmostEqual(after_cost, 100.07)
 
     def test_adaptive_profit_lock_waits_longer_when_continuation_confidence_is_high(self):
         state = self.state()

@@ -119,6 +119,68 @@ Important verdicts:
 - `keep_caps_unchanged_drawdown_risk`: drawdown breaches the pilot cap.
 - `keep_caps_unchanged`: no promotion evidence.
 
+## Run The Market-wide Micro-grid Funnel
+
+Do not use today's 24h ticker rank to decide which historical micro-grid symbols
+to replay. The dedicated scanner uses only bars completed before each signal
+hour, scans the public crypto USDT perpetual universe with cheap 5m data, and
+downloads 1m data only for the leading 48 symbols:
+
+```bash
+python scripts/run_micro_grid_market_scan.py \
+  --dates 2026-06-27,2026-06-29,2026-07-02 \
+  --prefilter-top-n 48 \
+  --final-top-n 3 \
+  --workers 16 \
+  --cache-dir runtime/market-scan-klines \
+  --output runtime/micro-grid-market-scan.json \
+  --quiet
+```
+
+The output contains `eligibility_schedule`, plus the exact selected symbols per
+date. Pass that same artifact to tick replay. `live_best` is the CLI default and
+submits one generated order using the same score as live. Use `basket` only to
+reproduce older multi-layer research:
+
+```bash
+python scripts/run_micro_grid_research.py \
+  --symbols AGLDUSDT,BELUSDT,BTWUSDT \
+  --start-date 2026-06-27 \
+  --end-date 2026-06-27 \
+  --eligibility-schedule runtime/micro-grid-market-scan.json \
+  --execution-order-mode live_best \
+  --signal-stride-seconds 3 \
+  --order-wait-seconds 20 \
+  --initial-capital 400 \
+  --max-open-positions 3 \
+  --max-leverage 30 \
+  --max-risk-per-trade-usdt 40 \
+  --max-position-notional-usdt 2400 \
+  --max-margin-per-position-usdt 80 \
+  --max-portfolio-margin-usdt 400 \
+  --max-portfolio-notional-usdt 4800 \
+  --pullback-scale-mode none \
+  --entry-maker-cost \
+  --output runtime/micro-grid-exact.json \
+  --quiet
+```
+
+With `live_best`, the replay will not resubmit the same symbol until its pending
+deadline or filled position lifecycle completes. Eligibility windows are also
+trimmed by the pending lifetime so an old hourly selection cannot leak into the
+next one.
+
+Always report cadence separately:
+
+- `--signal-stride-seconds 120` approximates the current two-minute main live
+  cycle;
+- `--signal-stride-seconds 3` is an opportunity upper bound for a future
+  dedicated micro loop and is not current-live evidence.
+
+The replay still lacks L2 queue position. Aggressor-side crossing is necessary
+for a passive fill but does not prove our order would have reached the front of
+the exchange queue.
+
 ## Promotion Rules
 
 Do not raise live limits just because one run is green. Treat a variant as a

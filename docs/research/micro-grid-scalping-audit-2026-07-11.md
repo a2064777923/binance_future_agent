@@ -233,7 +233,201 @@ The strategy is therefore a sparse specialist for a few high-wick contracts,
 not a general multi-coin scalp. The 73.91% aggregate win rate does not override
 the period concentration, zero large-cap coverage, and sub-30 trade sample.
 
+## Market-wide opportunity-ranking follow-up
+
+The fixed-symbol audit above did not answer the operator's core objection: a
+large futures market can contain many simultaneous micro opportunities, so the
+system should discover and rank them instead of treating one fixed list and one
+uniformly strict gate as the whole opportunity set. A second research pass
+therefore added `scripts/run_micro_grid_market_scan.py` and an eligibility
+schedule consumed by the exact aggTrade replay.
+
+### Prior-only two-stage discovery
+
+The scanner uses no current 24-hour ticker rank and no future signal-window
+bar. For every UTC hour it:
+
+1. evaluates every current crypto USDT perpetual whose `onboardDate` existed at
+   the feature window;
+2. ranks a cheap 360-minute 5m view and retains 48 symbols;
+3. recomputes liquidity, cost-adjusted range, turns, center crosses, wick
+   magnitude/frequency, path efficiency, drift, recent activity, and taker-flow
+   balance from 360 completed 1m bars;
+4. emits only the leading symbol-hours for exact tick replay.
+
+On the frozen July 5/8/10 scan this covered 528 contracts and 72 hourly
+windows. After cache warm-up, 3,168 5m archives and 653 1m archives were read
+with no missing final-stage data in 20.72 seconds. Only 223 symbols reached the
+1m stage and only 53 distinct symbols reached the final top-eight schedule.
+This avoids downloading aggTrades or fitting rolling wick models for the full
+market.
+
+### What strict and relaxed actually mean
+
+The strict entry profile adds all of the following to the structural range and
+passive spike-entry model:
+
+- dynamically tightened Stoch location, approximately 80/20 before context;
+- maximum adverse-flow allowance 0.18;
+- side pullback quality at least 0.50;
+- mature historical wick stop-rate at most 0.30.
+
+The capacity-relaxed profile disables confirmation, sets the pullback floor to
+zero, and allows mature wick stop-rate up to 1.0. Partial variants removed only
+the pullback floor or also moved Stoch toward 70/30.
+
+On the same July 5 market-ranked top-eight schedule:
+
+| Profile | Trades | Win rate | PF | Net PnL |
+| --- | ---: | ---: | ---: | ---: |
+| Strict | 31 | 67.74% | 0.777 | -23.4573U |
+| No pullback floor | 33 | 66.67% | 0.784 | -27.2864U |
+| Stoch about 70/30, no pullback floor | 51 | 60.78% | 0.655 | -89.3878U |
+| Capacity relaxed | 91 | 58.24% | 0.478 | -189.8134U |
+
+The relaxed-run attribution is more nuanced than "every strict guard is
+good." Trades failing Stoch plus pullback were especially poor (24 trades, PF
+0.306, -134.91U), and all Stoch failures together were also poor (53 trades,
+PF 0.393, -183.35U). However, the 23 trades rejected only by adverse-flow
+confirmation were positive on this date (PF 1.313, +6.16U). Earlier fixed-list
+attribution found the opposite for adverse flow. Therefore adverse flow should
+be researched as regime-aware evidence, not declared a universally correct
+hard threshold from either sample. The current live profile is unchanged.
+
+Across July 5/8/10, the legacy top-eight/basket diagnostic produced 97 trades,
+65.98% wins, PF 0.905, and -30.9113U. Gross price-path PnL was only +17.2890U,
+while fees were 48.2004U. The mean winner was 4.61U and the mean loser 9.87U.
+This confirms that finding more active coins is insufficient when entries still
+admit continuation paths and reward is small relative to stop loss and cost.
+
+### Additional framework mismatches corrected
+
+The market-wide pass found three material research/live mismatches:
+
+1. The deployed main cycle runs every two minutes, whereas dense research
+   evaluates every three seconds. The three-second result is an opportunity
+   upper bound, not current-live evidence.
+2. Live generates several layers/sides but submits only the highest-ranked one.
+   Legacy research simulated a filled multi-layer basket. New
+   `--execution-order-mode live_best` shares the exact live order score and
+   simulates one submitted order.
+3. Dense research could submit another order for the same symbol while the
+   previous 20-second limit was still pending, and could resignal while its
+   prior position was open. `live_best` replay now blocks that symbol until the
+   pending deadline or position exit plus cooldown, and trims the last pending
+   lifetime from each eligibility window so an old hourly schedule cannot
+   overlap the next one.
+
+Live and research no longer maintain duplicate order-score implementations;
+`micro_grid_live` calls the shared research score. This is a no-behavior-change
+refactor for live ranking and prevents future scoring drift.
+
+### Top-three result and cadence boundary
+
+Selecting the best three symbol-hours matches the configured three micro
+pending slots. A frozen current-cadence check on June 28/30 and July 1 used
+`live_best` but a 120-second stride. It produced only one filled trade across
+three days; two days had zero fills. This directly explains why the operator
+saw almost no effective 20-second micro orders: a two-minute sampler observes
+only one of every forty possible three-second decision points.
+
+A separate frozen three-second top-three confirmation initially failed (55
+trades, 69.09% wins, PF 0.795, -39.5425U). A later, independent validation on
+June 27/29 and July 2 added the corrected pending/position lifecycle and
+produced:
+
+| Date | Trades | Win rate | PF | Net PnL |
+| --- | ---: | ---: | ---: | ---: |
+| 2026-06-27 | 11 | 63.64% | 1.646 | +16.0205U |
+| 2026-06-29 | 14 | 78.57% | 2.750 | +48.5685U |
+| 2026-07-02 | 16 | 75.00% | 1.517 | +37.5220U |
+| Aggregate | 41 | 73.17% | 1.816 | +102.1110U |
+
+The aggregate is a trade-level diagnostic across three independently reset
+400U day accounts, not one continuously compounded account. All three dates
+were positive. Trades spanned 17 symbols, 10 symbols were net positive, and
+the largest symbol supplied 29.38% of gross winning-trade PnL. Submitted candidate
+orders fell from 951 before lifecycle enforcement to 594 after it, a 37.5%
+reduction. This clears the frozen statistical gates for a *research-only
+dedicated fast loop*, not for the current two-minute live service.
+
+Remaining promotion blockers are important:
+
+- aggTrades show aggressor side but not queue depth or volume ahead of the
+  post-only order;
+- the live raw seconds cache currently holds about 20 minutes, while the market
+  rank uses a six-hour 1m history;
+- no dedicated three-second micro service has been built, resource-tested, or
+  shadow-run forward;
+- current exchangeInfo creates a small survivorship limitation for old dates;
+- live and sentinel remain disabled, and no research flag is enabled in live.
+
+### Cost-aware profit protection
+
+Many losses first reached 45%-80% of target. Target-progress trailing was
+therefore hardened so it cannot claim breakeven before favorable movement
+covers maker entry, taker exit, and modeled slippage. The capability remains
+disabled by default.
+
+The frozen variant (45% activation, 10% nominal lock, 35% giveback, full-cost
+floor) raised the lifecycle-validation win rate from 73.17% to 82.93% and PF
+remained 1.580, but net PnL fell from +102.1110U to +44.0709U and July 2 became
+negative. It rescued large reversals but cut too many full-target winners. It
+is not approved for live or as the new research default. The next exit model
+should condition protection on continuation/exhaustion state rather than apply
+one lock curve to every profitable trade.
+
+### Revised recommendation
+
+- Keep `live_best`, pending/position lifecycle enforcement, prior-only market
+  ranking, and top-three capacity in the truthful research path.
+- Do not globally relax Stoch and pullback gates. Treat adverse flow as a
+  candidate for soft/regime-aware evidence only after another frozen test.
+- Keep cost-aware target protection available but disabled.
+- Build a separate shadow-only micro loop before any live consideration. It
+  needs an incremental six-hour 1m ring buffer, top-three ranking, one-order
+  pending state, CPU/latency budgets, and no AI/trend work in the fast path.
+- Add L2/queue-aware fill estimation and forward shadow outcomes. Passing the
+  historical 41-trade gate is evidence to continue, not permission to trade.
+
 ## Recommended next plan
+
+### Current P0 - keep research truthful
+
+- make `live_best` the CLI default; require explicit `basket` for legacy
+  reproduction;
+- retain corrected aggressor side, costs, millisecond order, cross-day warmup,
+  pending expiry, position lifecycle, and prior-only eligibility schedules;
+- require net PnL, PF, drawdown, sample size, per-date results, and profit
+  concentration together with win rate;
+- add an L2/queue-aware replay before any claim about 20-second passive fill
+  probability.
+
+### Current P1 - build opportunity discovery as a separate fast lane
+
+- turn the two-stage historical scanner into a shadow-only incremental ranker:
+  broad cheap universe, six-hour 1m ring buffer, then top three;
+- keep trend/AI work out of the proposed three-second micro loop and enforce one
+  pending order per selected symbol;
+- measure cycle CPU time, memory, raw-cache freshness, missed cycles, schedule
+  churn, and forward fill/outcome attribution before considering testnet;
+- compare strict confirmation with a predeclared regime-aware soft-flow variant
+  rather than removing all confirmation.
+
+### Current P2 - protect failures without clipping runners
+
+- replace one unconditional target-progress lock with an evidence state machine:
+  adverse continuation, absorption/exhaustion, delayed reversal, and
+  high-confidence runner states;
+- use post-fill flow *change*, price acceptance, and giveback speed rather than
+  one aggregate flow ratio;
+- validate every new exit on fresh dates with at least 30 trades, win rate >=
+  70%, PF >= 1.20, positive net PnL, and distributed profits;
+- do not deploy or enable live until queue-aware replay and forward shadow gates
+  pass.
+
+The older P0-P2 list below is retained as the pre-market-scan historical plan;
+the current plan above supersedes it where they differ.
 
 ### P0 — keep research truthful
 

@@ -245,6 +245,7 @@ class MicroGridProfile:
     target_progress_activate_fraction: float = 0.65
     target_progress_lock_fraction: float = 0.22
     target_progress_giveback_fraction: float = 0.45
+    target_progress_cost_floor_enabled: bool = True
     post_fill_confirmation_enabled: bool = False
     post_fill_confirmation_seconds: int = 8
     post_fill_confirmation_min_progress: float = 0.08
@@ -586,6 +587,14 @@ def main() -> int:
     parser.add_argument("--end-date", required=True, help="inclusive UTC date, YYYY-MM-DD")
     parser.add_argument("--signal-start", help="optional inclusive UTC signal timestamp inside the loaded date range")
     parser.add_argument("--signal-end", help="optional inclusive UTC signal timestamp inside the loaded date range")
+    parser.add_argument(
+        "--eligibility-schedule",
+        help=(
+            "optional market-scan JSON; only symbol/time windows selected from prior data are evaluated. "
+            "The file may be a bfa_micro_grid_eligibility_schedule_v1 payload or a market-scan payload "
+            "containing eligibility_schedule."
+        ),
+    )
     parser.add_argument("--cache-dir", default="runtime/aggTrades-cache")
     parser.add_argument("--output", required=True)
     parser.add_argument("--initial-capital", type=float, default=30.0)
@@ -751,6 +760,11 @@ def main() -> int:
     parser.add_argument("--target-progress-activate-fraction", type=float, default=MicroGridProfile.target_progress_activate_fraction)
     parser.add_argument("--target-progress-lock-fraction", type=float, default=MicroGridProfile.target_progress_lock_fraction)
     parser.add_argument("--target-progress-giveback-fraction", type=float, default=MicroGridProfile.target_progress_giveback_fraction)
+    parser.add_argument(
+        "--target-progress-cost-floor-enabled",
+        action=argparse.BooleanOptionalAction,
+        default=MicroGridProfile.target_progress_cost_floor_enabled,
+    )
     parser.add_argument("--post-fill-confirmation-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.post_fill_confirmation_enabled)
     parser.add_argument("--post-fill-confirmation-seconds", type=int, default=MicroGridProfile.post_fill_confirmation_seconds)
     parser.add_argument("--post-fill-confirmation-min-progress", type=float, default=MicroGridProfile.post_fill_confirmation_min_progress)
@@ -791,6 +805,15 @@ def main() -> int:
     parser.add_argument("--entry-taker-risk-bps", type=float, default=MicroGridProfile.entry_taker_risk_bps)
     parser.add_argument("--max-symbol-losses-per-day", type=int, default=MicroGridProfile.max_symbol_losses_per_day)
     parser.add_argument("--max-candidate-trades-per-symbol", type=int, default=0)
+    parser.add_argument(
+        "--execution-order-mode",
+        choices=["basket", "live_best"],
+        default="live_best",
+        help=(
+            "'basket' preserves legacy multi-layer research; 'live_best' ranks generated layers/sides "
+            "with the same score as micro_grid_live and submits only the leading order."
+        ),
+    )
     parser.add_argument("--quiet", action="store_true", help="write JSON output without printing the full payload")
     args = parser.parse_args()
 
@@ -813,6 +836,12 @@ def main() -> int:
         raise SystemExit("--signal-start must be inside --start-date/--end-date")
     if signal_end_ms is not None and not loaded_start_ms <= signal_end_ms <= loaded_end_ms:
         raise SystemExit("--signal-end must be inside --start-date/--end-date")
+    eligibility_by_symbol, eligibility_diagnostics = load_eligibility_schedule(
+        Path(args.eligibility_schedule) if args.eligibility_schedule else None,
+        loaded_start_ms=loaded_start_ms,
+        loaded_end_ms=loaded_end_ms,
+        requested_symbols=set(symbols),
+    )
 
     profile = MicroGridProfile(
         structure_lookback_seconds=args.lookback_seconds if args.lookback_seconds is not None else args.structure_lookback_seconds,
@@ -949,6 +978,7 @@ def main() -> int:
         target_progress_activate_fraction=args.target_progress_activate_fraction,
         target_progress_lock_fraction=args.target_progress_lock_fraction,
         target_progress_giveback_fraction=args.target_progress_giveback_fraction,
+        target_progress_cost_floor_enabled=args.target_progress_cost_floor_enabled,
         post_fill_confirmation_enabled=args.post_fill_confirmation_enabled,
         post_fill_confirmation_seconds=args.post_fill_confirmation_seconds,
         post_fill_confirmation_min_progress=args.post_fill_confirmation_min_progress,
@@ -1008,6 +1038,8 @@ def main() -> int:
                 args.max_candidate_trades_per_symbol,
                 signal_start_ms,
                 signal_end_ms,
+                eligibility_by_symbol.get(symbol),
+                args.execution_order_mode,
             )
             for symbol in symbols
         ]
@@ -1025,6 +1057,8 @@ def main() -> int:
                     args.max_candidate_trades_per_symbol,
                     signal_start_ms,
                     signal_end_ms,
+                    eligibility_by_symbol.get(symbol),
+                    args.execution_order_mode,
                 )
                 for symbol in symbols
             ]
@@ -1084,6 +1118,12 @@ def main() -> int:
             "sizing": "portfolio replay scales notional by risk, max notional, margin x leverage caps, configured pullback scale mode, and optional rolling per-symbol trade quality; leverage changes margin efficiency, not price edge",
             "intent": "research a smart-grid micro-oscillation supplement: second/tick data captures information, while trades may hold across a full multi-second or multi-minute wave",
             "pullback_scale_mode": args.pullback_scale_mode,
+            "eligibility": (
+                "prior-only market opportunity schedule"
+                if args.eligibility_schedule
+                else "all requested symbol/time windows"
+            ),
+            "execution_order_mode": args.execution_order_mode,
         },
         "symbols": symbols,
         "window": {
@@ -1095,6 +1135,7 @@ def main() -> int:
         },
         "profile": asdict(profile),
         "portfolio_sizing": replay["sizing"],
+        "eligibility_schedule": eligibility_diagnostics,
         "coverage": coverage,
         "performance": {
             "symbol_worker_count": worker_count,
@@ -1126,12 +1167,15 @@ def run_symbol_candidate_job(
     max_candidate_trades: int,
     signal_start_ms: int | None = None,
     signal_end_ms: int | None = None,
+    signal_intervals_ms: list[tuple[int, int]] | None = None,
+    execution_order_mode: str = "basket",
 ) -> dict[str, Any]:
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
     cache_path = Path(cache_dir)
-    seconds, coverage = load_symbol_seconds(symbol, start, end, cache_path)
-    tick_source = TickReplaySource(symbol=symbol, start=start, end=end, cache_dir=cache_path)
+    history_start = history_start_date_for_intervals(start, signal_intervals_ms, profile)
+    seconds, coverage = load_symbol_seconds(symbol, history_start, end, cache_path)
+    tick_source = TickReplaySource(symbol=symbol, start=history_start, end=end, cache_dir=cache_path)
     trades, diagnostics, order_stats = generate_symbol_candidate_trades(
         symbol,
         seconds,
@@ -1140,8 +1184,16 @@ def run_symbol_candidate_job(
         max_candidate_trades=max_candidate_trades,
         signal_start_ms=signal_start_ms,
         signal_end_ms=signal_end_ms,
+        signal_intervals_ms=signal_intervals_ms,
+        execution_order_mode=execution_order_mode,
     )
     coverage["tick_stream"] = tick_source.coverage()
+    coverage["requested_start_date"] = start.isoformat()
+    coverage["history_start_date"] = history_start.isoformat()
+    coverage["eligibility_intervals"] = [
+        {"start": ms_to_iso(start_ms), "end": ms_to_iso(end_ms)}
+        for start_ms, end_ms in signal_intervals_ms or []
+    ]
     return {
         "symbol": symbol,
         "coverage": coverage,
@@ -1149,6 +1201,23 @@ def run_symbol_candidate_job(
         "diagnostics": diagnostics,
         "order_stats": order_stats,
     }
+
+
+def history_start_date_for_intervals(
+    requested_start: date,
+    signal_intervals_ms: list[tuple[int, int]] | None,
+    profile: MicroGridProfile,
+) -> date:
+    if not signal_intervals_ms:
+        return requested_start
+    earliest_signal_ms = min(start_ms for start_ms, _end_ms in signal_intervals_ms)
+    warmup_seconds = max(
+        profile.required_history_seconds,
+        int(profile.wick_training_seconds),
+        int(profile.spike_depth_lookback_seconds),
+    )
+    warmup_start = ms_to_date(earliest_signal_ms - max(1, warmup_seconds) * SECOND_MS)
+    return min(requested_start, warmup_start)
 
 
 def generate_symbol_candidate_trades(
@@ -1161,6 +1230,8 @@ def generate_symbol_candidate_trades(
     max_candidate_trades: int = 0,
     signal_start_ms: int | None = None,
     signal_end_ms: int | None = None,
+    signal_intervals_ms: list[tuple[int, int]] | None = None,
+    execution_order_mode: str = "basket",
 ) -> tuple[list[MicroGridTrade], dict[str, Any], dict[str, Any]]:
     trades: list[MicroGridTrade] = []
     diagnostics = empty_scan_diagnostics()
@@ -1171,9 +1242,20 @@ def generate_symbol_candidate_trades(
         signal_start_ms=signal_start_ms,
         signal_end_ms=signal_end_ms,
     )
+    effective_signal_intervals = (
+        trim_intervals_for_pending_expiry(signal_intervals_ms, profile.order_wait_seconds)
+        if execution_order_mode == "live_best"
+        else signal_intervals_ms
+    )
     next_allowed_index = scan_start_index
     side_flow_block_until_index = {"long": -1, "short": -1}
-    for index in range(scan_start_index, scan_end_index, max(1, profile.signal_stride_seconds)):
+    for index in iter_signal_indexes(
+        seconds,
+        scan_start_index,
+        scan_end_index,
+        stride=max(1, profile.signal_stride_seconds),
+        signal_intervals_ms=effective_signal_intervals,
+    ):
         diagnostics["evaluated_windows"] += 1
         if index < next_allowed_index:
             diagnostics["cooldown_windows"] += 1
@@ -1193,6 +1275,11 @@ def generate_symbol_candidate_trades(
             for reason in reasons or ["no_valid_grid_orders"]:
                 diagnostics["rejection_counts"][reason] = diagnostics["rejection_counts"].get(reason, 0) + 1
             continue
+        order_stats["orders_generated"] += len(orders)
+        if execution_order_mode == "live_best":
+            orders = [sorted(orders, key=live_order_selection_key)[0]]
+        elif execution_order_mode != "basket":
+            raise ValueError(f"unknown execution_order_mode: {execution_order_mode}")
         order_stats["orders_created"] += len(orders)
         filled: list[tuple[int, MicroGridTrade]] = []
         orders_by_side = {
@@ -1228,10 +1315,13 @@ def generate_symbol_candidate_trades(
             if trade is not None and fill_index is not None:
                 filled.append((parse_iso_ms(trade.entry_time), trade))
         if not filled:
+            if execution_order_mode == "live_best":
+                next_allowed_index = max(next_allowed_index, index + max(1, profile.order_wait_seconds))
             continue
         _, trade = sorted(filled, key=lambda item: trade_selection_key(item[1], item[0]))[0]
         trades.append(trade)
-        next_allowed_index = index + profile.reentry_cooldown_seconds
+        exit_index = second_index_for_ms(seconds, parse_iso_ms(trade.exit_time))
+        next_allowed_index = max(index, exit_index) + max(1, profile.reentry_cooldown_seconds)
         if max_candidate_trades > 0 and len(trades) >= max_candidate_trades:
             break
     order_stats["fill_rate"] = round(
@@ -1241,6 +1331,120 @@ def generate_symbol_candidate_trades(
     diagnostics["passed_rate"] = round(diagnostics["passed_windows"] / diagnostics["evaluated_windows"], 8) if diagnostics["evaluated_windows"] else 0.0
     diagnostics["rejection_counts"] = dict(sorted(diagnostics["rejection_counts"].items(), key=lambda item: item[1], reverse=True))
     return trades, diagnostics, order_stats
+
+
+def trim_intervals_for_pending_expiry(
+    intervals: list[tuple[int, int]] | None,
+    order_wait_seconds: int,
+) -> list[tuple[int, int]] | None:
+    if intervals is None:
+        return None
+    wait_ms = max(0, int(order_wait_seconds)) * SECOND_MS
+    return [
+        (start_ms, end_ms - wait_ms)
+        for start_ms, end_ms in intervals
+        if end_ms - wait_ms >= start_ms
+    ]
+
+
+def load_eligibility_schedule(
+    path: Path | None,
+    *,
+    loaded_start_ms: int,
+    loaded_end_ms: int,
+    requested_symbols: set[str],
+) -> tuple[dict[str, list[tuple[int, int]]], dict[str, Any]]:
+    if path is None:
+        return {}, {"enabled": False, "mode": "all_requested_symbol_time_windows"}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    schedule = payload.get("eligibility_schedule") if isinstance(payload, dict) else None
+    if not isinstance(schedule, dict):
+        schedule = payload
+    if not isinstance(schedule, dict) or not isinstance(schedule.get("windows"), list):
+        raise ValueError("eligibility schedule must contain a windows list")
+
+    by_symbol: dict[str, list[tuple[int, int]]] = {symbol: [] for symbol in requested_symbols}
+    outside_loaded_window = 0
+    malformed_windows = 0
+    selected_rows = 0
+    unknown_symbols: set[str] = set()
+    for row in schedule["windows"]:
+        if not isinstance(row, dict):
+            malformed_windows += 1
+            continue
+        start_text = row.get("signal_start") or row.get("start")
+        end_text = row.get("signal_end") or row.get("end")
+        symbols = row.get("symbols")
+        if not start_text or not end_text or not isinstance(symbols, list):
+            malformed_windows += 1
+            continue
+        start_ms = parse_iso_ms(str(start_text))
+        end_ms = parse_iso_ms(str(end_text))
+        if end_ms < start_ms:
+            raise ValueError(f"eligibility window ends before it starts: {start_text}..{end_text}")
+        if end_ms < loaded_start_ms or start_ms > loaded_end_ms:
+            outside_loaded_window += 1
+            continue
+        clipped = (max(start_ms, loaded_start_ms), min(end_ms, loaded_end_ms))
+        selected_rows += 1
+        for raw_symbol in symbols:
+            symbol = str(raw_symbol).upper()
+            if symbol not in requested_symbols:
+                unknown_symbols.add(symbol)
+                continue
+            by_symbol[symbol].append(clipped)
+    by_symbol = {symbol: merge_time_intervals(intervals) for symbol, intervals in by_symbol.items()}
+    return by_symbol, {
+        "enabled": True,
+        "schema": schedule.get("schema"),
+        "source": str(path),
+        "schedule_window_count": len(schedule["windows"]),
+        "loaded_window_rows": selected_rows,
+        "outside_loaded_window_rows": outside_loaded_window,
+        "malformed_window_rows": malformed_windows,
+        "requested_symbol_count": len(requested_symbols),
+        "eligible_requested_symbol_count": sum(1 for intervals in by_symbol.values() if intervals),
+        "unknown_or_unrequested_symbols": sorted(unknown_symbols),
+        "interval_count": sum(len(intervals) for intervals in by_symbol.values()),
+    }
+
+
+def merge_time_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[tuple[int, int]] = []
+    for start_ms, end_ms in sorted(intervals):
+        if not merged or start_ms > merged[-1][1] + 1:
+            merged.append((start_ms, end_ms))
+            continue
+        merged[-1] = (merged[-1][0], max(merged[-1][1], end_ms))
+    return merged
+
+
+def iter_signal_indexes(
+    seconds: list[BacktestBar],
+    scan_start_index: int,
+    scan_end_index: int,
+    *,
+    stride: int,
+    signal_intervals_ms: list[tuple[int, int]] | None,
+):
+    stride = max(1, int(stride))
+    if signal_intervals_ms is None:
+        yield from range(scan_start_index, scan_end_index, stride)
+        return
+    if not signal_intervals_ms or not seconds or scan_start_index >= scan_end_index:
+        return
+    times = [bar.open_time for bar in seconds]
+    last_index = -1
+    for start_ms, end_ms in merge_time_intervals(signal_intervals_ms):
+        start_index = max(scan_start_index, bisect_left(times, start_ms, lo=scan_start_index, hi=scan_end_index))
+        end_index = min(scan_end_index, bisect_right(times, end_ms, lo=start_index, hi=scan_end_index))
+        offset = (start_index - scan_start_index) % stride
+        if offset:
+            start_index += stride - offset
+        for index in range(start_index, end_index, stride):
+            if index > last_index:
+                yield index
+                last_index = index
 
 
 def signal_scan_bounds(
@@ -1300,6 +1504,95 @@ def apply_side_flow_cooldowns(
 def trade_selection_key(trade: MicroGridTrade, entry_ms: int) -> tuple[float, int, int]:
     side_rank = 0 if trade.side == "long" else 1
     return (-trade_selection_score(trade), entry_ms, side_rank)
+
+
+def live_order_selection_key(order: GridOrder) -> tuple[float, int]:
+    return (-live_order_selection_score(order), 0 if order.side == "long" else 1)
+
+
+def live_order_selection_score(order: GridOrder) -> float:
+    """Score one generated order exactly as the live micro fast lane does."""
+
+    values = reason_code_map(order.reason_codes)
+    quality_scale, _quality_reasons = micro_trade_quality_scale_from_reason_codes(order.reason_codes)
+    if quality_scale <= 0:
+        return -1_000_000.0
+    side = order.side
+    pullback_key = "long_pullback_quality" if side == "long" else "short_pullback_quality"
+    pullback_quality = code_float(values, pullback_key, 0.0)
+    reversal_ready = 1.0 if values.get("edge_reversal_ready") == "True" else 0.0
+    entry_reversal = code_float(values, "entry_reversal_fraction", 0.0)
+    wick_success = code_float(values, "wick_success_rate", 0.0)
+    wick_score = code_float(values, "wick_score", 0.0)
+    net_reward = code_float(values, "net_notional_reward_percent", 0.0)
+    entry_continuation = code_float(values, "entry_continuation_fraction", 0.0)
+    basket_weight = code_float(values, "basket_size_weight", 0.75)
+    stop_fraction = code_float(values, "stop_span_fraction", 0.0)
+    entry_edge = code_float(values, "entry_edge_fraction", 0.0)
+    state = order.state
+    side_context_score = mean_reversion_side_context_score(order, values)
+    raw_score = (
+        max(float(state.score), 0.0)
+        + pullback_quality * 1.7
+        + reversal_ready * 1.05
+        + min(entry_reversal, 0.6) * 1.15
+        + wick_success * 1.2
+        + wick_score * 0.65
+        + max(net_reward, 0.0) * 2.0
+        + min(max(-entry_edge, 0.0), 0.24) * 1.1
+        + min(float(state.reversal_response_rate), 1.0) * 0.7
+        - max(basket_weight - 0.75, 0.0) * 0.55
+        - entry_continuation * 2.2
+        - max(stop_fraction - 0.32, 0.0) * 0.75
+    )
+    return raw_score * quality_scale + side_context_score
+
+
+def mean_reversion_side_context_score(order: GridOrder, values: dict[str, str]) -> float:
+    side = str(order.side).lower()
+    state = order.state
+    if side not in {"long", "short"}:
+        return 0.0
+    close_position = float(state.close_position_percent)
+    lower_edge = 1.0 - clamp(close_position / 38.0, 0.0, 1.0)
+    upper_edge = 1.0 - clamp((100.0 - close_position) / 38.0, 0.0, 1.0)
+    side_edge = lower_edge if side == "long" else upper_edge
+    opposite_edge = upper_edge if side == "long" else lower_edge
+    side_ready = values.get("edge_reversal_ready") == "True"
+    opposite_ready = state.short_reversal_ready if side == "long" else state.long_reversal_ready
+    entry_reversal = code_float(values, "entry_reversal_fraction", 0.0)
+    entry_continuation = code_float(values, "entry_continuation_fraction", 0.0)
+    score = side_edge * 2.6 - opposite_edge * 3.4
+    score += 1.25 if side_ready else -0.35
+    score += min(entry_reversal, 0.75) * 1.35
+    score -= min(entry_continuation, 0.75) * 1.6
+    if opposite_ready and not side_ready:
+        score -= 2.2
+
+    current = float(state.current_price) if state.current_price > 0 else None
+    ema_ref = next(
+        (
+            float(value)
+            for value in (state.triple_ema_mid, state.triple_ema_slow, state.center_price)
+            if value is not None and float(value) > 0
+        ),
+        None,
+    )
+    if current is not None and ema_ref is not None:
+        deviation_percent = (current - ema_ref) / current * 100.0
+        normalizer = max(float(state.width_percent) * 0.22, float(state.instantaneous_vol_percent) * 4.0, 0.04)
+        mean_reversion_bias = clamp(deviation_percent / normalizer, -1.5, 1.5)
+        score += (-mean_reversion_bias if side == "long" else mean_reversion_bias) * 0.95
+
+    if close_position >= 70.0:
+        edge_strength = clamp((close_position - 70.0) / 30.0, 0.0, 1.0)
+        score += 2.2 + edge_strength * 3.0 if side == "short" else -(4.8 + edge_strength * 4.2)
+    elif close_position <= 30.0:
+        edge_strength = clamp((30.0 - close_position) / 30.0, 0.0, 1.0)
+        score += 2.2 + edge_strength * 3.0 if side == "long" else -(4.8 + edge_strength * 4.2)
+    elif 38.0 <= close_position <= 62.0 and not side_ready:
+        score -= 0.65
+    return score
 
 
 def trade_selection_score(trade: MicroGridTrade) -> float:
@@ -4422,9 +4715,14 @@ def update_trailing_stop(order: GridOrder, profile: MicroGridProfile, best_price
         if profile.target_progress_trailing_enabled:
             target_move = max(order.target_price - order.entry_price, 0.0)
             if target_move > 0 and favorable >= target_move * max(0.0, profile.target_progress_activate_fraction):
-                lock = order.entry_price + target_move * max(0.0, profile.target_progress_lock_fraction)
-                giveback = best_price - target_move * max(0.0, profile.target_progress_giveback_fraction)
-                stop = max(stop, lock, giveback)
+                cost_move = order.entry_price * profile.round_trip_cost_percent / 100.0
+                if not profile.target_progress_cost_floor_enabled or favorable >= cost_move:
+                    lock_move = target_move * max(0.0, profile.target_progress_lock_fraction)
+                    if profile.target_progress_cost_floor_enabled:
+                        lock_move = max(lock_move, cost_move)
+                    lock = order.entry_price + lock_move
+                    giveback = best_price - target_move * max(0.0, profile.target_progress_giveback_fraction)
+                    stop = max(stop, lock, giveback)
         if favorable >= risk * trailing_activate:
             lock = order.entry_price + risk * trailing_lock
             giveback = best_price - risk * trailing_giveback
@@ -4437,9 +4735,14 @@ def update_trailing_stop(order: GridOrder, profile: MicroGridProfile, best_price
     if profile.target_progress_trailing_enabled:
         target_move = max(order.entry_price - order.target_price, 0.0)
         if target_move > 0 and favorable >= target_move * max(0.0, profile.target_progress_activate_fraction):
-            lock = order.entry_price - target_move * max(0.0, profile.target_progress_lock_fraction)
-            giveback = best_price + target_move * max(0.0, profile.target_progress_giveback_fraction)
-            stop = min(stop, lock, giveback)
+            cost_move = order.entry_price * profile.round_trip_cost_percent / 100.0
+            if not profile.target_progress_cost_floor_enabled or favorable >= cost_move:
+                lock_move = target_move * max(0.0, profile.target_progress_lock_fraction)
+                if profile.target_progress_cost_floor_enabled:
+                    lock_move = max(lock_move, cost_move)
+                lock = order.entry_price - lock_move
+                giveback = best_price + target_move * max(0.0, profile.target_progress_giveback_fraction)
+                stop = min(stop, lock, giveback)
     if favorable >= risk * trailing_activate:
         lock = order.entry_price - risk * trailing_lock
         giveback = best_price + risk * trailing_giveback
@@ -5567,6 +5870,7 @@ def empty_scan_diagnostics() -> dict[str, Any]:
 
 def empty_order_stats() -> dict[str, Any]:
     return {
+        "orders_generated": 0,
         "orders_created": 0,
         "orders_filled": 0,
         "orders_expired": 0,

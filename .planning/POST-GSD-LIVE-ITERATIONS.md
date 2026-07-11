@@ -312,6 +312,50 @@ Operational boundary: live and sentinel remain disabled and the kill switch
 remains in place. Existing positions are manual and must not be adopted by the
 agent. Code deployment or DB migration is not permission to resume trading.
 
+### 13. Market-wide micro opportunity discovery and replay parity
+
+The operator correctly challenged the fixed-symbol conclusion: with hundreds
+of futures contracts, opportunity discovery and cross-sectional competition
+must be tested before making every entry gate stricter. A prior-only historical
+scanner now performs a cheap all-market 5m pass, a 1m top-48 refinement, and a
+top-N symbol/hour eligibility schedule before exact aggTrades are downloaded.
+The frozen July 5/8/10 scan covered 528 crypto USDT perpetuals and 72 hourly
+windows without using current 24h ticker ranks or future signal bars.
+
+The follow-up also corrected research/live parity:
+
+- exact replay CLI defaults to the live single-best order instead of a filled
+  multi-layer basket;
+- live and research share one micro order score;
+- scheduled replay loads cross-day warmup only when required;
+- one symbol cannot resubmit while its previous 20-second limit is pending or
+  while its previous position remains open;
+- pending lifetimes cannot leak across hourly eligibility boundaries;
+- a target-progress trailing option can enforce full modeled round-trip cost,
+  but remains disabled.
+
+Strict-versus-relaxed market-ranked evidence shows blanket loosening is harmful
+but not every strict sub-gate is universally useful. On July 5, strict produced
+31 trades, PF 0.777, -23.4573U; removing only pullback produced PF 0.784,
+-27.2864U; moving Stoch toward 70/30 produced PF 0.655, -89.3878U; full
+capacity relaxation produced PF 0.478, -189.8134U. In the same relaxed run,
+Stoch-plus-pullback failures were deeply negative, while adverse-flow-only
+failures were positive, opposite an earlier fixed-list sample. Flow therefore
+remains unchanged live and is a future regime-aware research variable.
+
+The final frozen top-three, single-order, pending-lifecycle validation on June
+27/29 and July 2 produced 41 trades, 73.17% wins, PF 1.816, +102.1110U, three
+positive dates, and distributed profit. The same architecture at the current
+120-second live cadence produced only one fill across a separate three-day
+set. The edge is therefore evidence for a future dedicated shadow-only
+three-second micro loop, not permission to restart the two-minute live system.
+Queue/L2 modeling, incremental six-hour rank state, resource budgets, and
+forward shadow evidence remain required.
+
+Cost-aware profit locking raised validation wins to 82.93% but reduced net PnL
+to +44.0709U and made one date negative. It stays disabled because preserving
+runners matters more than manufacturing a higher win rate.
+
 ## Live Server Notes
 
 Known deployment shape:

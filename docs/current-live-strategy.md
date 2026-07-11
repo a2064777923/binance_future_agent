@@ -740,6 +740,42 @@ tested 8-second rule cut some losses but also killed delayed winners, while both
 profit locks worsened aggregate PnL. Full evidence and the next plan are in
 `docs/research/micro-grid-scalping-audit-2026-07-11.md`.
 
+### 2026-07-11 market-wide opportunity follow-up
+
+The later market-wide pass changed the research architecture, not the live
+server configuration:
+
+- a prior-only 5m/1m scanner now ranks the full crypto USDT perpetual universe
+  and emits symbol/hour eligibility schedules before aggTrades are downloaded;
+- exact replay defaults to `live_best`, matching live's one selected order
+  instead of the older filled multi-layer research basket;
+- `live_best` replay blocks duplicate same-symbol orders until a 20-second
+  pending order expires or the filled position exits, including hourly schedule
+  boundaries;
+- live and research share one order-ranking implementation;
+- target-progress protection can enforce a full modeled-cost floor, but the
+  feature remains disabled by default.
+
+The final frozen historical validation selected the leading three symbol-hours
+and used a three-second opportunity cadence, one live-ranked order, strict
+confirmation, real pending/position lifecycle, and the documented 400U sizing.
+It produced 41 trades, 30 wins (73.17%), PF 1.816, and +102.1110U across June
+27/29 and July 2; every date was positive and the largest source supplied
+29.38% of gross positive PnL. This is enough to continue research, not enough
+to resume live.
+
+The current two-minute live cadence was tested separately on three frozen days
+and produced only one filled trade. Therefore the historical edge cannot be
+realized by merely changing the current live top-N or pending caps. It would
+require a dedicated, lightweight, shadow-only micro loop with an incremental
+six-hour 1m rank buffer and measured CPU/latency budgets. No such service is
+deployed or enabled.
+
+The cost-aware profit-lock variant raised validation win rate to 82.93% but cut
+net PnL to +44.0709U and made one date negative. It remains disabled. Live,
+sentinel, and the kill-switch safety freeze remain unchanged; no result in this
+section authorizes service restart or order placement.
+
 ## Recent Live Evidence At Snapshot
 
 The latest recent intents proved that the micro-grid leg was scanning and
