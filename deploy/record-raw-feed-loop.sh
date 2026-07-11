@@ -15,6 +15,9 @@ OUTPUT_DIR="${BFA_RAW_FEED_DIR:-/opt/binance-futures-agent/data/raw-feed}"
 SECONDS_CACHE_OUTPUT="${BFA_RAW_FEED_SECONDS_CACHE:-/opt/binance-futures-agent/runtime/raw-feed-seconds.json}"
 SECONDS_CACHE_WINDOW="${BFA_RAW_FEED_SECONDS_CACHE_WINDOW:-1200}"
 SECONDS_CACHE_FLUSH_SECONDS="${BFA_RAW_FEED_SECONDS_CACHE_FLUSH_SECONDS:-2}"
+RAW_WRITE_BATCH_MESSAGES="${BFA_RAW_FEED_WRITE_BATCH_MESSAGES:-256}"
+GZIP_COMPRESSLEVEL="${BFA_RAW_FEED_GZIP_COMPRESSLEVEL:-3}"
+WEBSOCKET_MAX_QUEUE="${BFA_RAW_FEED_WEBSOCKET_MAX_QUEUE:-4096}"
 SYMBOLS="${BFA_RAW_FEED_SYMBOLS:-}"
 BASE_URL="${BFA_RAW_FEED_WS_BASE_URL:-${BINANCE_FUTURES_WS_BASE_URL:-wss://fstream.binance.com}}"
 REST_BASE_URL="${BFA_RAW_FEED_REST_BASE_URL:-${BINANCE_FUTURES_BASE_URL:-https://fapi.binance.com}}"
@@ -74,6 +77,9 @@ while true; do
     --duration-seconds "$ROTATE_SECONDS" \
     --seconds-cache-output "$SECONDS_CACHE_OUTPUT" \
     --seconds-cache-window "$SECONDS_CACHE_WINDOW" \
-    --seconds-cache-flush-seconds "$SECONDS_CACHE_FLUSH_SECONDS"
+    --seconds-cache-flush-seconds "$SECONDS_CACHE_FLUSH_SECONDS" \
+    --raw-write-batch-messages "$RAW_WRITE_BATCH_MESSAGES" \
+    --gzip-compresslevel "$GZIP_COMPRESSLEVEL" \
+    --websocket-max-queue "$WEBSOCKET_MAX_QUEUE"
   sleep 2
 done

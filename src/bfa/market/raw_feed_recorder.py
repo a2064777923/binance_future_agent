@@ -6,7 +6,7 @@ import gzip
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +14,8 @@ from bfa.market.binance_ws import combined_stream_url, depth_stream, trade_strea
 
 
 BINANCE_USDM_WS_BASE_URL = "wss://fstream.binance.com"
+_SYMBOL_PRUNE_INTERVAL_MS = 10_000
+_GLOBAL_PRUNE_INTERVAL_MS = 60_000
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,10 @@ class RawSecondBarCache:
         self.window_seconds = max(1, int(window_seconds))
         self._bars: dict[str, dict[int, RawSecondBar]] = {}
         self._latest_open_time: dict[str, int] = {}
+        self._last_symbol_prune_open_time: dict[str, int] = {}
+        self._global_latest_open_time: int | None = None
+        self._last_global_prune_open_time: int | None = None
+        self.latest_event_time_ms: int | None = None
         self.updated_at_ns: int | None = None
 
     @classmethod
@@ -79,6 +85,7 @@ class RawSecondBarCache:
         cache = cls(window_seconds=window_seconds or _int_or_none(payload.get("window_seconds")) or 1200)
         updated_at_ns = _int_or_none(payload.get("updated_at_ns"))
         cache.updated_at_ns = updated_at_ns
+        cache.latest_event_time_ms = _int_or_none(payload.get("latest_event_time_ms"))
         symbols = payload.get("symbols")
         if not isinstance(symbols, Mapping):
             return cache
@@ -97,9 +104,10 @@ class RawSecondBarCache:
             if by_time:
                 latest = max(by_time)
                 cache._latest_open_time[symbol] = latest
-                cutoff = latest - cache.window_seconds * 1000
-                for key in [key for key in by_time if key < cutoff]:
-                    del by_time[key]
+                cache._global_latest_open_time = max(cache._global_latest_open_time or latest, latest)
+                inferred_event_time = max(bar.close_time for bar in by_time.values())
+                cache.latest_event_time_ms = max(cache.latest_event_time_ms or inferred_event_time, inferred_event_time)
+        cache._prune_globally(force=True)
         return cache
 
     @classmethod
@@ -114,6 +122,10 @@ class RawSecondBarCache:
         return cls.from_dict(payload, window_seconds=window_seconds)
 
     def ingest_combined_message(self, message: Mapping[str, Any] | str | bytes) -> bool:
+        if isinstance(message, bytes) and b"trade" not in message:
+            return False
+        if isinstance(message, str) and "trade" not in message:
+            return False
         payload = _json_payload(message)
         if not isinstance(payload, Mapping):
             return False
@@ -170,12 +182,18 @@ class RawSecondBarCache:
             by_time[open_time] = bar
         else:
             bar.update(price=price, quantity=quantity, taker_buy=taker_buy)
-        latest = max(self._latest_open_time.get(normalized_symbol, open_time), open_time)
+        prior_latest = self._latest_open_time.get(normalized_symbol)
+        latest = max(prior_latest or open_time, open_time)
         self._latest_open_time[normalized_symbol] = latest
-        cutoff = latest - self.window_seconds * 1000
-        stale = [key for key in by_time if key < cutoff]
-        for key in stale:
-            del by_time[key]
+        if prior_latest is None or latest > prior_latest:
+            last_prune = self._last_symbol_prune_open_time.get(normalized_symbol)
+            prune_interval = min(_SYMBOL_PRUNE_INTERVAL_MS, self.window_seconds * 1000)
+            if last_prune is None or latest - last_prune >= prune_interval:
+                self._prune_symbol(normalized_symbol, latest=latest)
+        if self._global_latest_open_time is None or open_time > self._global_latest_open_time:
+            self._global_latest_open_time = open_time
+            self._prune_globally()
+        self.latest_event_time_ms = max(self.latest_event_time_ms or event_time_ms, event_time_ms)
         self.updated_at_ns = time.time_ns()
 
     def to_dict(self) -> dict[str, Any]:
@@ -183,22 +201,67 @@ class RawSecondBarCache:
             "schema": "bfa_raw_feed_second_bars_v1",
             "updated_at_ns": self.updated_at_ns,
             "updated_at_ms": int(self.updated_at_ns // 1_000_000) if self.updated_at_ns else None,
+            "latest_event_time_ms": self.latest_event_time_ms,
             "window_seconds": self.window_seconds,
             "symbols": {
                 symbol: [
-                    {**asdict(bar), "close_time": bar.close_time}
-                    for _, bar in sorted(by_time.items())
+                    {
+                        "open_time": bar.open_time,
+                        "open": bar.open,
+                        "high": bar.high,
+                        "low": bar.low,
+                        "close": bar.close,
+                        "volume": bar.volume,
+                        "quote_volume": bar.quote_volume,
+                        "taker_buy_quote_volume": bar.taker_buy_quote_volume,
+                    }
+                    for bar in by_time.values()
                 ]
                 for symbol, by_time in sorted(self._bars.items())
+                if by_time
             },
         }
 
     def write_json(self, path: str | Path) -> None:
-        output = Path(path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        tmp = output.with_suffix(output.suffix + ".tmp")
-        tmp.write_text(json.dumps(self.to_dict(), separators=(",", ":"), sort_keys=True), encoding="utf-8")
-        os.replace(tmp, output)
+        write_raw_second_cache_payload(path, self.to_dict())
+
+    def _prune_symbol(self, symbol: str, *, latest: int) -> None:
+        by_time = self._bars.get(symbol)
+        if not by_time:
+            return
+        cutoff = latest - self.window_seconds * 1000
+        for key in [key for key in by_time if key < cutoff]:
+            del by_time[key]
+        self._last_symbol_prune_open_time[symbol] = latest
+
+    def _prune_globally(self, *, force: bool = False) -> None:
+        latest = self._global_latest_open_time
+        if latest is None:
+            return
+        if not force and self._last_global_prune_open_time is not None:
+            if latest - self._last_global_prune_open_time < _GLOBAL_PRUNE_INTERVAL_MS:
+                return
+        cutoff = latest - self.window_seconds * 1000
+        for symbol, by_time in list(self._bars.items()):
+            for key in [key for key in by_time if key < cutoff]:
+                del by_time[key]
+            if not by_time:
+                del self._bars[symbol]
+                self._latest_open_time.pop(symbol, None)
+                self._last_symbol_prune_open_time.pop(symbol, None)
+                continue
+            symbol_latest = max(by_time)
+            self._latest_open_time[symbol] = symbol_latest
+            self._last_symbol_prune_open_time[symbol] = symbol_latest
+        self._last_global_prune_open_time = latest
+
+
+def write_raw_second_cache_payload(path: str | Path, payload: Mapping[str, Any]) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output.with_suffix(output.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    os.replace(tmp, output)
 
 
 def normalize_symbols(raw_symbols: str | list[str] | tuple[str, ...]) -> tuple[str, ...]:

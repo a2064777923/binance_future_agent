@@ -22,7 +22,13 @@ for path in (SCRIPT_DIR, SRC_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from bfa.market.raw_feed_recorder import RawFeedRecorderConfig, RawSecondBarCache, normalize_symbols, raw_feed_line  # noqa: E402
+from bfa.market.raw_feed_recorder import (  # noqa: E402
+    RawFeedRecorderConfig,
+    RawSecondBarCache,
+    normalize_symbols,
+    raw_feed_line,
+    write_raw_second_cache_payload,
+)
 
 
 async def main_async() -> int:
@@ -36,6 +42,9 @@ async def main_async() -> int:
     parser.add_argument("--seconds-cache-output", help="optional compact JSON cache of latest 1s trade bars")
     parser.add_argument("--seconds-cache-window", type=int, default=1200)
     parser.add_argument("--seconds-cache-flush-seconds", type=float, default=2.0)
+    parser.add_argument("--raw-write-batch-messages", type=int, default=256)
+    parser.add_argument("--gzip-compresslevel", type=int, default=3)
+    parser.add_argument("--websocket-max-queue", type=int, default=4096)
     args = parser.parse_args()
 
     config = RawFeedRecorderConfig(
@@ -51,6 +60,9 @@ async def main_async() -> int:
         seconds_cache_output=Path(args.seconds_cache_output) if args.seconds_cache_output else None,
         seconds_cache_window=int(args.seconds_cache_window),
         seconds_cache_flush_seconds=float(args.seconds_cache_flush_seconds),
+        raw_write_batch_messages=int(args.raw_write_batch_messages),
+        gzip_compresslevel=int(args.gzip_compresslevel),
+        websocket_max_queue=int(args.websocket_max_queue),
     )
     print({"output": str(config.output_path), "messages": count, "url": config.websocket_url})
     return 0
@@ -63,6 +75,9 @@ async def record_raw_feed(
     seconds_cache_output: Path | None = None,
     seconds_cache_window: int = 1200,
     seconds_cache_flush_seconds: float = 2.0,
+    raw_write_batch_messages: int = 256,
+    gzip_compresslevel: int = 3,
+    websocket_max_queue: int = 4096,
 ) -> int:
     try:
         import websockets
@@ -77,24 +92,59 @@ async def record_raw_feed(
         if seconds_cache_output is not None
         else None
     )
-    next_cache_flush = time.monotonic() + max(seconds_cache_flush_seconds, 0.1)
-    async with websockets.connect(config.websocket_url, ping_interval=20, ping_timeout=20) as websocket:
-        with gzip.open(config.output_path, "at", encoding="utf-8") as handle:
-            while deadline is None or time.monotonic() < deadline:
-                timeout = max(0.1, deadline - time.monotonic()) if deadline is not None else None
+    flush_interval = max(seconds_cache_flush_seconds, 0.1)
+    next_cache_flush = time.monotonic() + flush_interval
+    cache_write_task: asyncio.Task[None] | None = None
+    raw_batch: list[str] = []
+    batch_size = max(1, int(raw_write_batch_messages))
+    compresslevel = max(1, min(9, int(gzip_compresslevel)))
+    try:
+        async with websockets.connect(
+            config.websocket_url,
+            compression=None,
+            ping_interval=20,
+            ping_timeout=20,
+            close_timeout=2,
+            max_queue=max(16, int(websocket_max_queue)),
+        ) as websocket:
+            with gzip.open(config.output_path, "at", encoding="utf-8", compresslevel=compresslevel) as handle:
                 try:
-                    message = await asyncio.wait_for(websocket.recv(), timeout=timeout)
-                except asyncio.TimeoutError:
-                    break
-                handle.write(raw_feed_line(message, local_timestamp_ns=time.time_ns()))
-                if seconds_cache is not None:
-                    seconds_cache.ingest_combined_message(message)
-                    if time.monotonic() >= next_cache_flush:
-                        seconds_cache.write_json(seconds_cache_output)
-                        next_cache_flush = time.monotonic() + max(seconds_cache_flush_seconds, 0.1)
-                count += 1
-    if seconds_cache is not None:
-        seconds_cache.write_json(seconds_cache_output)
+                    while deadline is None or time.monotonic() < deadline:
+                        timeout = max(0.1, deadline - time.monotonic()) if deadline is not None else None
+                        try:
+                            message = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+                        except asyncio.TimeoutError:
+                            break
+                        local_timestamp_ns = time.time_ns()
+                        raw_batch.append(raw_feed_line(message, local_timestamp_ns=local_timestamp_ns))
+                        if len(raw_batch) >= batch_size:
+                            handle.write("".join(raw_batch))
+                            raw_batch.clear()
+                        if seconds_cache is not None:
+                            seconds_cache.ingest_combined_message(message)
+                            if time.monotonic() >= next_cache_flush:
+                                if cache_write_task is None or cache_write_task.done():
+                                    if cache_write_task is not None:
+                                        await cache_write_task
+                                    snapshot = seconds_cache.to_dict()
+                                    cache_write_task = asyncio.create_task(
+                                        asyncio.to_thread(
+                                            write_raw_second_cache_payload,
+                                            seconds_cache_output,
+                                            snapshot,
+                                        )
+                                    )
+                                next_cache_flush = time.monotonic() + flush_interval
+                        count += 1
+                finally:
+                    if raw_batch:
+                        handle.write("".join(raw_batch))
+                        raw_batch.clear()
+    finally:
+        if cache_write_task is not None:
+            await cache_write_task
+        if seconds_cache is not None:
+            await asyncio.to_thread(seconds_cache.write_json, seconds_cache_output)
     return count
 
 

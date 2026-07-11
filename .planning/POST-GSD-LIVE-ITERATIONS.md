@@ -356,6 +356,39 @@ Cost-aware profit locking raised validation wins to 82.93% but reduced net PnL
 to +44.0709U and made one date negative. It stays disabled because preserving
 runners matters more than manufacturing a higher win rate.
 
+### 14. Self-collected tick parity and recorder performance
+
+The operator proposed using the continuously collected live raw feed for the
+next validation. A frozen July 10 top-three, 400U, three-second, `live_best`
+comparison extracted six symbols only after fixing the schedule and time
+window. Public aggTrades and 1,231,762 self-collected individual trade events
+produced the same one SKL winner, including millisecond entry/exit and
++1.1912207U net PnL. Candidate order counts differed (12 public versus 10 raw),
+so the sources are not interchangeable at every rejected state. One winner is
+not a profitability sample.
+
+The exercise exposed a more important operational defect. The production raw
+feed had multi-second receive tails, 206 files over roughly 25 hours, repeated
+ping timeouts, and 169 service restarts at inspection. The second cache retained
+287 inactive symbols, JSON-decoded every depth message, rescanned expiry on
+every trade, and synchronously rewrote about 21.47MB every two seconds.
+
+The repo now globally expires inactive cache symbols, prunes active symbols at
+bounded intervals, emits compact bars, batches lower-cost gzip writes, skips
+depth parsing, writes cache snapshots off the event loop, and distinguishes
+receive freshness from Binance event freshness. A matched 90-second `/tmp`
+canary captured the same 63,012 trades as the official recorder while reducing
+p95 receive-event latency from 1,053ms to -22ms (about -40ms server clock
+offset) and max from 1,388ms to 85ms. Cache snapshot size fell 66%. The server
+service itself was not changed.
+
+Research now has a one-pass selected raw-trade extractor and a strict local
+archive mode that cannot silently download missing public days. Signal-window
+clipping also avoids irrelevant prior-day I/O. Original gzip depth remains
+available for future queue/L2 work, but this replay used trades only. Live,
+sentinel, and kill-switch safety state remain unchanged; no strategy flag was
+promoted.
+
 ## Live Server Notes
 
 Known deployment shape:

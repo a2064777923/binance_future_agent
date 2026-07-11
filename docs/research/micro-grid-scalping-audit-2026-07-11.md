@@ -377,6 +377,101 @@ is not approved for live or as the new research default. The next exit model
 should condition protection on continuation/exhaustion state rather than apply
 one lock curve to every profitable trade.
 
+## Self-collected tick replay and recorder audit
+
+The live raw-feed collector was still active while live trading and the
+position sentinel remained inactive and the kill switch remained present. A
+read-only inventory at `2026-07-11T20:40Z` found 206 gzip files, 6.994 GB
+compressed, spanning nominally `2026-07-10T19:31:06Z` through
+`2026-07-11T20:40:22Z`. This confirms roughly one day of usable retention, not
+a multi-day validation store. File transitions included one 103.6-second gap
+and many roughly 9-11-second gaps. `systemctl` reported 169 service restarts at
+the observation point, and the journal contained repeated keepalive ping
+timeouts and connection resets.
+
+### Frozen comparison
+
+Before reading tick outcomes, the validation fixed:
+
+- the existing prior-only 528-contract market scan and hourly top three;
+- `2026-07-10T20:50:00Z..23:50:00Z`, clipped from the available raw coverage
+  after the selected symbols first appeared at about `20:31:46Z` plus a
+  15-minute strategy warm-up;
+- six schedule symbols: `SKLUSDT`, `BUSDT`, `LABUSDT`, `TAGUSDT`, `XPINUSDT`,
+  and `TACUSDT`;
+- 400U capital, 30x maximum leverage, three open slots, three-second signals,
+  20-second pending limits, strict confirmation, maker entry cost, and
+  `live_best` single-order lifecycle.
+
+The self-collected extract contained 1,231,762 individual Binance `@trade`
+events. The same fixed replay was then run once with public daily aggTrades and
+once with the local extract, with network fallback disabled. Both produced the
+same single SKL long:
+
+| Field | Public aggTrades | Self-collected trades |
+| --- | ---: | ---: |
+| Signal | 23:27:39Z | 23:27:39Z |
+| Entry | 23:27:42.813Z at 0.00488455 | identical |
+| Exit | 23:27:55.589Z at 0.00489426 | identical |
+| Exit reason | take profit | take profit |
+| Net PnL | +1.1912207U | +1.1912207U |
+| Created / expired orders | 12 / 11 | 10 / 9 |
+
+Thus the one realized path is reproducible, while individual trades versus
+aggregated trades still change some rejected/pending candidate states. One win
+is not evidence of a 100% win rate and does not add meaningful statistical
+support to the earlier 41-trade validation.
+
+### Recorder bottleneck found and corrected
+
+The long raw extract showed receive-minus-exchange-event p95 latency of roughly
+6-9 seconds, p99 of 13-25 seconds, and maxima above 53 seconds for the selected
+symbols. Small negative values are server clock offset; the multi-second tail
+is real backlog. Code review found four compounding hot-path costs:
+
+1. every 100ms depth message was JSON-decoded even though only trades update
+   the second cache;
+2. every trade rescanned up to 1,200 cached seconds for expiry, even when many
+   trades shared the same second;
+3. stale symbols were pruned relative to their own last event and therefore
+   remained forever; the 21.47MB cache held 287 historical symbols;
+4. the event loop synchronously serialized and rewrote the full cache every two
+   seconds while also compressing every raw line and servicing WebSocket pings.
+
+The corrected recorder fast-rejects depth for cache parsing, prunes each active
+symbol at bounded intervals, globally removes inactive symbols, batches raw
+writes at gzip level 3, disables redundant WebSocket compression, enlarges the
+receive queue, and writes immutable cache snapshots in a background thread.
+Live candidate health now separately checks `latest_event_time_ms`, so recent
+processing of delayed messages cannot pass the freshness gate.
+
+On the real 21.47MB server cache snapshot, the compact/pruned representation
+kept the current 80 symbols and 44,072 bars, fell to 7.30MB (-66.0%), and JSON
+serialization was 2.71x faster. A separate 90-second server `/tmp` canary used
+the same 80 symbols and 100ms depth while the official recorder continued
+unchanged. Both captured exactly 63,012 trades in the matched interval:
+
+| Receive minus event latency | Existing recorder | Corrected canary |
+| --- | ---: | ---: |
+| p50 | -30ms | -40ms |
+| p95 | 1,053ms | -22ms |
+| p99 | 1,197ms | 22ms |
+| max | 1,388ms | 85ms |
+
+The canary completed without reconnect, used 13.042 user CPU seconds and 1.335
+system CPU seconds, peaked at 36.9MB RSS, and did not drop a matched trade. This
+is strong evidence that the recorder bottleneck is operational rather than a
+market-data limitation. It is not evidence for strategy profitability. The
+official server service was not restarted or replaced during this audit.
+
+The replay now supports `--archive-cache-only`, and schedule intervals are
+clipped to the requested signal window before history loading. This prevents a
+self-collected test from silently downloading public archives for irrelevant
+hours or missing local days. `prepare_self_collected_tick_replay.py` performs a
+single-pass selected-symbol extraction and records coverage/latency without
+placing orders. Full depth is still present in the original gzip files, but
+this comparison used trade events only and still does not model queue position.
+
 ### Revised recommendation
 
 - Keep `live_best`, pending/position lifecycle enforcement, prior-only market

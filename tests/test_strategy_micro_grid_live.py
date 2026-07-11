@@ -1,3 +1,4 @@
+import time
 import unittest
 from dataclasses import replace
 
@@ -11,6 +12,7 @@ from bfa.strategy.micro_grid_live import (
     _market_context_rejections,
     _micro_cost_quality_gate,
     _order_score,
+    build_micro_grid_live_candidates,
     micro_grid_setup_from_candidate,
     pending_quality_contexts_from_seconds_cache,
 )
@@ -19,6 +21,47 @@ from scripts import run_micro_grid_research as research
 
 
 class MicroGridLiveAdapterTests(unittest.TestCase):
+    def test_live_candidates_fail_closed_when_exchange_event_time_is_missing(self):
+        now_ms = int(time.time() * 1000)
+        config = load_config({"BFA_LIVE_MICRO_GRID_ENABLED": "true"})
+
+        candidates, health = build_micro_grid_live_candidates(
+            config=config,
+            scan_symbols=["BTCUSDT"],
+            generated_at="2026-07-11T00:00:00Z",
+            max_position_notional_usdt=100.0,
+            seconds_cache_payload={"updated_at_ms": now_ms, "symbols": {}},
+        )
+
+        self.assertEqual(candidates, [])
+        self.assertEqual(health["status"], "cache_event_time_missing")
+
+    def test_live_candidates_fail_closed_when_receive_time_is_fresh_but_exchange_event_is_stale(self):
+        now_ms = int(time.time() * 1000)
+        config = load_config(
+            {
+                "BFA_LIVE_MICRO_GRID_ENABLED": "true",
+                "BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS": "20",
+            }
+        )
+
+        candidates, health = build_micro_grid_live_candidates(
+            config=config,
+            scan_symbols=["BTCUSDT"],
+            generated_at="2026-07-11T00:00:00Z",
+            max_position_notional_usdt=100.0,
+            seconds_cache_payload={
+                "updated_at_ms": now_ms,
+                "latest_event_time_ms": now_ms - 30_000,
+                "symbols": {},
+            },
+        )
+
+        self.assertEqual(candidates, [])
+        self.assertEqual(health["status"], "cache_event_stale")
+        self.assertLess(health["cache_age_seconds"], 20)
+        self.assertGreaterEqual(health["cache_event_age_seconds"], 30)
+
     def test_cost_quality_gate_defaults_to_shadow_and_flags_uneconomic_order(self):
         live_config = MicroGridLiveConfig.from_app(load_config({}))
 

@@ -157,6 +157,15 @@ latest 120 trend setup calibration (`ldc_actual_latest_120_v2`) had only 19
 usable labels, so its lift is not production evidence. Keep LDC disabled until
 there are enough filled tick-labeled samples across symbols/days.
 
+The newer 2026-07-12 audit found that raw trade outcomes can reproduce an exact
+public-archive replay, but also found serious recorder backlog and reconnect
+evidence. Current repo code batches raw writes, avoids depth JSON work in the
+trade cache, globally evicts stale cache symbols, writes snapshots off the
+receive loop, and records `latest_event_time_ms` for fail-closed event
+freshness. Use `scripts/prepare_self_collected_tick_replay.py` plus
+`run_micro_grid_research.py --archive-cache-only` for strict local replays. Do
+not assume these fixes are deployed merely because they exist on the branch.
+
 Micro-grid can use extra slots and an extra same-direction notional allowance so
 trend positions do not fully crowd out scalping attempts. Protective SL/TP is
 required for live fills, and the pending-limit watchdog plus position sentinel

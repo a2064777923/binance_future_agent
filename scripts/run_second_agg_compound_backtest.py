@@ -190,6 +190,8 @@ def load_symbol_seconds(
     start: date,
     end: date,
     cache_dir: Path,
+    *,
+    cache_only: bool = False,
 ) -> tuple[list[BacktestBar], dict[str, Any]]:
     by_second: dict[int, dict[str, float]] = {}
     missing_dates: list[str] = []
@@ -198,7 +200,7 @@ def load_symbol_seconds(
     current = start
     while current <= end:
         try:
-            path = fetch_zip(symbol, current, cache_dir)
+            path = cached_aggtrade_zip(symbol, current, cache_dir) if cache_only else fetch_zip(symbol, current, cache_dir)
         except Exception as exc:  # noqa: BLE001 - report missing archive details to payload.
             missing_dates.append(f"{current.isoformat()}:{type(exc).__name__}:{exc}")
             current += timedelta(days=1)
@@ -291,22 +293,37 @@ def load_symbol_seconds(
         "missing_dates": missing_dates,
         "first_trade_time": ms_to_iso(first_trade_second) if first_trade_second is not None else None,
         "last_trade_time": ms_to_iso(last_trade_second) if last_trade_second is not None else None,
+        "archive_cache_only": bool(cache_only),
     }
     return seconds, coverage
 
 
-def fetch_zip(symbol: str, day: date, cache_dir: Path) -> Path:
-    symbol_dir = cache_dir / symbol
-    symbol_dir.mkdir(parents=True, exist_ok=True)
+def aggtrade_zip_path(symbol: str, day: date, cache_dir: Path) -> Path:
     name = f"{symbol}-aggTrades-{day.isoformat()}.zip"
-    path = symbol_dir / name
-    if path.exists() and path.stat().st_size > 0:
-        try:
-            with zipfile.ZipFile(path) as zf:
-                if zf.testzip() is None:
-                    return path
-        except (OSError, zipfile.BadZipFile, zlib.error):
-            pass
+    return cache_dir / symbol / name
+
+
+def cached_aggtrade_zip(symbol: str, day: date, cache_dir: Path) -> Path:
+    path = aggtrade_zip_path(symbol, day, cache_dir)
+    if not path.exists() or path.stat().st_size <= 0:
+        raise FileNotFoundError(f"cached aggTrades archive missing: {path}")
+    try:
+        with zipfile.ZipFile(path) as zf:
+            if zf.testzip() is None:
+                return path
+    except (OSError, zipfile.BadZipFile, zlib.error) as exc:
+        raise ValueError(f"cached aggTrades archive invalid: {path}") from exc
+    raise ValueError(f"cached aggTrades archive corrupt: {path}")
+
+
+def fetch_zip(symbol: str, day: date, cache_dir: Path) -> Path:
+    path = aggtrade_zip_path(symbol, day, cache_dir)
+    symbol_dir = path.parent
+    symbol_dir.mkdir(parents=True, exist_ok=True)
+    name = path.name
+    try:
+        return cached_aggtrade_zip(symbol, day, cache_dir)
+    except (FileNotFoundError, ValueError):
         path.unlink(missing_ok=True)
     url = f"{ARCHIVE_URL}/{symbol}/{name}"
     with urlopen(url, timeout=60) as response:  # noqa: S310 - fixed public Binance archive URL.

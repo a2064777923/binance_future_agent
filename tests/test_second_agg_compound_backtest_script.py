@@ -1,9 +1,12 @@
 import importlib.util
 import sys
+import tempfile
 import unittest
 import zipfile
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from bfa.backtest.models import BacktestBar, BacktestConfig
 
@@ -17,6 +20,22 @@ SPEC.loader.exec_module(second_bt)
 
 
 class SecondAggCompoundBacktestScriptTests(unittest.TestCase):
+    def test_cache_only_seconds_loader_never_downloads_a_missing_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(second_bt, "urlopen", side_effect=AssertionError("network fallback used")):
+                seconds, coverage = second_bt.load_symbol_seconds(
+                    "MISSUSDT",
+                    date(2026, 7, 10),
+                    date(2026, 7, 10),
+                    Path(tmp),
+                    cache_only=True,
+                )
+
+        self.assertEqual(len(seconds), 86_400)
+        self.assertTrue(coverage["archive_cache_only"])
+        self.assertEqual(coverage["agg_trade_rows"], 0)
+        self.assertEqual(len(coverage["missing_dates"]), 1)
+
     def config(self):
         return BacktestConfig(
             account_capital_usdt=30,

@@ -668,6 +668,16 @@ was growing too fast. For later analysis, rely on decision snapshots, raw-feed
 files, order intents, exchange responses, outcomes, fills, and signed
 `userTrades` reconciliation.
 
+A 2026-07-12 read-only audit found that the deployed recorder's cache had grown
+to 21.47MB and 287 stale/current symbols, with repeated WebSocket reconnects and
+multi-second receive tails. The repo correction reduces the same snapshot to
+7.30MB and 80 current symbols, moves snapshot writes off the receive event
+loop, and adds exchange-event freshness. See `docs/live-scalping-ops.md` and
+the self-collected section of
+`docs/research/micro-grid-scalping-audit-2026-07-11.md`. These repo changes are
+not evidence that the server has been deployed; verify the running command and
+cache schema before making operational claims.
+
 ## Backtest Sizing Notes
 
 For micro-grid live-like backtests, use

@@ -187,10 +187,20 @@ def build_micro_grid_live_candidates(
         return [], health
     updated_at_ms = _int_or_none(cache_payload.get("updated_at_ms"))
     age_seconds = _cache_age_seconds(updated_at_ms)
+    latest_event_time_ms = _int_or_none(cache_payload.get("latest_event_time_ms"))
+    event_age_seconds = _cache_age_seconds(latest_event_time_ms)
     health["cache_updated_at_ms"] = updated_at_ms
     health["cache_age_seconds"] = round(age_seconds, 3) if age_seconds is not None else None
+    health["cache_latest_event_time_ms"] = latest_event_time_ms
+    health["cache_event_age_seconds"] = round(event_age_seconds, 3) if event_age_seconds is not None else None
     if age_seconds is None or age_seconds > live_config.max_cache_age_seconds:
         health.update({"status": "cache_stale"})
+        return [], health
+    if latest_event_time_ms is None:
+        health.update({"status": "cache_event_time_missing"})
+        return [], health
+    if event_age_seconds is None or event_age_seconds > live_config.max_cache_age_seconds:
+        health.update({"status": "cache_event_stale"})
         return [], health
 
     research = _micro_grid_research_module()
@@ -297,6 +307,7 @@ def build_micro_grid_live_candidates(
                 max_position_notional_usdt=max_position_notional_usdt,
                 live_config=live_config,
                 cache_updated_at_ms=updated_at_ms,
+                cache_latest_event_time_ms=latest_event_time_ms,
                 market_context=context,
                 cost_quality_gate=cost_quality_gate,
             )
@@ -462,6 +473,7 @@ def _candidate_from_order(
     max_position_notional_usdt: float | None,
     live_config: MicroGridLiveConfig,
     cache_updated_at_ms: int | None,
+    cache_latest_event_time_ms: int | None = None,
     market_context: Mapping[str, Any] | None = None,
     cost_quality_gate: Mapping[str, Any] | None = None,
 ) -> CandidateSignal:
@@ -476,12 +488,18 @@ def _candidate_from_order(
         "signal_time": state.signal_time,
         "signal_time_ms": signal_time_ms,
         "cache_updated_at_ms": cache_updated_at_ms,
+        "cache_latest_event_time_ms": cache_latest_event_time_ms,
         "candidate_generated_at_ms": candidate_generated_at_ms,
         "signal_to_candidate_ms": (
             candidate_generated_at_ms - signal_time_ms if signal_time_ms is not None else None
         ),
         "cache_to_candidate_ms": (
             candidate_generated_at_ms - cache_updated_at_ms if cache_updated_at_ms is not None else None
+        ),
+        "cache_event_to_candidate_ms": (
+            candidate_generated_at_ms - cache_latest_event_time_ms
+            if cache_latest_event_time_ms is not None
+            else None
         ),
         "ai_expected": False,
     }
@@ -510,6 +528,7 @@ def _candidate_from_order(
         "micro_grid_signal_time_ms": signal_time_ms,
         "micro_grid_candidate_generated_at_ms": candidate_generated_at_ms,
         "micro_grid_cache_updated_at_ms": cache_updated_at_ms,
+        "micro_grid_cache_latest_event_time_ms": cache_latest_event_time_ms,
         "micro_grid_latency": latency,
         "price_change_percent": _float_or_none(context.get("price_change_percent")),
         "quote_volume": _positive_float(context.get("quote_volume")),

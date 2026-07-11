@@ -20,11 +20,52 @@ BFA_RAW_FEED_SYMBOLS=
 BFA_RAW_FEED_AUTO_HOT_SYMBOLS=true
 BFA_RAW_FEED_AUTO_HOT_TOP_N=80
 BFA_RAW_FEED_AUTO_HOT_CRYPTO_ONLY=true
+BFA_RAW_FEED_SECONDS_CACHE_WINDOW=1200
+BFA_RAW_FEED_SECONDS_CACHE_FLUSH_SECONDS=2
+BFA_RAW_FEED_WRITE_BATCH_MESSAGES=256
+BFA_RAW_FEED_GZIP_COMPRESSLEVEL=3
+BFA_RAW_FEED_WEBSOCKET_MAX_QUEUE=4096
 ```
 
 If `BFA_RAW_FEED_SYMBOLS` is set to a fixed list, live may scan 80 symbols while
 the seconds cache only covers that fixed list. The symptom is many micro-grid
 rejections with `insufficient_cached_seconds`.
+
+The recorder hot path deliberately does not JSON-decode depth messages merely
+to update the trade-second cache. Raw lines are written in batches at gzip
+level 3, and cache snapshots are serialized in a background thread. If one
+snapshot is still being written at the next flush deadline, that redundant
+flush is skipped. The cache globally evicts symbols whose latest trade second
+falls outside the configured window and omits repeated `symbol` and derived
+`close_time` fields from each bar; readers reconstruct both from the enclosing
+symbol key and `open_time`.
+
+Cache health has two clocks:
+
+- `updated_at_ms` is when the recorder processed the newest trade message;
+- `latest_event_time_ms` is the newest Binance trade event time in that cache.
+
+Live micro-grid remains fail-closed when either is older than
+`BFA_LIVE_MICRO_GRID_MAX_AGE_SECONDS`. This distinction matters under WebSocket
+backlog: a process can be actively writing an already-delayed message, making
+the receive clock look fresh while the exchange event clock is stale.
+
+For read-only replay of self-collected ticks, first freeze symbols and time
+windows without reading outcomes, then extract only those public trade events:
+
+```bash
+python scripts/prepare_self_collected_tick_replay.py \
+  --raw-feed-dir /opt/binance-futures-agent/data/raw-feed \
+  --symbols BTCUSDT,ETHUSDT \
+  --start 2026-07-10T20:00:00Z \
+  --end 2026-07-10T23:59:59.999Z \
+  --output-cache-dir /opt/binance-futures-agent/runtime/self-tick-cache
+```
+
+Pass that directory to `run_micro_grid_research.py` with
+`--archive-cache-only`. This flag is important: a missing local day must be
+reported as missing rather than silently downloaded from the public archive.
+Raw archives and extracted ticks are runtime data and must never be committed.
 
 ## Kill Switch Clearance
 

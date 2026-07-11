@@ -31,7 +31,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from run_second_agg_compound_backtest import fetch_zip, load_symbol_seconds, read_aggtrade_zip  # noqa: E402
+from run_second_agg_compound_backtest import (  # noqa: E402
+    cached_aggtrade_zip,
+    fetch_zip,
+    load_symbol_seconds,
+    read_aggtrade_zip,
+)
 
 
 SECOND_MS = 1_000
@@ -480,6 +485,7 @@ class TickReplaySource:
     start: date
     end: date
     cache_dir: Path
+    cache_only: bool = False
     daily_streams: dict[date, TickStream] = field(default_factory=dict)
     missing_dates: list[str] = field(default_factory=list)
     zip_bytes: int = 0
@@ -514,7 +520,11 @@ class TickReplaySource:
             self.daily_streams[day] = stream
             return stream
         try:
-            path = fetch_zip(self.symbol, day, self.cache_dir)
+            path = (
+                cached_aggtrade_zip(self.symbol, day, self.cache_dir)
+                if self.cache_only
+                else fetch_zip(self.symbol, day, self.cache_dir)
+            )
         except Exception as exc:  # noqa: BLE001 - keep research payload diagnostic.
             self.missing_dates.append(f"{day.isoformat()}:{type(exc).__name__}:{exc}")
             stream = TickStream(ticks=[], time_ms=[])
@@ -551,6 +561,7 @@ class TickReplaySource:
             "first_loaded_trade_time": ms_to_iso(first_tick.time_ms) if first_tick else None,
             "last_loaded_trade_time": ms_to_iso(last_tick.time_ms) if last_tick else None,
             "tick_replay_enabled": bool(loaded_ticks),
+            "archive_cache_only": bool(self.cache_only),
         }
 
 
@@ -596,6 +607,12 @@ def main() -> int:
         ),
     )
     parser.add_argument("--cache-dir", default="runtime/aggTrades-cache")
+    parser.add_argument(
+        "--archive-cache-only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="read only preloaded local archives and never download a missing day",
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--initial-capital", type=float, default=30.0)
     parser.add_argument("--max-open-positions", type=int, default=2)
@@ -838,8 +855,8 @@ def main() -> int:
         raise SystemExit("--signal-end must be inside --start-date/--end-date")
     eligibility_by_symbol, eligibility_diagnostics = load_eligibility_schedule(
         Path(args.eligibility_schedule) if args.eligibility_schedule else None,
-        loaded_start_ms=loaded_start_ms,
-        loaded_end_ms=loaded_end_ms,
+        loaded_start_ms=max(loaded_start_ms, signal_start_ms or loaded_start_ms),
+        loaded_end_ms=min(loaded_end_ms, signal_end_ms or loaded_end_ms),
         requested_symbols=set(symbols),
     )
 
@@ -1040,6 +1057,7 @@ def main() -> int:
                 signal_end_ms,
                 eligibility_by_symbol.get(symbol),
                 args.execution_order_mode,
+                args.archive_cache_only,
             )
             for symbol in symbols
         ]
@@ -1059,6 +1077,7 @@ def main() -> int:
                     signal_end_ms,
                     eligibility_by_symbol.get(symbol),
                     args.execution_order_mode,
+                    args.archive_cache_only,
                 )
                 for symbol in symbols
             ]
@@ -1101,7 +1120,11 @@ def main() -> int:
     payload = {
         "schema": "bfa_micro_grid_research_v1",
         "method": {
-            "data_source": "Binance USD-M public daily aggTrades for tick-order fill/exit replay plus continuous 1-second OHLCV bars for signal features",
+            "data_source": (
+                "preloaded local aggTrade-compatible archives with network fallback disabled"
+                if args.archive_cache_only
+                else "Binance USD-M public daily aggTrades for tick-order fill/exit replay plus continuous 1-second OHLCV bars for signal features"
+            ),
             "signal": "second-level short-window dynamic band, edge alternation/response, center-cross count, turn count, drift-vs-width, and trend-pause filter",
             "orders": "when a micro oscillation passes, place both passive low-buy and high-short orders near predicted wick zones; unfilled orders expire quickly",
             "entry_activation": (
@@ -1169,13 +1192,26 @@ def run_symbol_candidate_job(
     signal_end_ms: int | None = None,
     signal_intervals_ms: list[tuple[int, int]] | None = None,
     execution_order_mode: str = "basket",
+    archive_cache_only: bool = False,
 ) -> dict[str, Any]:
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
     cache_path = Path(cache_dir)
     history_start = history_start_date_for_intervals(start, signal_intervals_ms, profile)
-    seconds, coverage = load_symbol_seconds(symbol, history_start, end, cache_path)
-    tick_source = TickReplaySource(symbol=symbol, start=history_start, end=end, cache_dir=cache_path)
+    seconds, coverage = load_symbol_seconds(
+        symbol,
+        history_start,
+        end,
+        cache_path,
+        cache_only=archive_cache_only,
+    )
+    tick_source = TickReplaySource(
+        symbol=symbol,
+        start=history_start,
+        end=end,
+        cache_dir=cache_path,
+        cache_only=archive_cache_only,
+    )
     trades, diagnostics, order_stats = generate_symbol_candidate_trades(
         symbol,
         seconds,
@@ -1190,6 +1226,7 @@ def run_symbol_candidate_job(
     coverage["tick_stream"] = tick_source.coverage()
     coverage["requested_start_date"] = start.isoformat()
     coverage["history_start_date"] = history_start.isoformat()
+    coverage["archive_cache_only"] = bool(archive_cache_only)
     coverage["eligibility_intervals"] = [
         {"start": ms_to_iso(start_ms), "end": ms_to_iso(end_ms)}
         for start_ms, end_ms in signal_intervals_ms or []
@@ -1723,6 +1760,8 @@ def load_symbol_tick_stream(
     start: date,
     end: date,
     cache_dir: Path,
+    *,
+    cache_only: bool = False,
 ) -> tuple[TickStream, dict[str, Any]]:
     ticks: list[AggTradeTick] = []
     missing_dates: list[str] = []
@@ -1730,7 +1769,7 @@ def load_symbol_tick_stream(
     current = start
     while current <= end:
         try:
-            path = fetch_zip(symbol, current, cache_dir)
+            path = cached_aggtrade_zip(symbol, current, cache_dir) if cache_only else fetch_zip(symbol, current, cache_dir)
         except Exception as exc:  # noqa: BLE001 - keep research payload diagnostic.
             missing_dates.append(f"{current.isoformat()}:{type(exc).__name__}:{exc}")
             current += timedelta(days=1)
@@ -1756,6 +1795,7 @@ def load_symbol_tick_stream(
         "first_trade_time": ms_to_iso(ticks[0].time_ms) if ticks else None,
         "last_trade_time": ms_to_iso(ticks[-1].time_ms) if ticks else None,
         "tick_replay_enabled": bool(ticks),
+        "archive_cache_only": bool(cache_only),
     }
     return stream, coverage
 
