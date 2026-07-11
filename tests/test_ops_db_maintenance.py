@@ -9,10 +9,59 @@ from bfa.config import load_config
 from bfa.event_store.store import EventStore
 from bfa.market.models import NormalizedMarketSnapshot
 from bfa.narrative.models import normalize_narrative_record
-from bfa.ops.db_maintenance import build_db_maintenance_report, build_raw_feed_maintenance_report
+from bfa.ops.db_maintenance import (
+    _delete_old_decision_snapshots,
+    _delete_old_sentinel_events,
+    build_db_maintenance_report,
+    build_raw_feed_maintenance_report,
+)
 
 
 class DbMaintenanceTests(unittest.TestCase):
+    def test_high_frequency_event_retention_disables_fk_full_table_scans_during_delete(self):
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        store = EventStore(connection)
+        store.insert_artifact(
+            "decision_snapshots",
+            occurred_at="2026-06-20T00:00:00Z",
+            event_type="decision_snapshot",
+            payload={"status": "old"},
+        )
+        connection.execute(
+            """
+            INSERT INTO events (event_type, occurred_at, payload_json)
+            VALUES ('position_sentinel', '2026-06-20T00:00:00Z', '{}')
+            """
+        )
+        connection.commit()
+        statements = []
+        connection.set_trace_callback(statements.append)
+
+        _delete_old_decision_snapshots(
+            connection,
+            "2026-06-21T00:00:00Z",
+            batch_size=10,
+            max_delete_rows=10,
+        )
+        _delete_old_sentinel_events(
+            connection,
+            "2026-06-21T00:00:00Z",
+            batch_size=10,
+            max_delete_rows=10,
+        )
+        connection.close()
+
+        fk_off = [sql for sql in statements if sql.strip().upper() == "PRAGMA FOREIGN_KEYS = OFF"]
+        fk_on = [
+            sql
+            for sql in statements
+            if sql.strip().upper() in {"PRAGMA FOREIGN_KEYS = ON", "PRAGMA FOREIGN_KEYS = 1"}
+        ]
+        self.assertEqual(len(fk_off), 2)
+        self.assertEqual(len(fk_on), 2)
+
     def test_execute_deletes_only_old_market_snapshot_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

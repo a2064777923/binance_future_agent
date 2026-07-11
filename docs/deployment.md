@@ -222,6 +222,10 @@ market/decision/sentinel backlog, but only deletes up to
 batches of `BFA_DB_MAINTENANCE_BATCH_SIZE`.
 This avoids multi-million-row deletes creating huge WAL files beside live
 trading. Re-run maintenance or let the timer catch up gradually.
+The controlled retention transaction removes category rows first, temporarily
+disables SQLite foreign-key enforcement while deleting their exact event IDs,
+then restores it. This avoids a foreign-key full scan of every artifact table
+for every retired high-frequency event.
 
 Enable hourly retention:
 

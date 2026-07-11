@@ -412,31 +412,36 @@ def _delete_old_decision_snapshots(
     artifact_deleted = 0
     event_deleted = 0
     remaining = max(max_delete_rows, 0)
-    while remaining > 0:
-        limit = min(batch_size, remaining)
-        rows = connection.execute(
-            """
-            SELECT id, event_id
-            FROM decision_snapshots
-            WHERE occurred_at >= '1970-'
-              AND occurred_at < ?
-            ORDER BY occurred_at ASC, id ASC
-            LIMIT ?
-            """,
-            (cutoff_iso, limit),
-        ).fetchall()
-        if not rows:
-            break
-        artifact_ids = [int(row["id"]) for row in rows]
-        event_ids = [int(row["event_id"]) for row in rows if row["event_id"] is not None]
-        artifact_deleted += _delete_ids(connection, "decision_snapshots", artifact_ids)
-        event_deleted += _delete_event_ids(
-            connection,
-            event_ids,
-            ("decision_snapshot", "decision_snapshot_delta"),
-        )
-        connection.commit()
-        remaining -= len(artifact_ids)
+    previous_foreign_keys = int(connection.execute("PRAGMA foreign_keys").fetchone()[0])
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        while remaining > 0:
+            limit = min(batch_size, remaining)
+            rows = connection.execute(
+                """
+                SELECT id, event_id
+                FROM decision_snapshots
+                WHERE occurred_at >= '1970-'
+                  AND occurred_at < ?
+                ORDER BY occurred_at ASC, id ASC
+                LIMIT ?
+                """,
+                (cutoff_iso, limit),
+            ).fetchall()
+            if not rows:
+                break
+            artifact_ids = [int(row["id"]) for row in rows]
+            event_ids = [int(row["event_id"]) for row in rows if row["event_id"] is not None]
+            artifact_deleted += _delete_ids(connection, "decision_snapshots", artifact_ids)
+            event_deleted += _delete_event_ids(
+                connection,
+                event_ids,
+                ("decision_snapshot", "decision_snapshot_delta"),
+            )
+            connection.commit()
+            remaining -= len(artifact_ids)
+    finally:
+        connection.execute(f"PRAGMA foreign_keys = {previous_foreign_keys}")
     return {
         "decision_snapshots": max(int(artifact_deleted), 0),
         "events": max(int(event_deleted), 0),
@@ -452,30 +457,35 @@ def _delete_old_sentinel_events(
 ) -> dict[str, int]:
     deleted = 0
     remaining = max(max_delete_rows, 0)
-    while remaining > 0:
-        limit = min(batch_size, remaining)
-        rows = connection.execute(
-            """
-            SELECT id
-            FROM events
-            WHERE event_type IN ('position_sentinel', 'position_sentinel_delta')
-              AND occurred_at >= '1970-'
-              AND occurred_at < ?
-            ORDER BY occurred_at ASC, id ASC
-            LIMIT ?
-            """,
-            (cutoff_iso, limit),
-        ).fetchall()
-        if not rows:
-            break
-        event_ids = [int(row["id"]) for row in rows]
-        deleted += _delete_event_ids(
-            connection,
-            event_ids,
-            ("position_sentinel", "position_sentinel_delta"),
-        )
-        connection.commit()
-        remaining -= len(event_ids)
+    previous_foreign_keys = int(connection.execute("PRAGMA foreign_keys").fetchone()[0])
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        while remaining > 0:
+            limit = min(batch_size, remaining)
+            rows = connection.execute(
+                """
+                SELECT id
+                FROM events
+                WHERE event_type IN ('position_sentinel', 'position_sentinel_delta')
+                  AND occurred_at >= '1970-'
+                  AND occurred_at < ?
+                ORDER BY occurred_at ASC, id ASC
+                LIMIT ?
+                """,
+                (cutoff_iso, limit),
+            ).fetchall()
+            if not rows:
+                break
+            event_ids = [int(row["id"]) for row in rows]
+            deleted += _delete_event_ids(
+                connection,
+                event_ids,
+                ("position_sentinel", "position_sentinel_delta"),
+            )
+            connection.commit()
+            remaining -= len(event_ids)
+    finally:
+        connection.execute(f"PRAGMA foreign_keys = {previous_foreign_keys}")
     return {
         "position_sentinel_events": max(int(deleted), 0),
         "events": max(int(deleted), 0),
