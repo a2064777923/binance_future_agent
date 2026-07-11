@@ -289,11 +289,15 @@ describe either model as proven profitable.
 The 2026-07-11 scalping audit corrected passive-fill direction, maker/taker cost
 gates, sparse-tick horizon exits, millisecond ordering, and intraday research
 windows. Dynamic Stoch/flow confirmation reduced the same MAGMA research run's
-candidate time from 59.82s to 24.43s by rejecting before wick fitting. A
-development profile reached 8 wins from 9 trades, but failed predeclared unseen
-validation: 2 trades across 18 symbol-days, 1 win, PF 0.988, net -0.0006U, plus
-zero trades in the separate intraday and higher-beta sets. The confirmation,
-post-fill exit, and research trailing variants remain disabled in live.
+candidate time from 59.82s to 24.43s by rejecting before wick fitting. The
+first report used the legacy 30U sizing by mistake. Corrected 400U / 30x runs
+showed the development profile at 8 wins from 9 trades, PF 1.878, net +8.6226U,
+but predeclared unseen validation still failed: 2 trades across 18 symbol-days,
+1 win, PF 0.934, net -0.0939U, plus zero trades in the separate intraday and
+higher-beta sets. A research-only reversal scout then produced 9/10 wins across
+seen development/calibration data, but its newly frozen 24-symbol-day matrix
+filled zero of 35 created orders. All new entry, post-fill exit, and trailing
+variants remain disabled in live.
 
 Operational boundary: live and sentinel remain disabled and the kill switch
 remains in place. Existing positions are manual and must not be adopted by the

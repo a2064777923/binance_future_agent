@@ -3,11 +3,13 @@
 ## Outcome
 
 The current micro-grid strategy has not demonstrated a generalizable 70% win
-rate. A development-selected profile reached 8 wins from 9 trades (88.89%, PF
-3.91, +0.3327 USDT), but the predeclared unseen universe produced only 2 trades
-across 18 symbol-days, with 1 win, 1 loss, PF 0.988, and -0.0006 USDT. All six
-predeclared intraday windows and all seven higher-beta eligible-universe windows
-produced zero trades.
+rate. The first report accidentally used the script's legacy 30 USDT / 10x / 1%
+risk defaults instead of the current 400 USDT live risk profile. After rerunning
+with the server's non-secret 400 USDT caps, the development-selected profile
+reached 8 wins from 9 trades (88.89%, PF 1.878, +8.6226 USDT), but the
+predeclared unseen universe produced only 2 trades across 18 symbol-days, with
+1 win, 1 loss, PF 0.934, and -0.0939 USDT. All six predeclared intraday windows
+and all seven higher-beta eligible-universe windows produced zero trades.
 
 This is a failed promotion result, not a reason to loosen live risk. The new
 confirmation remains research/shadow only. Live and sentinel remain disabled.
@@ -35,11 +37,44 @@ The following issues were found and corrected in
    wick/EV fit. If both sides fail Stoch/flow confirmation, the scan now exits
    before fitting. Multi-layer order generation also computes confirmation only
    once per side.
+7. Portfolio replay exposed only fractional caps and did not record the sizing
+   arguments in its JSON artifact. It now supports and records absolute
+   per-trade risk, position notional, position margin, portfolio margin, and
+   portfolio notional caps. This prevents a nominally "live-like" run from
+   silently using the old 30 USDT defaults.
+8. The live pending-quality context and the research replay had separate
+   implementations. Second-bar flow, return, volume expansion, VWAP acceptance,
+   and absorption diagnostics now share one pure implementation. Research can
+   model pending cancellation or a two-stage inactive scout without changing
+   live execution.
 
 On the same MAGMAUSDT full-day confirmation run, candidate-generation time fell
 from 59.8249 seconds to 24.4331 seconds (59.2% lower) with identical candidate
 summary and portfolio summary. Diagnostic `passed_windows` changes intentionally
 because confirmation rejections are now counted before wick fitting.
+
+### Current 400 USDT sizing used for corrected results
+
+The corrected runs explicitly use:
+
+```text
+--initial-capital 400
+--max-open-positions 3
+--risk-per-trade-fraction 0.10
+--max-notional-fraction 6
+--max-margin-fraction 1.0
+--max-leverage 30
+--max-risk-per-trade-usdt 40
+--max-position-notional-usdt 2400
+--max-margin-per-position-usdt 80
+--max-portfolio-margin-usdt 400
+--max-portfolio-notional-usdt 4800
+--pullback-scale-mode none
+```
+
+These map to the selected non-secret server limits. The standalone micro replay
+uses three concurrent positions to match the micro pending capacity. The JSON
+artifact now carries the complete values under `portfolio_sizing`.
 
 ### Remaining model limitations
 
@@ -81,19 +116,17 @@ oversold can remain weak — is supported by the losing paths observed here.
 
 ## Development ablations
 
-All rows below use corrected aggTrade replay. The live-like rows use
-`--pullback-scale-mode none`; therefore their PnL scale differs from the older
-legacy-cap research outputs.
+All rows below use corrected aggTrade replay and the explicit 400 USDT sizing
+above. Older 30 USDT PnL figures are superseded.
 
 | Profile | Trades | Win rate | PF | Net PnL (USDT) | Interpretation |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Corrected broad baseline | 37 | 48.65% | 0.298 | -0.4910 | No edge |
-| Dynamic Stoch/flow confirmation, legacy size cap | 11 | 72.73% | 1.017 | +0.0015 | High win rate, economically negligible |
-| Dynamic confirmation, live-like sizing | 11 | 72.73% | 0.817 | -0.0998 | Fails economic gate |
-| + 8-second post-fill confirmation | 11 | 36.36% | 1.379 | +0.0693 | Cuts loss size but misclassifies delayed winners |
-| + target-progress trailing | 11 | 72.73% | 0.550 | -0.2449 | Locks too early in weak windows |
-| + adaptive profit lock | 11 | 72.73% | 0.525 | -0.2585 | Same failure mode |
-| Pullback >= 0.50 and mature wick stop rate <= 0.30 | 9 | 88.89% | 3.909 | +0.3327 | Development winner; sample too small |
+| Corrected broad baseline | 38 | 50.00% | 0.265 | -104.4294 | No edge; 26.1% capital loss across separate windows |
+| Dynamic Stoch/flow confirmation | 11 | 72.73% | 0.896 | -2.1398 | Win rate alone still hides negative expectancy |
+| Pullback >= 0.50 and mature wick stop rate <= 0.30 | 9 | 88.89% | 1.878 | +8.6226 | Development winner; sample too small |
+| Fixed 15-second inactive scout | 6 | 83.33% | 1.155 | +1.5226 | Removes winners and retains the large loss |
+| Reversal-activated scout, development only | 9 | 88.89% | 1.878 | +8.6226 | Same development trades as quality profile |
+| Reversal scout plus calibration day | 10 | 90.00% | 2.013 | +9.9453 | Promising in seen data only |
 
 The 8-second early-exit rule reduced drawdown in some losses, but it also closed
 the eventual MAGMA winner and several other winners before their reversal
@@ -101,6 +134,22 @@ developed. Aggregate taker flow during the first eight seconds did not separate
 winners cleanly: several profitable mean reversions first showed strongly
 adverse flow, consistent with capitulation or passive absorption. It therefore
 stays disabled.
+
+The live pending-quality rule was also replayed before fills. On the calibration
+day it canceled the profitable PUMP order and retained the losing NEAR order.
+The evidence capable of separating them appeared only after NEAR had already
+touched its entry. This is a timing/architecture problem, not a threshold
+problem. The live scan runs every two minutes while micro entries expire after
+20 seconds; the 10-second pending watchdog currently handles lifecycle and
+protection, not market-quality rescoring. No live behavior was changed.
+
+A research-only two-stage scout was therefore added. In reversal mode the order
+is not active until at least five seconds have elapsed and a side-favorable
+five-second return appears. It improved the seen calibration day from 1 win / 1
+loss to 1 win / 0 losses while preserving all nine development trades. This did
+not solve generalization: the subsequently frozen 24-symbol-day blind matrix
+created 35 orders, filled none, and therefore supplied no evidence for live
+promotion.
 
 ## Generalization result
 
@@ -110,8 +159,9 @@ The exact blind windows and selection rules are recorded in
 | Blind set | Coverage | Trades | Win rate | PF | Net PnL (USDT) |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Arbitrary intraday | 6 windows, 7 symbol-window observations | 0 | n/a | n/a | 0.0000 |
-| Broad coverage extension | 18 symbol-days | 2 | 50.00% | 0.988 | -0.0006 |
+| Broad coverage extension, corrected 400U sizing | 18 symbol-days | 2 | 50.00% | 0.934 | -0.0939 |
 | Higher-beta eligible universe | 7 eight-hour windows | 0 | n/a | n/a | 0.0000 |
+| Reversal-scout matrix | 24 unseen symbol-days | 0 | n/a | n/a | 0.0000 |
 
 Across the 18 symbol-days, only 31 individual orders were created; 3 layers
 filled (9.68% order fill rate), producing 2 portfolio trades. The dominant
@@ -126,6 +176,10 @@ and capping entry depth at -0.30 span with a 0.60-span stop also produced 0 wins
 from 4 trades. The lack of fills is therefore not the only problem; the closer
 signals often represent continuation rather than reversal.
 
+The reversal-scout blind matrix created 35 orders. Seven were rejected because
+no qualifying reversal appeared and the remaining 28 expired unfilled. This is
+safe abstention, but a zero-trade test cannot establish a 70% edge.
+
 ## Recommended next plan
 
 ### P0 — keep research truthful
@@ -137,17 +191,16 @@ signals often represent continuation rather than reversal.
 - add an L2/queue-aware replay before any claim about 20-second passive fill
   probability.
 
-### P1 — redesign entry as a two-stage decision
+### P1 — separate eligibility, reversal, and passive-grid legs
 
-- stage 1 scouts a band edge but does not immediately assume reversal;
-- stage 2 distinguishes continuation from exhaustion using a short flow slope,
-  price acceptance outside the band, and an actual reversal follow-through;
-- maintain a deep passive quote only while adverse pressure remains high;
-  otherwise move to a bounded near-edge quote, but cancel if price acceptance
-  confirms a breakout;
-- score symbol eligibility from trailing cost-adjusted range, wick frequency,
-  spread, and realized fill rate using only information available before the
-  test window.
+- retain the research-only stage-1/stage-2 switches, but do not deploy them;
+- stop tuning the same deep passive geometry against the now-seen windows;
+- build a separate eligibility model from trailing cost-adjusted range, wick
+  frequency, spread, and realized fill rate before choosing symbols;
+- compare a confirmed-reversal entry leg against the deep passive micro-grid as
+  a separate strategy, rather than forcing one set of entries to do both jobs;
+- require any new variant to produce enough fills on a fresh manifest before
+  optimizing its exits.
 
 ### P2 — exit and validation
 

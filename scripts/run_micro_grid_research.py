@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from bfa.backtest.models import BacktestBar
+from bfa.strategy.pending_quality import second_quality_context, second_quality_diagnostics
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -149,6 +150,19 @@ class MicroGridProfile:
     scalp_confirmation_dynamic_buffer: float = 4.0
     scalp_confirmation_max_adverse_flow: float = 0.18
     scalp_confirmation_max_wick_stop_rate: float = 1.0
+    pending_quality_enabled: bool = False
+    pending_quality_min_age_seconds: int = 5
+    pending_quality_max_distance_percent: float = 0.35
+    pending_quality_momentum_percent: float = 0.08
+    pending_quality_adverse_taker_buy_fraction: float = 0.35
+    pending_quality_adverse_min_windows: int = 2
+    pending_quality_volume_expansion_ratio: float = 1.5
+    pending_quality_price_acceptance_return_percent: float = 0.03
+    pending_quality_micro_absorption_mode: bool = False
+    entry_scout_enabled: bool = False
+    entry_scout_seconds: int = 15
+    entry_scout_mode: str = "fixed_quality"
+    entry_scout_reversal_return_percent: float = 0.02
     side_flow_filter_enabled: bool = True
     side_flow_extreme_taker_ratio: float = 0.64
     side_flow_min_pullback_quality: float = 0.58
@@ -580,6 +594,11 @@ def main() -> int:
     parser.add_argument("--max-notional-fraction", type=float, default=4.0)
     parser.add_argument("--max-margin-fraction", type=float, default=0.4)
     parser.add_argument("--max-leverage", type=float, default=10.0)
+    parser.add_argument("--max-risk-per-trade-usdt", type=float, default=0.0, help="optional absolute per-trade stop-risk cap; zero disables")
+    parser.add_argument("--max-position-notional-usdt", type=float, default=0.0, help="optional absolute per-position notional cap; zero disables")
+    parser.add_argument("--max-margin-per-position-usdt", type=float, default=0.0, help="optional absolute per-position initial-margin cap; zero disables")
+    parser.add_argument("--max-portfolio-margin-usdt", type=float, default=0.0, help="optional absolute concurrent portfolio-margin cap; zero disables")
+    parser.add_argument("--max-portfolio-notional-usdt", type=float, default=0.0, help="optional absolute concurrent portfolio-notional cap; zero disables")
     parser.add_argument(
         "--pullback-scale-mode",
         choices=["cap", "none"],
@@ -701,6 +720,19 @@ def main() -> int:
     parser.add_argument("--scalp-confirmation-dynamic-buffer", type=float, default=MicroGridProfile.scalp_confirmation_dynamic_buffer)
     parser.add_argument("--scalp-confirmation-max-adverse-flow", type=float, default=MicroGridProfile.scalp_confirmation_max_adverse_flow)
     parser.add_argument("--scalp-confirmation-max-wick-stop-rate", type=float, default=MicroGridProfile.scalp_confirmation_max_wick_stop_rate)
+    parser.add_argument("--pending-quality-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.pending_quality_enabled)
+    parser.add_argument("--pending-quality-min-age-seconds", type=int, default=MicroGridProfile.pending_quality_min_age_seconds)
+    parser.add_argument("--pending-quality-max-distance-percent", type=float, default=MicroGridProfile.pending_quality_max_distance_percent)
+    parser.add_argument("--pending-quality-momentum-percent", type=float, default=MicroGridProfile.pending_quality_momentum_percent)
+    parser.add_argument("--pending-quality-adverse-taker-buy-fraction", type=float, default=MicroGridProfile.pending_quality_adverse_taker_buy_fraction)
+    parser.add_argument("--pending-quality-adverse-min-windows", type=int, default=MicroGridProfile.pending_quality_adverse_min_windows)
+    parser.add_argument("--pending-quality-volume-expansion-ratio", type=float, default=MicroGridProfile.pending_quality_volume_expansion_ratio)
+    parser.add_argument("--pending-quality-price-acceptance-return-percent", type=float, default=MicroGridProfile.pending_quality_price_acceptance_return_percent)
+    parser.add_argument("--pending-quality-micro-absorption-mode", action=argparse.BooleanOptionalAction, default=MicroGridProfile.pending_quality_micro_absorption_mode)
+    parser.add_argument("--entry-scout-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.entry_scout_enabled)
+    parser.add_argument("--entry-scout-seconds", type=int, default=MicroGridProfile.entry_scout_seconds)
+    parser.add_argument("--entry-scout-mode", choices=["fixed_quality", "reversal"], default=MicroGridProfile.entry_scout_mode)
+    parser.add_argument("--entry-scout-reversal-return-percent", type=float, default=MicroGridProfile.entry_scout_reversal_return_percent)
     parser.add_argument("--side-flow-filter-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.side_flow_filter_enabled)
     parser.add_argument("--side-flow-extreme-taker-ratio", type=float, default=MicroGridProfile.side_flow_extreme_taker_ratio)
     parser.add_argument("--side-flow-min-pullback-quality", type=float, default=MicroGridProfile.side_flow_min_pullback_quality)
@@ -886,6 +918,19 @@ def main() -> int:
         scalp_confirmation_dynamic_buffer=args.scalp_confirmation_dynamic_buffer,
         scalp_confirmation_max_adverse_flow=args.scalp_confirmation_max_adverse_flow,
         scalp_confirmation_max_wick_stop_rate=args.scalp_confirmation_max_wick_stop_rate,
+        pending_quality_enabled=args.pending_quality_enabled,
+        pending_quality_min_age_seconds=args.pending_quality_min_age_seconds,
+        pending_quality_max_distance_percent=args.pending_quality_max_distance_percent,
+        pending_quality_momentum_percent=args.pending_quality_momentum_percent,
+        pending_quality_adverse_taker_buy_fraction=args.pending_quality_adverse_taker_buy_fraction,
+        pending_quality_adverse_min_windows=args.pending_quality_adverse_min_windows,
+        pending_quality_volume_expansion_ratio=args.pending_quality_volume_expansion_ratio,
+        pending_quality_price_acceptance_return_percent=args.pending_quality_price_acceptance_return_percent,
+        pending_quality_micro_absorption_mode=args.pending_quality_micro_absorption_mode,
+        entry_scout_enabled=args.entry_scout_enabled,
+        entry_scout_seconds=args.entry_scout_seconds,
+        entry_scout_mode=args.entry_scout_mode,
+        entry_scout_reversal_return_percent=args.entry_scout_reversal_return_percent,
         side_flow_filter_enabled=args.side_flow_filter_enabled,
         side_flow_extreme_taker_ratio=args.side_flow_extreme_taker_ratio,
         side_flow_min_pullback_quality=args.side_flow_min_pullback_quality,
@@ -1006,6 +1051,11 @@ def main() -> int:
         max_notional_fraction=args.max_notional_fraction,
         max_margin_fraction=args.max_margin_fraction,
         max_leverage=args.max_leverage,
+        max_risk_per_trade_usdt=args.max_risk_per_trade_usdt,
+        max_position_notional_usdt=args.max_position_notional_usdt,
+        max_margin_per_position_usdt=args.max_margin_per_position_usdt,
+        max_portfolio_margin_usdt=args.max_portfolio_margin_usdt,
+        max_portfolio_notional_usdt=args.max_portfolio_notional_usdt,
         pullback_scale_mode=args.pullback_scale_mode,
         symbol_quality_filter_enabled=args.symbol_quality_filter_enabled,
         symbol_quality_lookback_hours=args.symbol_quality_lookback_hours,
@@ -1020,6 +1070,16 @@ def main() -> int:
             "data_source": "Binance USD-M public daily aggTrades for tick-order fill/exit replay plus continuous 1-second OHLCV bars for signal features",
             "signal": "second-level short-window dynamic band, edge alternation/response, center-cross count, turn count, drift-vs-width, and trend-pause filter",
             "orders": "when a micro oscillation passes, place both passive low-buy and high-short orders near predicted wick zones; unfilled orders expire quickly",
+            "entry_activation": (
+                f"research-only {profile.entry_scout_mode} scout waits at least {profile.entry_scout_seconds}s before the passive order can fill"
+                if profile.entry_scout_enabled
+                else "passive order is active immediately"
+            ),
+            "pending_quality": (
+                "re-evaluate unfilled limits from completed second bars"
+                if profile.pending_quality_enabled
+                else "disabled"
+            ),
             "exit": "ride the oscillation toward the opposite band, then target, stop beyond local wick zone, cost-aware trailing lock, or max-hold failsafe",
             "sizing": "portfolio replay scales notional by risk, max notional, margin x leverage caps, configured pullback scale mode, and optional rolling per-symbol trade quality; leverage changes margin efficiency, not price edge",
             "intent": "research a smart-grid micro-oscillation supplement: second/tick data captures information, while trades may hold across a full multi-second or multi-minute wave",
@@ -1034,6 +1094,7 @@ def main() -> int:
             "signal_end": ms_to_iso(signal_end_ms) if signal_end_ms is not None else None,
         },
         "profile": asdict(profile),
+        "portfolio_sizing": replay["sizing"],
         "coverage": coverage,
         "performance": {
             "symbol_worker_count": worker_count,
@@ -1153,7 +1214,12 @@ def generate_symbol_candidate_trades(
             )
             order_stats[f"baskets_{status}"] = order_stats.get(f"baskets_{status}", 0) + 1
             if trade is None:
-                order_stats["orders_expired"] = order_stats.get("orders_expired", 0) + len(side_orders)
+                if status == "quality_canceled":
+                    order_stats["orders_quality_canceled"] = order_stats.get("orders_quality_canceled", 0) + len(side_orders)
+                elif status in {"scout_rejected", "scout_not_activated"}:
+                    order_stats["orders_scout_rejected"] = order_stats.get("orders_scout_rejected", 0) + len(side_orders)
+                else:
+                    order_stats["orders_expired"] = order_stats.get("orders_expired", 0) + len(side_orders)
             else:
                 filled_layers = filled_layer_count_from_trade(trade)
                 status_key = "same_bar_stop" if trade.exit_reason == "same_bar_stop" else "filled"
@@ -3157,6 +3223,12 @@ def simulate_grid_basket_on_ticks(
         return None, "expired", None
     signal_ms = seconds[orders[0].signal_index].open_time
     wait_end_ms = signal_ms + max(1, profile.order_wait_seconds) * SECOND_MS - 1
+    scout_mode = str(profile.entry_scout_mode or "fixed_quality").strip().lower()
+    activation_ms = (
+        signal_ms + max(0, int(profile.entry_scout_seconds)) * SECOND_MS
+        if profile.entry_scout_enabled
+        else signal_ms
+    )
     start = bisect_left(tick_stream.time_ms, signal_ms)
     open_orders = list(orders)
     fills: list[BasketFill] = []
@@ -3170,6 +3242,12 @@ def simulate_grid_basket_on_ticks(
     worst_price = 0.0
     end_ms = wait_end_ms
     last_tick: AggTradeTick | None = None
+    quality_canceled_count = 0
+    scout_rejected_count = 0
+    scout_checked = not profile.entry_scout_enabled
+    scout_activated = not profile.entry_scout_enabled
+    last_scout_check_second = -1
+    last_quality_check_second = -1
     for position in range(start, len(tick_stream.ticks)):
         tick = tick_stream.ticks[position]
         if first_fill_ms is None and tick.time_ms > wait_end_ms:
@@ -3179,6 +3257,52 @@ def simulate_grid_basket_on_ticks(
         last_tick = tick
         filled_this_tick = False
         if tick.time_ms <= wait_end_ms:
+            if tick.time_ms < activation_ms:
+                continue
+            if profile.entry_scout_enabled and scout_mode == "reversal" and not scout_activated:
+                scout_second = tick.time_ms // SECOND_MS
+                if scout_second != last_scout_check_second:
+                    last_scout_check_second = scout_second
+                    scout_activated = entry_scout_reversal_ready(
+                        seconds,
+                        orders[0].side,
+                        profile,
+                        current_time_ms=tick.time_ms,
+                    )
+                if not scout_activated:
+                    continue
+                scout_checked = True
+            if not scout_checked:
+                scout_checked = True
+                for order in list(open_orders):
+                    quality = entry_scout_quality_diagnostics(
+                        seconds,
+                        order,
+                        profile,
+                        current_time_ms=tick.time_ms,
+                        current_price=tick.price,
+                    )
+                    if quality["cancel"]:
+                        open_orders.remove(order)
+                        scout_rejected_count += 1
+                if not open_orders and not fills:
+                    return None, "scout_rejected", None
+            quality_second = tick.time_ms // SECOND_MS
+            if profile.pending_quality_enabled and quality_second != last_quality_check_second:
+                last_quality_check_second = quality_second
+                for order in list(open_orders):
+                    quality = pending_order_quality_diagnostics(
+                        seconds,
+                        order,
+                        profile,
+                        current_time_ms=tick.time_ms,
+                        current_price=tick.price,
+                    )
+                    if quality["cancel"]:
+                        open_orders.remove(order)
+                        quality_canceled_count += 1
+                if not open_orders and not fills:
+                    return None, "quality_canceled", None
             for order in list(open_orders):
                 if passive_limit_fills_on_tick(order, tick):
                     fills.append(BasketFill(order=order, fill_time_ms=tick.time_ms))
@@ -3256,7 +3380,11 @@ def simulate_grid_basket_on_ticks(
             ), "filled", fill_index
         dynamic_stop = update_trailing_stop(basket_order, profile, best_price, dynamic_stop)
     if not fills or basket_order is None or first_fill_ms is None or fill_index is None:
-        return None, "expired", None
+        if profile.entry_scout_enabled and scout_mode == "reversal" and not scout_activated:
+            return None, "scout_not_activated", None
+        if scout_rejected_count:
+            return None, "scout_rejected", None
+        return None, "quality_canceled" if quality_canceled_count else "expired", None
     if last_tick is None:
         return None, "expired", None
     exit_time_ms, exit_price, reason = tick_replay_horizon_exit(seconds, end_ms=end_ms, last_tick=last_tick)
@@ -3809,6 +3937,11 @@ def replay_portfolio(
     max_notional_fraction: float,
     max_margin_fraction: float = 1.0,
     max_leverage: float = 1.0,
+    max_risk_per_trade_usdt: float = 0.0,
+    max_position_notional_usdt: float = 0.0,
+    max_margin_per_position_usdt: float = 0.0,
+    max_portfolio_margin_usdt: float = 0.0,
+    max_portfolio_notional_usdt: float = 0.0,
     pullback_scale_mode: str = "cap",
     symbol_quality_filter_enabled: bool = False,
     symbol_quality_lookback_hours: float = 72.0,
@@ -3831,6 +3964,7 @@ def replay_portfolio(
     max_concurrent_positions_observed = 0
     max_margin_used_usdt = 0.0
     max_margin_used_percent_of_equity = 0.0
+    max_portfolio_notional_used_usdt = 0.0
     for trade in sorted(candidate_trades, key=lambda item: (parse_iso_ms(item.entry_time), item.symbol)):
         entry_ms = parse_iso_ms(trade.entry_time)
         exit_ms = parse_iso_ms(trade.exit_time)
@@ -3872,8 +4006,16 @@ def replay_portfolio(
             skip_counts["trade_quality"] += 1
             continue
         margin_budget = equity * max(max_margin_fraction, 0.0)
+        if max_portfolio_margin_usdt > 0:
+            margin_budget = min(margin_budget, max_portfolio_margin_usdt)
         margin_used = portfolio_margin_used(open_positions)
         margin_available = max(0.0, margin_budget - margin_used)
+        portfolio_notional_used = portfolio_notional(open_positions)
+        portfolio_notional_available = (
+            max(0.0, max_portfolio_notional_usdt - portfolio_notional_used)
+            if max_portfolio_notional_usdt > 0
+            else None
+        )
         scale = position_scale(
             trade,
             equity=equity,
@@ -3882,6 +4024,10 @@ def replay_portfolio(
             max_margin_fraction=max_margin_fraction,
             max_leverage=max_leverage,
             available_margin_usdt=margin_available,
+            max_risk_per_trade_usdt=max_risk_per_trade_usdt,
+            max_position_notional_usdt=max_position_notional_usdt,
+            max_margin_per_position_usdt=max_margin_per_position_usdt,
+            available_portfolio_notional_usdt=portfolio_notional_available,
             pullback_scale_mode=pullback_scale_mode,
         )
         scale *= symbol_quality_scale
@@ -3899,6 +4045,10 @@ def replay_portfolio(
         record["margin_budget_before_entry_usdt"] = round(margin_budget, 8)
         record["margin_used_before_entry_usdt"] = round(margin_used, 8)
         record["margin_available_before_entry_usdt"] = round(margin_available, 8)
+        record["portfolio_notional_used_before_entry_usdt"] = round(portfolio_notional_used, 8)
+        record["portfolio_notional_available_before_entry_usdt"] = (
+            round(portfolio_notional_available, 8) if portfolio_notional_available is not None else None
+        )
         open_positions.append(
             {
                 "exit_ms": exit_ms,
@@ -3913,6 +4063,10 @@ def replay_portfolio(
             max_margin_used_percent_of_equity,
             margin_used_after / equity * 100.0 if equity > 0 else 0.0,
         )
+        max_portfolio_notional_used_usdt = max(
+            max_portfolio_notional_used_usdt,
+            portfolio_notional(open_positions),
+        )
         cooldown_until_by_symbol[trade.symbol] = exit_ms + profile.reentry_cooldown_seconds * SECOND_MS
     equity = close_due_positions(open_positions, accepted, equity=equity, current_ms=math.inf)
     summary = summarize_trade_dicts(accepted, initial_capital=initial_capital)
@@ -3921,7 +4075,26 @@ def replay_portfolio(
     summary["max_concurrent_positions_observed"] = max_concurrent_positions_observed
     summary["max_margin_used_usdt"] = round(max_margin_used_usdt, 8)
     summary["max_margin_used_percent_of_equity"] = round(max_margin_used_percent_of_equity, 8)
-    return {"summary": summary, "trades": sorted(accepted, key=lambda item: (item["exit_time"], item["symbol"]))}
+    summary["max_portfolio_notional_used_usdt"] = round(max_portfolio_notional_used_usdt, 8)
+    sizing = {
+        "initial_capital_usdt": float(initial_capital),
+        "max_open_positions": int(max_open_positions),
+        "risk_per_trade_fraction": float(risk_per_trade_fraction),
+        "max_notional_fraction": float(max_notional_fraction),
+        "max_margin_fraction": float(max_margin_fraction),
+        "max_leverage": float(max_leverage),
+        "max_risk_per_trade_usdt": float(max_risk_per_trade_usdt),
+        "max_position_notional_usdt": float(max_position_notional_usdt),
+        "max_margin_per_position_usdt": float(max_margin_per_position_usdt),
+        "max_portfolio_margin_usdt": float(max_portfolio_margin_usdt),
+        "max_portfolio_notional_usdt": float(max_portfolio_notional_usdt),
+        "pullback_scale_mode": pullback_scale_mode,
+    }
+    return {
+        "sizing": sizing,
+        "summary": summary,
+        "trades": sorted(accepted, key=lambda item: (item["exit_time"], item["symbol"])),
+    }
 
 
 def close_due_positions(
@@ -3946,6 +4119,10 @@ def close_due_positions(
 
 def portfolio_margin_used(open_positions: list[dict[str, Any]]) -> float:
     return sum(float(position["record"].get("initial_margin_usdt") or 0.0) for position in open_positions)
+
+
+def portfolio_notional(open_positions: list[dict[str, Any]]) -> float:
+    return sum(float(position["record"].get("notional_usdt") or 0.0) for position in open_positions)
 
 
 def count_symbol_day_losses(accepted: list[dict[str, Any]], symbol: str, entry_ms: int) -> int:
@@ -4018,6 +4195,10 @@ def position_scale(
     max_margin_fraction: float = 1.0,
     max_leverage: float = 1.0,
     available_margin_usdt: float | None = None,
+    max_risk_per_trade_usdt: float = 0.0,
+    max_position_notional_usdt: float = 0.0,
+    max_margin_per_position_usdt: float = 0.0,
+    available_portfolio_notional_usdt: float | None = None,
     pullback_scale_mode: str = "cap",
 ) -> float:
     if equity <= 0 or trade.notional_usdt <= 0:
@@ -4031,7 +4212,16 @@ def position_scale(
     margin_budget = equity * max(max_margin_fraction, 0.0) if available_margin_usdt is None else max(available_margin_usdt, 0.0)
     max_by_margin = margin_budget * effective_leverage / trade.notional_usdt
     max_by_pullback = pullback_trade_scale_cap(trade) if pullback_scale_mode == "cap" else math.inf
-    return max(0.0, min(max_by_risk, max_by_notional, max_by_margin, max_by_pullback))
+    limits = [max_by_risk, max_by_notional, max_by_margin, max_by_pullback]
+    if max_risk_per_trade_usdt > 0:
+        limits.append(max_risk_per_trade_usdt / initial_risk_usdt)
+    if max_position_notional_usdt > 0:
+        limits.append(max_position_notional_usdt / trade.notional_usdt)
+    if max_margin_per_position_usdt > 0:
+        limits.append(max_margin_per_position_usdt * effective_leverage / trade.notional_usdt)
+    if available_portfolio_notional_usdt is not None:
+        limits.append(max(available_portfolio_notional_usdt, 0.0) / trade.notional_usdt)
+    return max(0.0, min(limits))
 
 
 def scale_trade(trade: MicroGridTrade, *, scale: float, equity_before: float, max_leverage: float = 1.0) -> dict[str, Any]:
@@ -4090,6 +4280,115 @@ def passive_limit_fills_on_tick(order: GridOrder, tick: AggTradeTick) -> bool:
         return bool(tick.buyer_maker) and tick.price <= order.entry_price
     if order.side == "short":
         return not bool(tick.buyer_maker) and tick.price >= order.entry_price
+    return False
+
+
+def pending_order_quality_diagnostics(
+    seconds: list[BacktestBar],
+    order: GridOrder,
+    profile: MicroGridProfile,
+    *,
+    current_time_ms: int,
+    current_price: float,
+) -> dict[str, Any]:
+    if not profile.pending_quality_enabled:
+        return {"cancel": False, "reasons": ["pending_quality_disabled"]}
+    signal_ms = seconds[order.signal_index].open_time
+    age_seconds = max(0.0, (current_time_ms - signal_ms) / SECOND_MS)
+    if age_seconds < max(0, int(profile.pending_quality_min_age_seconds)):
+        return {"cancel": False, "reasons": ["pending_quality_order_too_fresh"]}
+    if order.stop_price > 0 and (
+        (order.side == "long" and current_price <= order.stop_price)
+        or (order.side == "short" and current_price >= order.stop_price)
+    ):
+        return {"cancel": True, "reasons": ["market_crossed_pending_plan_invalidation"]}
+
+    current_index = second_index_for_ms(seconds, current_time_ms)
+    context = second_quality_context(seconds[max(0, current_index - 90) : current_index])
+    if not context:
+        return {"cancel": False, "reasons": ["pending_quality_context_missing"]}
+    side = "BUY" if order.side == "long" else "SELL"
+    second_quality = second_quality_diagnostics(
+        context,
+        side=side,
+        adverse_taker_buy_fraction=profile.pending_quality_adverse_taker_buy_fraction,
+        price_acceptance_return_percent=profile.pending_quality_price_acceptance_return_percent,
+        adverse_min_windows=profile.pending_quality_adverse_min_windows,
+        volume_expansion_ratio=profile.pending_quality_volume_expansion_ratio,
+    )
+    reasons: list[str] = []
+    reference_price = float(context.get("reference_price") or current_price)
+    if reference_price > 0 and order.entry_price > 0:
+        if order.side == "long":
+            distance_percent = max(reference_price - order.entry_price, 0.0) / reference_price * 100.0
+        else:
+            distance_percent = max(order.entry_price - reference_price, 0.0) / reference_price * 100.0
+    else:
+        distance_percent = 0.0
+    momentum = float((context.get("second_returns_percent") or {}).get("5") or 0.0)
+    moving_away = (
+        order.side == "long" and momentum >= max(0.0, profile.pending_quality_momentum_percent)
+    ) or (
+        order.side == "short" and momentum <= -max(0.0, profile.pending_quality_momentum_percent)
+    )
+    if distance_percent >= max(0.0, profile.pending_quality_max_distance_percent) and moving_away:
+        reasons.append("short_term_fill_probability_deteriorated")
+    if bool(second_quality.get("available")) and bool(second_quality.get("volume_expanding")) and bool(second_quality.get("price_acceptance")):
+        if profile.pending_quality_micro_absorption_mode and bool(second_quality.get("absorption_persistent")):
+            reasons.append("pending_order_absorption_volume_price_acceptance")
+        elif not profile.pending_quality_micro_absorption_mode and bool(second_quality.get("adverse_flow_persistent")):
+            reasons.append("pending_order_adverse_flow_volume_price_acceptance")
+    return {
+        "cancel": bool(reasons),
+        "reasons": reasons or ["pending_order_quality_still_valid"],
+        "age_seconds": round(age_seconds, 6),
+        "entry_distance_percent": round(distance_percent, 8),
+        "momentum_percent": round(momentum, 8),
+        **second_quality,
+    }
+
+
+def entry_scout_quality_diagnostics(
+    seconds: list[BacktestBar],
+    order: GridOrder,
+    profile: MicroGridProfile,
+    *,
+    current_time_ms: int,
+    current_price: float,
+) -> dict[str, Any]:
+    scout_profile = replace(
+        profile,
+        pending_quality_enabled=True,
+        pending_quality_min_age_seconds=max(0, int(profile.entry_scout_seconds)),
+        pending_quality_micro_absorption_mode=True,
+    )
+    return pending_order_quality_diagnostics(
+        seconds,
+        order,
+        scout_profile,
+        current_time_ms=current_time_ms,
+        current_price=current_price,
+    )
+
+
+def entry_scout_reversal_ready(
+    seconds: list[BacktestBar],
+    side: str,
+    profile: MicroGridProfile,
+    *,
+    current_time_ms: int,
+) -> bool:
+    current_index = second_index_for_ms(seconds, current_time_ms)
+    context = second_quality_context(seconds[max(0, current_index - 90) : current_index])
+    returns = context.get("second_returns_percent")
+    if not isinstance(returns, dict):
+        return False
+    five_second_return = float(returns.get("5") or 0.0)
+    threshold = max(0.0, float(profile.entry_scout_reversal_return_percent))
+    if side == "long":
+        return five_second_return >= threshold
+    if side == "short":
+        return five_second_return <= -threshold
     return False
 
 
@@ -5271,6 +5570,8 @@ def empty_order_stats() -> dict[str, Any]:
         "orders_created": 0,
         "orders_filled": 0,
         "orders_expired": 0,
+        "orders_quality_canceled": 0,
+        "orders_scout_rejected": 0,
         "orders_same_bar_stop": 0,
         "orders_rejected_sizing": 0,
         "fill_rate": 0.0,

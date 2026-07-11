@@ -16,6 +16,7 @@ from bfa.ai.schema import RiskLimits
 from bfa.backtest.models import BacktestBar
 from bfa.config import AppConfig
 from bfa.strategy.candidates import CandidateSignal
+from bfa.strategy.pending_quality import second_quality_context
 from bfa.strategy.setup import FactorScore, TradeSetup
 
 
@@ -331,76 +332,10 @@ def pending_quality_contexts_from_seconds_cache(
         raw_bars = symbols_payload.get(raw_symbol) or symbols_payload.get(raw_symbol.lower())
         if not isinstance(raw_bars, list):
             continue
-        rows = [_second_context_row(item) for item in raw_bars[-90:]]
-        rows = [row for row in rows if row is not None]
-        if len(rows) < 5:
-            continue
-        rows.sort(key=lambda row: row["open_time"])
-        closes = [row["close"] for row in rows]
-        fractions: dict[str, float] = {}
-        returns: dict[str, float] = {}
-        for window in (5, 15, 30):
-            sample = rows[-window:]
-            if len(sample) < min(window, 5):
-                continue
-            first = sample[0]["close"]
-            last = sample[-1]["close"]
-            returns[str(window)] = round((last - first) / first * 100.0, 8) if first > 0 else 0.0
-            quote_volume = sum(row["quote_volume"] for row in sample)
-            if quote_volume > 0:
-                fractions[str(window)] = round(
-                    sum(row["taker_buy_quote_volume"] for row in sample) / quote_volume,
-                    8,
-                )
-        recent_volume = _mean([row["quote_volume"] for row in rows[-10:]])
-        prior_volume = _mean([row["quote_volume"] for row in rows[-30:-10]])
-        volume_expansion = (
-            recent_volume / prior_volume
-            if recent_volume is not None and prior_volume is not None and prior_volume > 0
-            else None
-        )
-        vwap_rows = rows[-30:]
-        base_volume = sum(row["volume"] for row in vwap_rows)
-        second_vwap = (
-            sum(row["close"] * row["volume"] for row in vwap_rows) / base_volume
-            if base_volume > 0
-            else _mean([row["close"] for row in vwap_rows])
-        )
-        contexts[raw_symbol] = {
-            "reference_price": closes[-1],
-            "second_taker_buy_fractions": fractions,
-            "second_returns_percent": returns,
-            "second_volume_expansion_ratio": round(volume_expansion, 8)
-            if volume_expansion is not None
-            else None,
-            "second_vwap": round(second_vwap, 8) if second_vwap is not None else None,
-            "second_closes": [round(value, 8) for value in closes[-5:]],
-            "second_context_sample_count": len(rows),
-        }
+        context = second_quality_context(raw_bars)
+        if context:
+            contexts[raw_symbol] = context
     return contexts
-
-
-def _second_context_row(item: Any) -> dict[str, float] | None:
-    if not isinstance(item, Mapping):
-        return None
-    open_time = _int_or_none(item.get("open_time"))
-    close = _positive_float(item.get("close"))
-    if open_time is None or close is None:
-        return None
-    return {
-        "open_time": float(open_time),
-        "close": close,
-        "volume": max(_float_or_default(item.get("volume"), 0.0), 0.0),
-        "quote_volume": max(_float_or_default(item.get("quote_volume"), 0.0), 0.0),
-        "taker_buy_quote_volume": max(
-            _float_or_default(item.get("taker_buy_quote_volume"), 0.0),
-            0.0,
-        ),
-    }
-
-
-def _mean(values: list[float]) -> float | None:
-    return sum(values) / len(values) if values else None
 
 
 def micro_grid_setup_from_candidate(

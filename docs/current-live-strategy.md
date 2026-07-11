@@ -709,12 +709,22 @@ supports bounded intraday signal windows. Confirmation failures now skip the
 expensive wick/EV fit; the same MAGMA full-day run fell from 59.82 seconds to
 24.43 seconds without changing its candidate or portfolio summary.
 
-An article-inspired Stoch/EMA/taker-flow confirmation reached 72.73% on 11
-development trades, but live-like sizing was still net negative. A stricter
-development profile reached 8/9 wins, PF 3.91, and +0.3327U, then failed its
-predeclared generalization test: the 18-symbol-day extension produced only 2
-trades, 1 win, PF 0.988, and -0.0006U; the separate arbitrary intraday and
-higher-beta windows produced no trades. It remains research/shadow only.
+The first audit report accidentally used the script's legacy 30U sizing. All
+material runs were repeated with the selected server profile: 400U capital,
+30x, 40U stop-risk, 2400U position notional, 80U position margin, 400U
+portfolio margin, and 4800U portfolio notional. An article-inspired
+Stoch/EMA/taker-flow confirmation reached 72.73% on 11 development trades but
+was net `-2.1398U`. A stricter development profile reached 8/9 wins, PF 1.878,
+and `+8.6226U`, then failed its predeclared generalization test: the
+18-symbol-day extension produced only 2 trades, 1 win, PF 0.934, and
+`-0.0939U`; the separate arbitrary intraday and higher-beta windows produced no
+trades. It remains research/shadow only.
+
+The replay now records all fractional and absolute sizing caps under
+`portfolio_sizing`. A research-only two-stage reversal scout preserved the
+development trades and improved one seen calibration day, but a subsequently
+frozen 24-symbol-day / 8-symbol blind matrix created 35 orders and filled none.
+It is not approved for live deployment.
 
 Do not enable post-fill confirmation or either research trailing variant: the
 tested 8-second rule cut some losses but also killed delayed winners, while both

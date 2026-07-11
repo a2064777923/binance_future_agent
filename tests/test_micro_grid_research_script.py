@@ -355,6 +355,280 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertEqual(long_fill, 2)
         self.assertEqual(short_fill, 3)
 
+    def test_pending_quality_cancels_before_fill_on_adverse_flow_volume_and_acceptance(self):
+        seconds = self.pending_quality_seconds(expanding_volume=True)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=98.5,
+            stop_price=97.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream("TESTUSDT", [(45_000, 98.5, True), (46_000, 101.1, False)])
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                pending_quality_enabled=True,
+                pending_quality_min_age_seconds=5,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertIsNone(trade)
+        self.assertEqual(status, "quality_canceled")
+
+    def test_pending_quality_keeps_order_without_volume_expansion(self):
+        seconds = self.pending_quality_seconds(expanding_volume=False)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=98.5,
+            stop_price=97.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream("TESTUSDT", [(45_000, 98.5, True), (46_000, 101.1, False)])
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                pending_quality_enabled=True,
+                pending_quality_min_age_seconds=5,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertIsNotNone(trade)
+        self.assertEqual(trade.exit_reason, "take_profit")
+
+    def test_micro_absorption_mode_keeps_aligned_capitulation_flow(self):
+        seconds = self.pending_quality_seconds(expanding_volume=True, post_signal_taker_buy_fraction=0.2)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=98.5,
+            stop_price=97.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream("TESTUSDT", [(45_000, 98.5, True), (46_000, 101.1, False)])
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                pending_quality_enabled=True,
+                pending_quality_micro_absorption_mode=True,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertEqual(trade.exit_reason, "take_profit")
+
+    def test_micro_absorption_mode_cancels_price_flow_divergence(self):
+        seconds = self.pending_quality_seconds(expanding_volume=True, post_signal_taker_buy_fraction=0.8)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=98.5,
+            stop_price=97.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream("TESTUSDT", [(45_000, 98.5, True), (46_000, 101.1, False)])
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                pending_quality_enabled=True,
+                pending_quality_micro_absorption_mode=True,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertIsNone(trade)
+        self.assertEqual(status, "quality_canceled")
+
+    def test_two_stage_scout_ignores_early_touch_then_activates_valid_order(self):
+        seconds = self.pending_quality_seconds(expanding_volume=True, post_signal_taker_buy_fraction=0.2)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=98.5,
+            stop_price=97.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream(
+            "TESTUSDT",
+            [(40_000, 98.4, True), (45_000, 98.5, True), (46_000, 101.1, False)],
+        )
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                entry_scout_enabled=True,
+                entry_scout_seconds=15,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertGreaterEqual(research.parse_iso_ms(trade.entry_time), BASE_MS + 45_000)
+        self.assertEqual(trade.exit_reason, "take_profit")
+
+    def test_two_stage_scout_rejects_absorption_before_order_activation(self):
+        seconds = self.pending_quality_seconds(expanding_volume=True, post_signal_taker_buy_fraction=0.8)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=98.5,
+            stop_price=97.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream(
+            "TESTUSDT",
+            [(40_000, 98.4, True), (45_000, 98.5, True), (46_000, 101.1, False)],
+        )
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                entry_scout_enabled=True,
+                entry_scout_seconds=15,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertIsNone(trade)
+        self.assertEqual(status, "scout_rejected")
+
+    def test_reversal_scout_activates_only_after_favorable_five_second_return(self):
+        seconds = self.reversal_scout_seconds(reverses=True)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=99.3,
+            stop_price=98.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream(
+            "TESTUSDT",
+            [
+                (34_000, 99.2, True),
+                (35_000, 99.5, False),
+                (36_000, 99.7, False),
+                (37_000, 99.9, False),
+                (40_000, 99.3, True),
+                (41_000, 101.1, False),
+            ],
+        )
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                entry_scout_enabled=True,
+                entry_scout_mode="reversal",
+                entry_scout_seconds=5,
+                entry_scout_reversal_return_percent=0.02,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertGreaterEqual(research.parse_iso_ms(trade.entry_time), BASE_MS + 40_000)
+        self.assertEqual(trade.exit_reason, "take_profit")
+
+    def test_reversal_scout_never_activates_without_price_reversal(self):
+        seconds = self.reversal_scout_seconds(reverses=False)
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=30,
+            signal_time=seconds[30].open_time_iso,
+            entry_price=99.3,
+            stop_price=98.0,
+            target_price=101.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=20,
+        )
+        ticks = tick_stream(
+            "TESTUSDT",
+            [(34_000, 99.2, True), (40_000, 99.0, True), (49_000, 98.8, True)],
+        )
+
+        trade, status, _ = research.simulate_grid_basket(
+            seconds,
+            [order],
+            self.profile(
+                order_wait_seconds=20,
+                entry_scout_enabled=True,
+                entry_scout_mode="reversal",
+                entry_scout_seconds=5,
+                entry_scout_reversal_return_percent=0.02,
+            ),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertIsNone(trade)
+        self.assertEqual(status, "scout_not_activated")
+
     def test_wick_path_cannot_profit_before_entry_is_touched(self):
         path = [
             bar("TESTUSDT", 0, open_price=105, high=106, low=104, close=105),
@@ -2181,6 +2455,55 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertAlmostEqual(second_scaled["initial_margin_usdt"], 4.0)
         self.assertEqual(replay["summary"]["max_margin_used_percent_of_equity"], 40.0)
 
+    def test_absolute_live_caps_bound_position_and_portfolio_notional(self):
+        trades = [
+            self.trade("AAAUSDT", entry_index=0, exit_index=30, net_pnl=1.0),
+            self.trade("BBBUSDT", entry_index=1, exit_index=30, net_pnl=1.0),
+            self.trade("CCCUSDT", entry_index=2, exit_index=30, net_pnl=1.0),
+        ]
+
+        replay = research.replay_portfolio(
+            trades,
+            profile=self.profile(),
+            initial_capital=400.0,
+            max_open_positions=3,
+            risk_per_trade_fraction=10.0,
+            max_notional_fraction=100.0,
+            max_margin_fraction=1.0,
+            max_leverage=30.0,
+            max_position_notional_usdt=2_400.0,
+            max_margin_per_position_usdt=80.0,
+            max_portfolio_margin_usdt=400.0,
+            max_portfolio_notional_usdt=4_800.0,
+            pullback_scale_mode="none",
+        )
+
+        self.assertEqual(replay["summary"]["trade_count"], 2)
+        self.assertEqual(replay["summary"]["replay_skip_counts"]["sizing"], 1)
+        self.assertEqual([trade["notional_usdt"] for trade in replay["trades"]], [2_400.0, 2_400.0])
+        self.assertEqual(replay["summary"]["max_portfolio_notional_used_usdt"], 4_800.0)
+        self.assertEqual(replay["sizing"]["initial_capital_usdt"], 400.0)
+        self.assertEqual(replay["sizing"]["max_portfolio_notional_usdt"], 4_800.0)
+
+    def test_absolute_risk_cap_does_not_grow_with_equity_fraction(self):
+        trade = self.trade("AAAUSDT", entry_index=0, exit_index=10, net_pnl=1.0)
+
+        replay = research.replay_portfolio(
+            [trade],
+            profile=self.profile(),
+            initial_capital=400.0,
+            max_open_positions=1,
+            risk_per_trade_fraction=1.0,
+            max_notional_fraction=100.0,
+            max_margin_fraction=1.0,
+            max_leverage=30.0,
+            max_risk_per_trade_usdt=40.0,
+            pullback_scale_mode="none",
+        )
+
+        self.assertEqual(replay["trades"][0]["initial_risk_usdt"], 40.0)
+        self.assertEqual(replay["trades"][0]["notional_usdt"], 80.0)
+
     def test_pullback_size_multiplier_caps_portfolio_scale(self):
         trade = research.replace(
             self.trade("AAAUSDT", entry_index=0, exit_index=10, net_pnl=1.0),
@@ -2332,6 +2655,56 @@ class MicroGridResearchScriptTests(unittest.TestCase):
             exit_reason="take_profit" if net_pnl > 0 else "stop_loss",
             reason_codes=["test"],
         )
+
+    def pending_quality_seconds(self, *, expanding_volume, post_signal_taker_buy_fraction=0.2):
+        bars = []
+        for index in range(60):
+            if index < 30:
+                close = 100.0
+            else:
+                close = 100.0 - (index - 29) * 0.1
+            quote_volume = 30.0 if expanding_volume and index >= 30 else 10.0
+            open_price = bars[-1].close if bars else close
+            bars.append(
+                bar(
+                    "TESTUSDT",
+                    index,
+                    open_price=open_price,
+                    high=max(open_price, close) + 0.03,
+                    low=min(open_price, close) - 0.03,
+                    close=close,
+                    quote_volume=quote_volume,
+                )
+            )
+            bars[-1] = replace(
+                bars[-1],
+                taker_buy_quote_volume=quote_volume * (post_signal_taker_buy_fraction if index >= 30 else 0.5),
+            )
+        return bars
+
+    def reversal_scout_seconds(self, *, reverses):
+        bars = []
+        for index in range(60):
+            if index < 30:
+                close = 100.0
+            elif reverses:
+                path = [99.8, 99.6, 99.4, 99.2, 99.3, 99.5, 99.7, 99.9, 99.7, 99.5, 99.3]
+                close = path[min(index - 30, len(path) - 1)]
+            else:
+                close = 99.8 - (index - 30) * 0.04
+            open_price = bars[-1].close if bars else close
+            bars.append(
+                bar(
+                    "TESTUSDT",
+                    index,
+                    open_price=open_price,
+                    high=max(open_price, close) + 0.03,
+                    low=min(open_price, close) - 0.03,
+                    close=close,
+                    quote_volume=20.0,
+                )
+            )
+        return bars
 
 
 if __name__ == "__main__":

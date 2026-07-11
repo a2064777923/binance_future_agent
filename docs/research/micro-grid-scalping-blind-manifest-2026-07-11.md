@@ -98,3 +98,29 @@ set was frozen before evaluation from higher-beta or recently active contracts.
 This check uses the already frozen development-selected profile. It is not a
 replacement for the 30-trade promotion gate; it only tests whether the edge is
 portable inside the strategy's intended universe.
+
+## Two-stage reversal-scout blind matrix
+
+This matrix was frozen before downloading or evaluating these symbol/date
+combinations. None of the symbols appeared in the earlier development,
+calibration, broad-blind, or eligible-universe sets.
+
+Frozen research profile:
+
+- 400 USDT initial capital, 30x assumed leverage;
+- 40 USDT absolute stop-risk cap, 2,400 USDT position-notional cap, 80 USDT
+  position-margin cap, 400 USDT portfolio-margin cap, and 4,800 USDT
+  portfolio-notional cap;
+- three concurrent micro positions and live-like pullback sizing;
+- dynamic Stoch/flow confirmation, pullback quality >= 0.50, mature wick stop
+  rate <= 0.30;
+- passive order remains inactive for at least five seconds and activates only
+  after a side-favorable five-second return of at least 0.02%;
+- original 20-second signal-to-fill deadline remains unchanged.
+
+Blind symbols: `ARBUSDT`, `OPUSDT`, `WLDUSDT`, `SEIUSDT`, `TIAUSDT`,
+`JUPUSDT`, `TRUMPUSDT`, and `DOGEUSDT`.
+
+Blind full UTC dates: `2026-07-03`, `2026-07-04`, and `2026-07-07`, for a
+total of 24 unseen symbol-days. All 24 rows are included regardless of trade
+count or result. The existing promotion gates still apply without alteration.
