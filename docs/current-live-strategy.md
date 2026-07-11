@@ -726,6 +726,15 @@ development trades and improved one seen calibration day, but a subsequently
 frozen 24-symbol-day / 8-symbol blind matrix created 35 orders and filled none.
 It is not approved for live deployment.
 
+Additional shared-capital portfolio runs used 6-12 simultaneous symbols across
+five periods. Their trade aggregate was 23 trades, 17 wins (73.91%), PF 2.671,
+and +29.5696U, but the 2026-07-03..04 period supplied 91.5% of net profit and
+maximum observed concurrency was only one. Two fresh ten-large-cap, two-day
+portfolios produced zero fills under both strict-quality and reversal-scout
+profiles. A looser capacity stress produced 63 trades, 58.73% wins, PF 0.978,
+-2.2960U, and 28.9241U drawdown. Treat the micro leg as a sparse high-wick
+specialist; these runs do not approve it for general multi-coin live scalping.
+
 Do not enable post-fill confirmation or either research trailing variant: the
 tested 8-second rule cut some losses but also killed delayed winners, while both
 profit locks worsened aggregate PnL. Full evidence and the next plan are in

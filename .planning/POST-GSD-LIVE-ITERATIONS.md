@@ -299,6 +299,15 @@ seen development/calibration data, but its newly frozen 24-symbol-day matrix
 filled zero of 35 created orders. All new entry, post-fill exit, and trailing
 variants remain disabled in live.
 
+Follow-up shared-capital portfolio tests used 6-12 simultaneous symbols and
+the corrected 400U caps. Across five separate periods the trade aggregate was
+23 trades, 73.91% wins, PF 2.671, net +29.5696U, but 91.5% of net came from the
+2026-07-03..04 window and maximum observed concurrency was one. Two unseen
+ten-large-cap, two-day portfolios filled no orders. A loose 12-symbol capacity
+stress generated 63 trades but degraded to 58.73% wins, PF 0.978, net -2.2960U,
+and 28.9241U drawdown. This confirms sparse/symbol-specific edge rather than a
+general multi-coin scalp; live remains disabled.
+
 Operational boundary: live and sentinel remain disabled and the kill switch
 remains in place. Existing positions are manual and must not be adopted by the
 agent. Code deployment or DB migration is not permission to resume trading.

@@ -124,3 +124,34 @@ Blind symbols: `ARBUSDT`, `OPUSDT`, `WLDUSDT`, `SEIUSDT`, `TIAUSDT`,
 Blind full UTC dates: `2026-07-03`, `2026-07-04`, and `2026-07-07`, for a
 total of 24 unseen symbol-days. All 24 rows are included regardless of trade
 count or result. The existing promotion gates still apply without alteration.
+
+## Shared-capital multi-symbol portfolio matrix
+
+This matrix was frozen before running the additional portfolio tests requested
+after the 400 USDT sizing correction. Every run uses one shared 400 USDT
+account, 30x assumed leverage, at most three concurrent micro positions, 40
+USDT stop risk per trade, 2,400 USDT position notional, 80 USDT position
+margin, 400 USDT portfolio margin, and 4,800 USDT portfolio notional. Candidate
+symbols compete by score and entry time; capital is not reset per symbol.
+
+Operational stress windows using already-inspected symbols:
+
+1. `2026-07-03..2026-07-04`: ALLO, ARB, DOGE, JUP, MAGMA, OP, SEI, SLX,
+   TAIKO, TIA, TRUMP, WLD (12 symbols, continuous two-day account).
+2. `2026-07-06`: HYPE, NEAR, ONDO, PUMP, SUI, ZEC (6 symbols).
+3. `2026-07-07`: AIN, ARB, DOGE, HOT, JUP, MAGMA, OP, SEI, SPK, TIA,
+   TRUMP, WLD (12 symbols).
+4. `2026-07-08`: 1000BONK, H, HYPE, NEAR, PUMP, VIRTUAL, ZEC (7 symbols).
+5. `2026-07-09`: EDGE, G, HYPE, KAITO, ONDO, PUMP, SENT, SUI, ZEC
+   (9 symbols).
+
+Fresh large-cap portfolio validation windows:
+
+- universe: BTC, ETH, SOL, XRP, BNB, ADA, LINK, AVAX, DOT, LTC;
+- period A: `2026-07-05..2026-07-06`, continuous two-day account;
+- period B: `2026-07-08..2026-07-09`, continuous two-day account.
+
+The operational windows use the strict quality profile. Each fresh large-cap
+period is run once with the strict quality profile and once with the frozen
+five-second reversal-activation scout. Results are reported even when no orders
+fill.

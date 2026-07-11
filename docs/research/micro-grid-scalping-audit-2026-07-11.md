@@ -180,6 +180,59 @@ The reversal-scout blind matrix created 35 orders. Seven were rejected because
 no qualifying reversal appeared and the remaining 28 expired unfilled. This is
 safe abstention, but a zero-trade test cannot establish a 70% edge.
 
+## Shared-capital multi-symbol portfolio runs
+
+Additional runs used one shared 400 USDT account per period. Symbols competed
+by candidate score and entry time; the replay enforced three open micro
+positions, 40 USDT stop risk, 2,400 USDT position notional, 80 USDT position
+margin, 400 USDT portfolio margin, and 4,800 USDT portfolio notional. Capital
+was not reset per symbol.
+
+| Period | Symbols | Trades | Win rate | PF | Net PnL | Max DD | Max concurrent |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2026-07-03..04 | 12 | 14 | 71.43% | 5.186 | +27.0675U | 5.4002U | 1 |
+| 2026-07-06 | 6 | 2 | 50.00% | 0.934 | -0.0939U | 1.4167U | 1 |
+| 2026-07-07 | 12 | 1 | 100.00% | inf | +1.5393U | 0.0000U | 1 |
+| 2026-07-08 | 7 | 0 | n/a | n/a | 0.0000U | 0.0000U | 0 |
+| 2026-07-09 | 9 | 6 | 83.33% | 1.108 | +1.0567U | 9.8168U | 1 |
+| Trade aggregate | 46 symbol-period observations | 23 | 73.91% | 2.671 | +29.5696U | n/a | 1 |
+
+The aggregate is a trade-level diagnostic across separate account windows, not
+a claim that one account compounded continuously across all dates. The
+continuous 2026-07-03..04 window supplied 91.5% of aggregate net profit.
+Results were concentrated in MAGMA (+12.68U), SENT (+8.01U), TAIKO (+6.67U),
+and SLX (+6.08U), while EDGE (-6.95U), NEAR (-1.42U), and ALLO (-0.37U) were
+negative.
+
+Six-hour UTC entry buckets further show regime concentration:
+
+| UTC bucket | Trades | Win rate | PF | Net PnL |
+| --- | ---: | ---: | ---: | ---: |
+| 00:00-06:00 | 8 | 50.00% | 2.629 | +10.5343U |
+| 06:00-12:00 | 4 | 100.00% | inf | +11.2234U |
+| 12:00-18:00 | 9 | 77.78% | 1.135 | +1.5161U |
+| 18:00-24:00 | 2 | 100.00% | inf | +6.2958U |
+
+Across these windows the strategy created 562 individual grid orders, filled
+25 layers (4.45%), and produced 23 portfolio trades. No two accepted positions
+overlapped, so real market evidence did not exercise the configured three-slot
+capacity. A deliberately looser 12-symbol capacity stress run produced 63
+trades but still only one concurrent position; it fell to 58.73% wins, PF
+0.978, -2.2960U, and 28.9241U maximum drawdown. The concurrency implementation
+is covered synthetically, but increasing signal count in market data degraded
+the edge rather than creating useful parallel exposure.
+
+Two fresh two-day portfolios of BTC, ETH, SOL, XRP, BNB, ADA, LINK, AVAX, DOT,
+and LTC were also run with both strict quality and reversal-scout profiles:
+
+- 2026-07-05..06: 10 strict-profile orders, zero fills/trades;
+- 2026-07-08..09: 1 strict-profile order, zero fills/trades;
+- reversal scout: zero fills/trades in both periods.
+
+The strategy is therefore a sparse specialist for a few high-wick contracts,
+not a general multi-coin scalp. The 73.91% aggregate win rate does not override
+the period concentration, zero large-cap coverage, and sub-30 trade sample.
+
 ## Recommended next plan
 
 ### P0 — keep research truthful
