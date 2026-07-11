@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time as dt_time, timedelta
@@ -1171,17 +1172,96 @@ def _persist_decision_snapshot(
         rejected_candidates=rejected_candidates,
     )
     try:
-        return store.insert_artifact(
+        fingerprint = _decision_snapshot_fingerprint(payload)
+        state_key = "decision_snapshot:agent.live_cycle"
+        prior = store.latest_state(state_key)
+        compact_unchanged = _truthy(config.get("BFA_DECISION_SNAPSHOT_COMPACT_UNCHANGED", "true"))
+        unchanged = bool(
+            compact_unchanged
+            and prior is not None
+            and prior.get("fingerprint") == fingerprint
+        )
+        persisted_payload = (
+            _decision_snapshot_delta_payload(payload, fingerprint=fingerprint, prior=prior)
+            if unchanged
+            else payload
+        )
+        event_id = store.insert_artifact(
             "decision_snapshots",
             occurred_at=started_at,
             source="agent.live_cycle",
             symbol=None,
             ref_id=f"decision_snapshot:{started_at}",
-            event_type="decision_snapshot",
-            payload=payload,
+            event_type="decision_snapshot_delta" if unchanged else "decision_snapshot",
+            payload=persisted_payload,
         )
+        store.upsert_latest_state(
+            state_key,
+            state_type="decision_snapshot",
+            updated_at=started_at,
+            fingerprint=fingerprint,
+            payload=payload,
+            event_id=event_id,
+        )
+        return event_id
     except Exception:
         return None
+
+
+def _decision_snapshot_fingerprint(payload: Mapping[str, Any]) -> str:
+    compact = _without_volatile_snapshot_fields(payload)
+    encoded = json.dumps(compact, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _without_volatile_snapshot_fields(value: Any) -> Any:
+    volatile_keys = {
+        "decided_at",
+        "latest_event_time",
+        "source_event_ids",
+        "market_event_ids",
+        "cache_updated_at_ms",
+        "cache_age_seconds",
+        "seconds_cache_path",
+    }
+    if isinstance(value, Mapping):
+        return {
+            str(key): _without_volatile_snapshot_fields(item)
+            for key, item in value.items()
+            if str(key) not in volatile_keys
+        }
+    if isinstance(value, list):
+        return [_without_volatile_snapshot_fields(item) for item in value]
+    return value
+
+
+def _decision_snapshot_delta_payload(
+    payload: Mapping[str, Any],
+    *,
+    fingerprint: str,
+    prior: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    generation = payload.get("candidate_generation")
+    generation = generation if isinstance(generation, Mapping) else {}
+    return {
+        "schema": "bfa_decision_snapshot_delta_v1",
+        "mode": payload.get("mode"),
+        "status": payload.get("status"),
+        "decided_at": payload.get("decided_at"),
+        "state_fingerprint": fingerprint,
+        "unchanged": True,
+        "previous_event_id": prior.get("event_id") if prior else None,
+        "scan_symbol_count": payload.get("scan_symbol_count"),
+        "candidate_counts": {
+            key: generation.get(key)
+            for key in (
+                "normal_candidate_count",
+                "micro_candidate_count",
+                "fused_candidate_count",
+                "rejected_count",
+            )
+        },
+    }
 
 
 def _decision_snapshot_payload(

@@ -25,6 +25,7 @@ class EventStoreMigrationTests(unittest.TestCase):
         self.assertIn("schema_version", tables)
         self.assertIn("events", tables)
         self.assertIn("pending_limit_entries", tables)
+        self.assertIn("latest_states", tables)
         for table in CATEGORY_TABLES:
             self.assertIn(table, tables)
 
@@ -64,6 +65,7 @@ class EventStoreMigrationTests(unittest.TestCase):
         self.assertIn("idx_pending_limit_entries_status_expiry", indexes)
         self.assertIn("idx_pending_limit_entries_symbol_status", indexes)
         self.assertIn("idx_fills_ref_id", indexes)
+        self.assertIn("idx_latest_states_type_updated", indexes)
 
     def test_pending_limit_query_uses_status_expiry_index(self):
         connection = sqlite3.connect(":memory:")

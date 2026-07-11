@@ -5,6 +5,41 @@ Historical GSD phase files remain useful for decisions, but they are not the
 current live strategy contract. Verify the server before making live claims,
 because timers, env caps, positions, and order intents change continuously.
 
+## 2026-07-11 Safety Freeze And P0-P2 Review
+
+The live and position-sentinel units were explicitly left `inactive` after the
+review, and the kill switch remains present. Existing exchange positions are
+operator-owned manual positions; this change set does not trail, close, resize,
+or otherwise adopt them. Deploying code or migrating SQLite does not authorize
+re-enabling live execution. Resume requires a separate explicit operator
+instruction after read-only readiness and exchange-protection checks.
+
+The July 3-11 order review produced three implementation layers:
+
+- P0 fixes the protection lifecycle: a 20-second micro-grid order is polled and
+  protected inline instead of entering the long deferred path; trend SL/TP and
+  micro SL use `MARK_PRICE`, while micro TP uses `CONTRACT_PRICE`; identical
+  protection plans are no-ops; replacement is sequential (SL first, then TP);
+  and lifetime MFE/MAE is persisted in `position_excursions`.
+- P1 adds the trend climax-entry guard, second-level pending-order quality,
+  shared seconds-cache parsing, conservative outcome attribution, and
+  shadow-only micro economics / trend early-failure diagnostics. Trend and
+  micro pending caps remain 8 and 3 respectively.
+- P2 separates latest state from full audit history. Unchanged sentinel cycles
+  do not write a full multi-kilobyte event every five seconds; full state is
+  kept in one `latest_states` row, with a 300-second full heartbeat and a
+  60-second compact delta. Unchanged decision snapshots use compact deltas.
+  Repeated same-cycle K-line and seconds-cache work is reused.
+
+Micro-grid 1-second replay over three disjoint windows remained negative after
+fees. The shadow economic gate reduced loss/drawdown materially in two windows
+and was neutral in one, but did not establish positive expectancy; therefore
+`BFA_LIVE_MICRO_GRID_COST_QUALITY_ENFORCE_ENABLED` remains `false`. Stored-live
+trend counterfactuals showed the climax guard would block 0%, 14.65%, 26.18%,
+and 24.80% of eligible signals across four windows. Only one attributable
+closed trade was guard-hit (a `-0.3246U` loss), so the result supports a
+defensive guard but is not enough to claim a proven profit uplift.
+
 Snapshot checked from the server at `2026-07-05T12:07:56Z`
 (`2026-07-05 20:07:56` Asia/Hong_Kong) before the USDC execution-preference
 deploy.

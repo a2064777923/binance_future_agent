@@ -182,11 +182,21 @@ cycle writes high-volume market payloads twice, once as a generic event and once
 as a category row.
 
 Keep `BFA_PERSIST_DECISION_SNAPSHOTS=true` when raw market snapshots are
-disabled. Each cycle then writes one compact `decision_snapshots` artifact with
+disabled. A changed cycle writes one full `decision_snapshots` artifact with
 symbol selection health, market-source counts, per-symbol ticker/kline/flow/OI
 summaries, candidate rankings, micro-grid health, and rejection counts. This is
 small enough for live retention while preserving the evidence needed for later
-strategy debugging.
+strategy debugging. An unchanged cycle writes a much smaller delta, while the
+latest full state is upserted into `latest_states`.
+
+Recommended defaults retain decision full/delta history for 72 hours and
+sentinel full/delta history for 168 hours:
+
+```bash
+BFA_DECISION_SNAPSHOT_COMPACT_UNCHANGED=true
+BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS=72
+BFA_DB_SENTINEL_EVENT_RETENTION_HOURS=168
+```
 
 Preview retention before deleting rows:
 
@@ -207,8 +217,9 @@ Apply retention without shrinking the database file:
 ```
 
 The normal hourly unit is intentionally incremental: it reports the full stale
-snapshot backlog, but only deletes up to `BFA_DB_MAINTENANCE_MAX_DELETE_ROWS`
-market-snapshot rows per run in batches of `BFA_DB_MAINTENANCE_BATCH_SIZE`.
+market/decision/sentinel backlog, but only deletes up to
+`BFA_DB_MAINTENANCE_MAX_DELETE_ROWS` rows per run across those categories in
+batches of `BFA_DB_MAINTENANCE_BATCH_SIZE`.
 This avoids multi-million-row deletes creating huge WAL files beside live
 trading. Re-run maintenance or let the timer catch up gradually.
 

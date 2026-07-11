@@ -112,6 +112,74 @@ class EventStore:
                 time.sleep(delay)
         raise RuntimeError("unreachable sqlite lock retry state")
 
+    def latest_state(self, state_key: str) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            """
+            SELECT state_key, state_type, updated_at, fingerprint, payload_json, event_id
+            FROM latest_states
+            WHERE state_key = ?
+            """,
+            (state_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "state_key": str(row["state_key"]),
+            "state_type": str(row["state_type"]),
+            "updated_at": str(row["updated_at"]),
+            "fingerprint": str(row["fingerprint"]),
+            "payload": json.loads(row["payload_json"]),
+            "event_id": int(row["event_id"]) if row["event_id"] is not None else None,
+        }
+
+    def upsert_latest_state(
+        self,
+        state_key: str,
+        *,
+        state_type: str,
+        updated_at: str,
+        fingerprint: str,
+        payload: Mapping[str, Any],
+        event_id: int | None,
+    ) -> None:
+        payload_json = _to_json(payload)
+        self._with_lock_retry(
+            lambda: self._upsert_latest_state_once(
+                state_key,
+                state_type=state_type,
+                updated_at=updated_at,
+                fingerprint=fingerprint,
+                payload_json=payload_json,
+                event_id=event_id,
+            )
+        )
+
+    def _upsert_latest_state_once(
+        self,
+        state_key: str,
+        *,
+        state_type: str,
+        updated_at: str,
+        fingerprint: str,
+        payload_json: str,
+        event_id: int | None,
+    ) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO latest_states (
+                state_key, state_type, updated_at, fingerprint, payload_json, event_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(state_key) DO UPDATE SET
+                state_type = excluded.state_type,
+                updated_at = excluded.updated_at,
+                fingerprint = excluded.fingerprint,
+                payload_json = excluded.payload_json,
+                event_id = excluded.event_id
+            """,
+            (state_key, state_type, updated_at, fingerprint, payload_json, event_id),
+        )
+        self.connection.commit()
+
     def events_between(
         self,
         start: str,

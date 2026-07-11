@@ -68,10 +68,26 @@ class DbMaintenanceTests(unittest.TestCase):
             rows = _event_rows(db_path)
 
         self.assertEqual(preview.status, "db_maintenance_preview")
-        self.assertEqual(preview.deletion_candidates, {"market_snapshots": 2, "events": 2})
+        self.assertEqual(
+            preview.deletion_candidates,
+            {
+                "market_snapshots": 2,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 2,
+            },
+        )
         self.assertEqual(preview.batch_size, 5000)
         self.assertEqual(preview.max_delete_rows, 25000)
-        self.assertEqual(applied.deleted, {"market_snapshots": 2, "events": 2})
+        self.assertEqual(
+            applied.deleted,
+            {
+                "market_snapshots": 2,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 2,
+            },
+        )
         self.assertEqual(market_count, 1)
         self.assertEqual(narrative_count, 1)
         self.assertEqual(order_intent_count, 1)
@@ -105,8 +121,24 @@ class DbMaintenanceTests(unittest.TestCase):
             )
             rows = _event_rows(db_path)
 
-        self.assertEqual(applied.deletion_candidates, {"market_snapshots": 1, "events": 1})
-        self.assertEqual(applied.deleted, {"market_snapshots": 1, "events": 1})
+        self.assertEqual(
+            applied.deletion_candidates,
+            {
+                "market_snapshots": 1,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 1,
+            },
+        )
+        self.assertEqual(
+            applied.deleted,
+            {
+                "market_snapshots": 1,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 1,
+            },
+        )
         self.assertEqual(
             [(row["event_type"], row["ref_id"]) for row in rows],
             [("market_snapshot", "ticker_24h:NEWEPOCHUSDT:1782200000000")],
@@ -142,13 +174,92 @@ class DbMaintenanceTests(unittest.TestCase):
             market_count = _count(db_path, "market_snapshots")
             event_count = len(_event_rows(db_path))
 
-        self.assertEqual(applied.deletion_candidates, {"market_snapshots": 5, "events": 5})
-        self.assertEqual(applied.deleted, {"market_snapshots": 3, "events": 3})
+        self.assertEqual(
+            applied.deletion_candidates,
+            {
+                "market_snapshots": 5,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 5,
+            },
+        )
+        self.assertEqual(
+            applied.deleted,
+            {
+                "market_snapshots": 3,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 3,
+            },
+        )
         self.assertEqual(applied.batch_size, 2)
         self.assertEqual(applied.max_delete_rows, 3)
         self.assertIn("delete_limited", applied.reasons)
         self.assertEqual(market_count, 2)
         self.assertEqual(event_count, 2)
+
+    def test_execute_retires_old_decision_and_sentinel_events_but_keeps_latest_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "agent.sqlite"
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            try:
+                store = EventStore(connection)
+                for occurred_at in ("2026-06-23T04:00:00Z", "2026-06-23T11:00:00Z"):
+                    store.insert_artifact(
+                        "decision_snapshots",
+                        occurred_at=occurred_at,
+                        source="test",
+                        ref_id=f"decision:{occurred_at}",
+                        event_type="decision_snapshot",
+                        payload={"schema": "bfa_decision_snapshot_v1", "decided_at": occurred_at},
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO events (event_type, occurred_at, source, ref_id, payload_json)
+                        VALUES ('position_sentinel', ?, 'test', ?, '{}')
+                        """,
+                        (occurred_at, f"sentinel:{occurred_at}"),
+                    )
+                connection.commit()
+                store.upsert_latest_state(
+                    "position_sentinel:global",
+                    state_type="position_sentinel",
+                    updated_at="2026-06-23T11:00:00Z",
+                    fingerprint="latest",
+                    payload={"status": "sentinel_observing"},
+                    event_id=None,
+                )
+            finally:
+                connection.close()
+
+            applied = build_db_maintenance_report(
+                load_config(
+                    {
+                        "BFA_DB_PATH": str(db_path),
+                        "BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS": "6",
+                        "BFA_DB_SENTINEL_EVENT_RETENTION_HOURS": "6",
+                    }
+                ),
+                retention_hours=6,
+                now="2026-06-23T12:00:00Z",
+                execute=True,
+            )
+            connection = sqlite3.connect(db_path)
+            try:
+                decision_count = connection.execute("SELECT COUNT(*) FROM decision_snapshots").fetchone()[0]
+                sentinel_count = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_type = 'position_sentinel'"
+                ).fetchone()[0]
+                latest_count = connection.execute("SELECT COUNT(*) FROM latest_states").fetchone()[0]
+            finally:
+                connection.close()
+
+        self.assertEqual(applied.deleted["decision_snapshots"], 1)
+        self.assertEqual(applied.deleted["position_sentinel_events"], 1)
+        self.assertEqual(decision_count, 1)
+        self.assertEqual(sentinel_count, 1)
+        self.assertEqual(latest_count, 1)
 
     def test_vacuum_is_noop_in_preview_and_runs_with_execute(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -177,7 +288,15 @@ class DbMaintenanceTests(unittest.TestCase):
             )
 
         self.assertIn("vacuum_requested_but_execute_false", preview.reasons)
-        self.assertEqual(preview.deleted, {"market_snapshots": 0, "events": 0})
+        self.assertEqual(
+            preview.deleted,
+            {
+                "market_snapshots": 0,
+                "decision_snapshots": 0,
+                "position_sentinel_events": 0,
+                "events": 0,
+            },
+        )
         self.assertEqual(applied.status, "db_maintenance_applied_vacuumed")
         self.assertIn("vacuum_applied", applied.reasons)
 

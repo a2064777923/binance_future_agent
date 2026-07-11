@@ -6,7 +6,7 @@ from pathlib import Path
 from bfa.config import load_config
 from bfa.event_store.store import EventStore
 from bfa.market.models import MarketDataResponse
-from bfa.ops.position_sentinel import build_position_sentinel_report
+from bfa.ops.position_sentinel import _recent_klines, build_position_sentinel_report
 
 
 class FakeSignedClient:
@@ -75,6 +75,7 @@ class FakeMarketClient:
         self.volumes = volumes or [10 + index * 3 for index in range(len(self.closes))]
         self.high_offset = high_offset
         self.low_offset = low_offset
+        self.kline_calls = []
 
     def exchange_info(self):
         return MarketDataResponse(
@@ -95,6 +96,7 @@ class FakeMarketClient:
         )
 
     def klines(self, symbol, *, interval, limit=24, start_time=None, end_time=None):
+        self.kline_calls.append((symbol, interval, limit))
         rows = []
         for index, close in enumerate(self.closes):
             rows.append(
@@ -212,6 +214,68 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertEqual(fake_signed.algo_orders, [])
         self.assertGreaterEqual(report.persisted["position_sentinel"], 1)
 
+    def test_unchanged_sentinel_cycles_use_latest_state_and_compact_delta(self):
+        fake_signed = FakeSignedClient(mark_price="107")
+        market = FakeMarketClient()
+        config = self.config(
+            BFA_POSITION_SENTINEL_FULL_HEARTBEAT_SECONDS="300",
+            BFA_POSITION_SENTINEL_DELTA_HEARTBEAT_SECONDS="60",
+        )
+
+        build_position_sentinel_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:00Z",
+            signed_client=fake_signed,
+            market_client=market,
+        )
+        second = build_position_sentinel_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:00:05Z",
+            signed_client=fake_signed,
+            market_client=market,
+        )
+        third = build_position_sentinel_report(
+            config,
+            db_path=str(self.db_path),
+            now="2026-06-20T04:01:05Z",
+            signed_client=fake_signed,
+            market_client=market,
+        )
+
+        connection = sqlite3.connect(self.db_path)
+        try:
+            rows = connection.execute(
+                """
+                SELECT event_type, LENGTH(payload_json)
+                FROM events
+                WHERE event_type IN ('position_sentinel', 'position_sentinel_delta')
+                ORDER BY id
+                """
+            ).fetchall()
+            latest_count = connection.execute(
+                "SELECT COUNT(*) FROM latest_states WHERE state_key = 'position_sentinel:global'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+
+        self.assertEqual([row[0] for row in rows], ["position_sentinel", "position_sentinel_delta"])
+        self.assertLess(rows[1][1], rows[0][1])
+        self.assertEqual(latest_count, 1)
+        self.assertNotIn("position_sentinel", second.persisted)
+        self.assertIn("position_sentinel_delta", third.persisted)
+
+    def test_recent_kline_cache_avoids_duplicate_api_work(self):
+        market = FakeMarketClient()
+        cache = {}
+
+        first = _recent_klines(market, "BTCUSDT", interval="1m", limit=24, cache=cache)
+        second = _recent_klines(market, "btcusdt", interval="1m", limit=24, cache=cache)
+
+        self.assertIs(first, second)
+        self.assertEqual(market.kline_calls, [("BTCUSDT", "1m", 24)])
+
     def test_sentinel_executes_trailing_when_execute_flag_and_config_allow(self):
         fake_signed = FakeSignedClient(mark_price="107")
         report = build_position_sentinel_report(
@@ -275,6 +339,7 @@ class PositionSentinelTests(unittest.TestCase):
     def test_trend_protection_waits_for_cooldown_between_adjustments(self):
         self._insert_sentinel_signal(occurred_at="2026-06-20T03:59:00Z")
         fake_signed = FakeSignedClient(mark_price="107")
+        market = FakeMarketClient()
 
         report = build_position_sentinel_report(
             self.config(
@@ -284,7 +349,7 @@ class PositionSentinelTests(unittest.TestCase):
             db_path=str(self.db_path),
             now="2026-06-20T04:00:00Z",
             signed_client=fake_signed,
-            market_client=FakeMarketClient(),
+            market_client=market,
             execute=True,
         )
 
@@ -327,13 +392,14 @@ class PositionSentinelTests(unittest.TestCase):
             profile="micro_grid",
         )
         fake_signed = FakeSignedClient(mark_price="102")
+        market = FakeMarketClient()
 
         report = build_position_sentinel_report(
             self.config(BFA_POSITION_SENTINEL_EXECUTE_ENABLED="true"),
             db_path=str(self.db_path),
             now="2026-06-20T04:00:00Z",
             signed_client=fake_signed,
-            market_client=FakeMarketClient(),
+            market_client=market,
             execute=True,
         )
 
@@ -341,6 +407,8 @@ class PositionSentinelTests(unittest.TestCase):
         self.assertIn("micro_grid_protection_cooldown_active", report.reversal_signals[0].reasons)
         self.assertEqual(report.status, "sentinel_no_allowed_action")
         self.assertEqual(fake_signed.algo_orders, [])
+        self.assertEqual(market.kline_calls, [])
+        self.assertEqual(market.kline_calls, [])
 
     def test_sentinel_does_not_trail_tiny_profit_before_minimum_progress(self):
         fake_signed = FakeSignedClient(mark_price="100.4")

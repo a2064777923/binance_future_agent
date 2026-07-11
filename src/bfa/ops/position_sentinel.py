@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+import hashlib
 import json
 import sqlite3
 from typing import Any, Mapping
 
 from bfa.config import AppConfig, RuntimeMode
 from bfa.event_store.migrations import connect, migrate
+from bfa.event_store.store import EventStore
 from bfa.execution.binance_client import BinanceFuturesSignedClient
 from bfa.market.binance_rest import BinanceFuturesRestClient
 from bfa.ops.position_adjustment import (
@@ -201,6 +203,7 @@ def _reversal_signals_from_plan(
     review = plan.position_review
     if review is None:
         return []
+    kline_cache: dict[tuple[str, str, int], list[Any]] = {}
     return [
         _reversal_signal(
             config,
@@ -208,6 +211,7 @@ def _reversal_signals_from_plan(
             market_client=market_client,
             cooldowns=cooldowns or {},
             excursion_state=(excursion_states or {}).get(_position_key(item) or ""),
+            kline_cache=kline_cache,
         )
         for item in review.positions
         if item.recommendation != "manual_hold" and item.position_amt != 0
@@ -221,6 +225,7 @@ def _reversal_signal(
     market_client,
     cooldowns: Mapping[tuple[str, str | None], dict[str, Any]],
     excursion_state: Mapping[str, Any] | None = None,
+    kline_cache: dict[tuple[str, str, int], list[Any]] | None = None,
 ) -> ReversalRiskSignal:
     side = "LONG" if item.position_amt > 0 else "SHORT"
     profile = _protection_profile(config, item)
@@ -230,11 +235,14 @@ def _reversal_signal(
     threshold = profile["threshold"]
     min_profit_r = profile["min_profit_r"]
     min_progress = profile["min_progress"]
+    interval = config.get("BFA_POSITION_SENTINEL_INTERVAL", "1m")
+    lookback_limit = _int_or_default(config.get("BFA_POSITION_SENTINEL_LOOKBACK_LIMIT"), 24)
     klines = _recent_klines(
         market_client,
         item.symbol,
-        interval=config.get("BFA_POSITION_SENTINEL_INTERVAL", "1m"),
-        limit=_int_or_default(config.get("BFA_POSITION_SENTINEL_LOOKBACK_LIMIT"), 24),
+        interval=interval,
+        limit=lookback_limit,
+        cache=kline_cache,
     )
     elapsed_seconds = round((item.elapsed_minutes or 0.0) * 60.0, 3) if item.elapsed_minutes is not None else None
     entry_klines = _entry_scoped_klines(klines, elapsed_seconds=elapsed_seconds)
@@ -434,12 +442,26 @@ def _cooldown_signal(item, *, profile: Mapping[str, Any], cooldown: Mapping[str,
     )
 
 
-def _recent_klines(market_client, symbol: str, *, interval: str, limit: int) -> list[Any]:
+def _recent_klines(
+    market_client,
+    symbol: str,
+    *,
+    interval: str,
+    limit: int,
+    cache: dict[tuple[str, str, int], list[Any]] | None = None,
+) -> list[Any]:
+    key = (str(symbol).upper(), str(interval), int(limit))
+    if cache is not None and key in cache:
+        return cache[key]
     try:
         payload = market_client.klines(symbol, interval=interval, limit=limit).payload
     except Exception:
-        return []
-    return payload if isinstance(payload, list) else []
+        result: list[Any] = []
+    else:
+        result = payload if isinstance(payload, list) else []
+    if cache is not None:
+        cache[key] = result
+    return result
 
 
 def _micro_path_metrics(klines: list[Any], *, side: str) -> dict[str, Any]:
@@ -1434,22 +1456,66 @@ def _report(config: AppConfig, db_path: str | None, report: PositionSentinelRepo
     try:
         connection = connect(path)
         try:
-            cursor = connection.execute(
-                """
-                INSERT INTO events (event_type, occurred_at, source, symbol, ref_id, payload_json)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    "position_sentinel",
-                    report.checked_at,
-                    "ops.position_sentinel",
-                    None,
-                    f"position_sentinel:{report.checked_at}",
-                    _json(report.to_dict()),
-                ),
+            store = EventStore(connection)
+            state_key = "position_sentinel:global"
+            payload = report.to_dict()
+            fingerprint = _sentinel_state_fingerprint(report)
+            prior = store.latest_state(state_key)
+            unchanged = bool(prior is not None and prior.get("fingerprint") == fingerprint)
+            force_full = bool(
+                not unchanged
+                or report.action_executed
+                or report.status in {"sentinel_executed", "sentinel_execution_blocked"}
             )
-            connection.commit()
-            persisted["position_sentinel"] = int(cursor.lastrowid)
+            full_heartbeat = max(
+                _float_or_default(config.get("BFA_POSITION_SENTINEL_FULL_HEARTBEAT_SECONDS"), 300.0),
+                1.0,
+            )
+            delta_heartbeat = max(
+                _float_or_default(config.get("BFA_POSITION_SENTINEL_DELTA_HEARTBEAT_SECONDS"), 60.0),
+                1.0,
+            )
+            if not force_full:
+                force_full = _sentinel_event_due(
+                    connection,
+                    event_type="position_sentinel",
+                    checked_at=report.checked_at,
+                    interval_seconds=full_heartbeat,
+                )
+            event_id: int | None = None
+            if force_full:
+                event_id = _insert_sentinel_event(
+                    connection,
+                    report.checked_at,
+                    event_type="position_sentinel",
+                    payload=payload,
+                )
+                persisted["position_sentinel"] = event_id
+            elif _sentinel_event_due(
+                connection,
+                event_type="position_sentinel_delta",
+                checked_at=report.checked_at,
+                interval_seconds=delta_heartbeat,
+                fallback_event_type="position_sentinel",
+            ):
+                event_id = _insert_sentinel_event(
+                    connection,
+                    report.checked_at,
+                    event_type="position_sentinel_delta",
+                    payload=_sentinel_delta_payload(report, fingerprint=fingerprint, prior=prior),
+                )
+                persisted["position_sentinel_delta"] = event_id
+            elif prior is not None:
+                event_id = prior.get("event_id")
+            store.upsert_latest_state(
+                state_key,
+                state_type="position_sentinel",
+                updated_at=report.checked_at,
+                fingerprint=fingerprint,
+                payload=payload,
+                event_id=event_id,
+            )
+            persisted["latest_state"] = 1
         finally:
             connection.close()
     except Exception:
@@ -1464,6 +1530,133 @@ def _report(config: AppConfig, db_path: str | None, report: PositionSentinelRepo
         execution=report.execution,
         persisted=persisted,
     )
+
+
+def _insert_sentinel_event(
+    connection: sqlite3.Connection,
+    checked_at: str,
+    *,
+    event_type: str,
+    payload: Mapping[str, Any],
+) -> int:
+    cursor = connection.execute(
+        """
+        INSERT INTO events (event_type, occurred_at, source, symbol, ref_id, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            event_type,
+            checked_at,
+            "ops.position_sentinel",
+            None,
+            f"{event_type}:{checked_at}",
+            _json(payload),
+        ),
+    )
+    connection.commit()
+    return int(cursor.lastrowid)
+
+
+def _sentinel_state_fingerprint(report: PositionSentinelReport) -> str:
+    plan = report.adjustment_plan
+    plan_summary = None
+    if plan is not None:
+        plan_summary = {
+            "status": plan.status,
+            "adjustment_allowed": plan.adjustment_allowed,
+            "actions": sorted(
+                item.order_plan.action
+                for item in plan.plans
+                if item.order_plan is not None
+            ),
+        }
+    semantic = {
+        "status": report.status,
+        "execution_enabled": report.execution_enabled,
+        "reasons": report.reasons,
+        "signals": [
+            {
+                "symbol": signal.symbol,
+                "position_side": signal.position_side,
+                "decision": signal.decision,
+                "reasons": signal.reasons,
+                "protection_profile": signal.metrics.get("protection_profile"),
+                "profit_protection_layer": signal.metrics.get("profit_protection_layer"),
+            }
+            for signal in report.reversal_signals
+        ],
+        "plan": plan_summary,
+        "execution_status": report.execution.status if report.execution else None,
+        "action_executed": report.action_executed,
+    }
+    encoded = json.dumps(semantic, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _sentinel_delta_payload(
+    report: PositionSentinelReport,
+    *,
+    fingerprint: str,
+    prior: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "schema": "bfa_position_sentinel_delta_v1",
+        "status": report.status,
+        "checked_at": report.checked_at,
+        "execution_enabled": report.execution_enabled,
+        "state_fingerprint": fingerprint,
+        "unchanged": True,
+        "previous_event_id": prior.get("event_id") if prior else None,
+        "signal_count": len(report.reversal_signals),
+        "signals": [
+            {
+                "symbol": signal.symbol,
+                "position_side": signal.position_side,
+                "decision": signal.decision,
+            }
+            for signal in report.reversal_signals
+        ],
+    }
+
+
+def _sentinel_event_due(
+    connection: sqlite3.Connection,
+    *,
+    event_type: str,
+    checked_at: str,
+    interval_seconds: float,
+    fallback_event_type: str | None = None,
+) -> bool:
+    row = connection.execute(
+        """
+        SELECT occurred_at
+        FROM events
+        WHERE event_type = ?
+          AND occurred_at <= ?
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT 1
+        """,
+        (event_type, checked_at),
+    ).fetchone()
+    if row is None and fallback_event_type:
+        row = connection.execute(
+            """
+            SELECT occurred_at
+            FROM events
+            WHERE event_type = ?
+              AND occurred_at <= ?
+            ORDER BY occurred_at DESC, id DESC
+            LIMIT 1
+            """,
+            (fallback_event_type, checked_at),
+        ).fetchone()
+    if row is None:
+        return True
+    checked = _parse_iso(checked_at)
+    previous = _parse_iso(str(row["occurred_at"]))
+    if checked is None or previous is None:
+        return True
+    return (checked - previous).total_seconds() >= interval_seconds
 
 
 def _now_iso(now: str | None) -> str:

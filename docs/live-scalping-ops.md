@@ -120,24 +120,63 @@ When a fresh execution signal exists, an optional quality pass reuses the
 already-collected market context and the shared open-orders snapshot. It adds no
 per-order market API call. It marks an order for cancellation only when evidence
 is explicit: a fresh opposite-side signal, price beyond the original stop, a
-limit moving too far away while momentum continues away, or adverse micro-
-momentum and taker flow together.
+limit moving too far away while momentum continues away, or the persistent
+flow/volume/price-acceptance combination described below.
 
 ```bash
 BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED=true
 BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED=true
-BFA_PENDING_LIMIT_QUALITY_MAX_ITEMS=10
+BFA_PENDING_LIMIT_QUALITY_MAX_ITEMS=11
 BFA_PENDING_LIMIT_QUALITY_MIN_AGE_SECONDS=5
 BFA_PENDING_LIMIT_QUALITY_MAX_DISTANCE_PERCENT=0.35
 BFA_PENDING_LIMIT_QUALITY_MOMENTUM_PERCENT=0.08
 BFA_PENDING_LIMIT_QUALITY_TAKER_SELL_RATIO=0.85
 BFA_PENDING_LIMIT_QUALITY_TAKER_BUY_RATIO=1.18
+BFA_PENDING_LIMIT_QUALITY_ADVERSE_TAKER_BUY_FRACTION=0.42
+BFA_PENDING_LIMIT_QUALITY_ADVERSE_MIN_WINDOWS=2
+BFA_PENDING_LIMIT_QUALITY_VOLUME_EXPANSION_RATIO=1.25
+BFA_PENDING_LIMIT_QUALITY_PRICE_ACCEPTANCE_RETURN_PERCENT=0.03
 ```
 
 The reviewed live profile enables both flags after kill-switch deployment
 validation. A new environment should begin observe-only until cancellation
 reasons are reviewed. Missing context, partial fills, and ambiguous evidence
 always keep the order for the normal watchdog to reconcile.
+
+The quality pass runs on every live scan, including scans that produce no new
+candidate. Ordinary adverse taker flow is no longer enough to cancel by itself:
+the adverse second-level flow must persist across configured windows and be
+confirmed by expanding volume plus price acceptance away from the entry.
+Explicit opposite signals or a breached original stop remain independent hard
+invalidation evidence. The raw seconds cache is parsed once per agent cycle and
+shared between micro-grid generation and pending-quality checks.
+
+## High-Frequency Persistence Budget
+
+The sentinel stores current full state by upserting
+`latest_states.position_sentinel:global`. A semantic state change, attempted
+execution, or 300-second heartbeat writes a full `position_sentinel` event.
+Unchanged state writes at most one small `position_sentinel_delta` per 60
+seconds. Cooldown decisions short-circuit before K-line access, and same-symbol
+positions share one K-line response within the cycle.
+
+Decision snapshots behave similarly: the newest full payload is available in
+`latest_states`, while a cycle whose semantic fingerprint is unchanged writes
+`bfa_decision_snapshot_delta_v1` instead of repeating candidate and market
+summaries. Defaults and retention controls are:
+
+```bash
+BFA_POSITION_SENTINEL_FULL_HEARTBEAT_SECONDS=300
+BFA_POSITION_SENTINEL_DELTA_HEARTBEAT_SECONDS=60
+BFA_DECISION_SNAPSHOT_COMPACT_UNCHANGED=true
+BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS=72
+BFA_DB_SENTINEL_EVENT_RETENTION_HOURS=168
+```
+
+SQLite migration creates `latest_states` automatically. Preview DB maintenance
+before applying it. Maintenance removes stale market snapshots, decision
+snapshot full/delta rows, and sentinel full/delta events within one bounded
+delete budget. `--vacuum` still requires all writers to be stopped.
 
 ## Outcome Attribution
 

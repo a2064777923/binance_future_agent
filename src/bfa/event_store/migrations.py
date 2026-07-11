@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 SQLITE_CONNECT_TIMEOUT_SECONDS = SQLITE_BUSY_TIMEOUT_MS / 1000.0
 
@@ -105,6 +105,18 @@ def migrate(connection: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_position_excursions_last_observed
             ON position_excursions (last_observed_at, position_key);
+
+        CREATE TABLE IF NOT EXISTS latest_states (
+            state_key TEXT PRIMARY KEY,
+            state_type TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            event_id INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_latest_states_type_updated
+            ON latest_states (state_type, updated_at, state_key);
         """
     )
 

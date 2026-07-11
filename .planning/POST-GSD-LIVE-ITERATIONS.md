@@ -260,6 +260,36 @@ checking/cancellation and uses `BFA_MICRO_GRID_MAX_PENDING_ORDERS=3` plus
 portfolio, direction, balance, position-slot, and margin guards remain in
 force. Micro-grid pending initial margin is additionally capped at 40 USDT.
 
+### 12. 2026-07-11 Trade Review P0-P2
+
+The operator paused live and requested a full order/strategy review focused on
+unfilled 20-second micro orders, stale 30-minute trend limits, poor entry
+geometry, early failure recognition, profit runners, and server overhead.
+
+Implemented results:
+
+- micro-grid inline fill/protection and leg-specific trigger working types;
+- sequential SL-first protection replacement, no-op identical plans, lifetime
+  MFE/MAE, and confirmed-execution cooldowns;
+- trend climax guard using actual planned entry position plus at least two of
+  volume, taker flow, momentum, and flow-acceleration confirmation;
+- pending quality on every scan, with persistent adverse flow + volume
+  expansion + price acceptance required for ordinary flow cancellation;
+- shared seconds-cache parsing, 8 trend pending / 3 micro pending caps, and
+  shadow-only micro economic and trend early-failure models;
+- latest-state upserts, compact unchanged decision/sentinel deltas, bounded
+  full-event retention, same-cycle K-line reuse, and cooldown API short-circuit.
+
+Research boundary: three micro-grid replay windows remained net negative. The
+economic gate improved two and was neutral in one, so it stays shadow-only.
+Four stored-live trend windows show meaningful signal reduction from the climax
+guard, but only one closed attributable guard-hit outcome was available. Do not
+describe either model as proven profitable.
+
+Operational boundary: live and sentinel remain disabled and the kill switch
+remains in place. Existing positions are manual and must not be adopted by the
+agent. Code deployment or DB migration is not permission to resume trading.
+
 ## Live Server Notes
 
 Known deployment shape:

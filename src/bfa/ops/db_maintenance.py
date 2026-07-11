@@ -50,7 +50,9 @@ class DbMaintenanceReport:
     execute: bool
     vacuum: bool
     retention_hours: float
+    event_retention_hours: dict[str, float]
     cutoff_iso: str
+    event_cutoff_isos: dict[str, str]
     cutoff_epoch_ms: int
     before: DatabaseFootprint
     after: DatabaseFootprint
@@ -68,7 +70,9 @@ class DbMaintenanceReport:
             "execute": self.execute,
             "vacuum": self.vacuum,
             "retention_hours": self.retention_hours,
+            "event_retention_hours": dict(self.event_retention_hours),
             "cutoff_iso": self.cutoff_iso,
+            "event_cutoff_isos": dict(self.event_cutoff_isos),
             "cutoff_epoch_ms": self.cutoff_epoch_ms,
             "before": self.before.to_dict(),
             "after": self.after.to_dict(),
@@ -140,6 +144,8 @@ TABLES_TO_SUMMARIZE = (
     "paper_observations",
     "paper_outcomes",
     "narratives",
+    "decision_snapshots",
+    "latest_states",
 )
 
 
@@ -165,6 +171,12 @@ def build_db_maintenance_report(
     )
     if retention <= 0:
         raise ValueError("retention_hours must be positive")
+    decision_retention = float(config.get("BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS", "72"))
+    sentinel_retention = float(config.get("BFA_DB_SENTINEL_EVENT_RETENTION_HOURS", "168"))
+    if decision_retention <= 0:
+        raise ValueError("BFA_DB_DECISION_SNAPSHOT_RETENTION_HOURS must be positive")
+    if sentinel_retention <= 0:
+        raise ValueError("BFA_DB_SENTINEL_EVENT_RETENTION_HOURS must be positive")
     resolved_batch_size = (
         int(batch_size)
         if batch_size is not None
@@ -179,9 +191,12 @@ def build_db_maintenance_report(
     )
     if resolved_max_delete_rows <= 0:
         raise ValueError("max_delete_rows must be positive")
-    cutoff = _parse_now(now) - timedelta(hours=retention)
+    parsed_now = _parse_now(now)
+    cutoff = parsed_now - timedelta(hours=retention)
     cutoff_iso = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
     cutoff_epoch_ms = int(cutoff.timestamp() * 1000)
+    decision_cutoff_iso = (parsed_now - timedelta(hours=decision_retention)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sentinel_cutoff_iso = (parsed_now - timedelta(hours=sentinel_retention)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     raw_feed_report = (
         build_raw_feed_maintenance_report(
@@ -198,8 +213,19 @@ def build_db_maintenance_report(
     connection = connect(path)
     try:
         before = _footprint(connection, path, include_table_counts=not execute)
-        deletion_candidates = _deletion_candidates(connection, cutoff_iso, cutoff_epoch_ms)
-        deleted = {"market_snapshots": 0, "events": 0}
+        deletion_candidates = _deletion_candidates(
+            connection,
+            cutoff_iso,
+            cutoff_epoch_ms,
+            decision_cutoff_iso=decision_cutoff_iso,
+            sentinel_cutoff_iso=sentinel_cutoff_iso,
+        )
+        deleted = {
+            "market_snapshots": 0,
+            "decision_snapshots": 0,
+            "position_sentinel_events": 0,
+            "events": 0,
+        }
         reasons = ["dry_run"] if not execute else ["retention_applied"]
         if execute:
             deleted = _delete_old_market_snapshots(
@@ -209,7 +235,30 @@ def build_db_maintenance_report(
                 batch_size=resolved_batch_size,
                 max_delete_rows=resolved_max_delete_rows,
             )
-            if deletion_candidates["market_snapshots"] > deleted["market_snapshots"]:
+            remaining = max(resolved_max_delete_rows - deleted["market_snapshots"], 0)
+            decision_deleted = _delete_old_decision_snapshots(
+                connection,
+                decision_cutoff_iso,
+                batch_size=resolved_batch_size,
+                max_delete_rows=remaining,
+            )
+            remaining = max(remaining - decision_deleted["decision_snapshots"], 0)
+            sentinel_deleted = _delete_old_sentinel_events(
+                connection,
+                sentinel_cutoff_iso,
+                batch_size=resolved_batch_size,
+                max_delete_rows=remaining,
+            )
+            deleted = {
+                "market_snapshots": deleted["market_snapshots"],
+                "decision_snapshots": decision_deleted["decision_snapshots"],
+                "position_sentinel_events": sentinel_deleted["position_sentinel_events"],
+                "events": deleted["events"] + decision_deleted["events"] + sentinel_deleted["events"],
+            }
+            if any(
+                deletion_candidates[key] > deleted[key]
+                for key in ("market_snapshots", "decision_snapshots", "position_sentinel_events")
+            ):
                 reasons.append("delete_limited")
             if vacuum:
                 reasons.append("vacuum_applied")
@@ -238,7 +287,15 @@ def build_db_maintenance_report(
         execute=execute,
         vacuum=vacuum,
         retention_hours=retention,
+        event_retention_hours={
+            "decision_snapshots": decision_retention,
+            "position_sentinel_events": sentinel_retention,
+        },
         cutoff_iso=cutoff_iso,
+        event_cutoff_isos={
+            "decision_snapshots": decision_cutoff_iso,
+            "position_sentinel_events": sentinel_cutoff_iso,
+        },
         cutoff_epoch_ms=cutoff_epoch_ms,
         before=before,
         after=after,
@@ -334,7 +391,7 @@ def _delete_old_market_snapshots(
                 event_ids = [int(row["event_id"]) for row in rows if row["event_id"] is not None]
                 market_deleted += _delete_ids(connection, "market_snapshots", market_ids)
                 if event_ids:
-                    event_deleted += _delete_event_ids(connection, event_ids)
+                    event_deleted += _delete_event_ids(connection, event_ids, ("market_snapshot",))
                 connection.commit()
                 remaining -= len(market_ids)
     finally:
@@ -342,6 +399,86 @@ def _delete_old_market_snapshots(
     return {
         "market_snapshots": max(int(market_deleted), 0),
         "events": max(int(event_deleted), 0),
+    }
+
+
+def _delete_old_decision_snapshots(
+    connection: sqlite3.Connection,
+    cutoff_iso: str,
+    *,
+    batch_size: int,
+    max_delete_rows: int,
+) -> dict[str, int]:
+    artifact_deleted = 0
+    event_deleted = 0
+    remaining = max(max_delete_rows, 0)
+    while remaining > 0:
+        limit = min(batch_size, remaining)
+        rows = connection.execute(
+            """
+            SELECT id, event_id
+            FROM decision_snapshots
+            WHERE occurred_at >= '1970-'
+              AND occurred_at < ?
+            ORDER BY occurred_at ASC, id ASC
+            LIMIT ?
+            """,
+            (cutoff_iso, limit),
+        ).fetchall()
+        if not rows:
+            break
+        artifact_ids = [int(row["id"]) for row in rows]
+        event_ids = [int(row["event_id"]) for row in rows if row["event_id"] is not None]
+        artifact_deleted += _delete_ids(connection, "decision_snapshots", artifact_ids)
+        event_deleted += _delete_event_ids(
+            connection,
+            event_ids,
+            ("decision_snapshot", "decision_snapshot_delta"),
+        )
+        connection.commit()
+        remaining -= len(artifact_ids)
+    return {
+        "decision_snapshots": max(int(artifact_deleted), 0),
+        "events": max(int(event_deleted), 0),
+    }
+
+
+def _delete_old_sentinel_events(
+    connection: sqlite3.Connection,
+    cutoff_iso: str,
+    *,
+    batch_size: int,
+    max_delete_rows: int,
+) -> dict[str, int]:
+    deleted = 0
+    remaining = max(max_delete_rows, 0)
+    while remaining > 0:
+        limit = min(batch_size, remaining)
+        rows = connection.execute(
+            """
+            SELECT id
+            FROM events
+            WHERE event_type IN ('position_sentinel', 'position_sentinel_delta')
+              AND occurred_at >= '1970-'
+              AND occurred_at < ?
+            ORDER BY occurred_at ASC, id ASC
+            LIMIT ?
+            """,
+            (cutoff_iso, limit),
+        ).fetchall()
+        if not rows:
+            break
+        event_ids = [int(row["id"]) for row in rows]
+        deleted += _delete_event_ids(
+            connection,
+            event_ids,
+            ("position_sentinel", "position_sentinel_delta"),
+        )
+        connection.commit()
+        remaining -= len(event_ids)
+    return {
+        "position_sentinel_events": max(int(deleted), 0),
+        "events": max(int(deleted), 0),
     }
 
 
@@ -363,17 +500,22 @@ def _delete_ids(connection: sqlite3.Connection, table: str, row_ids: list[int]) 
     return deleted
 
 
-def _delete_event_ids(connection: sqlite3.Connection, row_ids: list[int]) -> int:
+def _delete_event_ids(
+    connection: sqlite3.Connection,
+    row_ids: list[int],
+    event_types: tuple[str, ...],
+) -> int:
     if not row_ids:
         return 0
     deleted = 0
     for chunk in _chunks(row_ids, 900):
-        placeholders = ",".join("?" for _ in chunk)
+        id_placeholders = ",".join("?" for _ in chunk)
+        type_placeholders = ",".join("?" for _ in event_types)
         deleted += max(
             int(
                 connection.execute(
-                    f"DELETE FROM events WHERE event_type = 'market_snapshot' AND id IN ({placeholders})",
-                    chunk,
+                    f"DELETE FROM events WHERE event_type IN ({type_placeholders}) AND id IN ({id_placeholders})",
+                    (*event_types, *chunk),
                 ).rowcount
             ),
             0,
@@ -389,6 +531,9 @@ def _deletion_candidates(
     connection: sqlite3.Connection,
     cutoff_iso: str,
     cutoff_epoch_ms: int,
+    *,
+    decision_cutoff_iso: str,
+    sentinel_cutoff_iso: str,
 ) -> dict[str, int]:
     market_count = 0
     event_count = 0
@@ -409,7 +554,47 @@ def _deletion_candidates(
                 params,
             ).fetchone()[0]
         )
-    return {"market_snapshots": market_count, "events": event_count}
+    decision_count = int(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM decision_snapshots
+            WHERE occurred_at >= '1970-'
+              AND occurred_at < ?
+            """,
+            (decision_cutoff_iso,),
+        ).fetchone()[0]
+    )
+    decision_event_count = int(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM events
+            WHERE event_type IN ('decision_snapshot', 'decision_snapshot_delta')
+              AND occurred_at >= '1970-'
+              AND occurred_at < ?
+            """,
+            (decision_cutoff_iso,),
+        ).fetchone()[0]
+    )
+    sentinel_count = int(
+        connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM events
+            WHERE event_type IN ('position_sentinel', 'position_sentinel_delta')
+              AND occurred_at >= '1970-'
+              AND occurred_at < ?
+            """,
+            (sentinel_cutoff_iso,),
+        ).fetchone()[0]
+    )
+    return {
+        "market_snapshots": market_count,
+        "decision_snapshots": decision_count,
+        "position_sentinel_events": sentinel_count,
+        "events": event_count + decision_event_count + sentinel_count,
+    }
 
 
 def _older_than_cutoff_ranges(cutoff_iso: str, cutoff_epoch_ms: int) -> list[tuple[str, tuple[str, str]]]:

@@ -98,6 +98,31 @@ class EventStoreRepositoryTests(unittest.TestCase):
         self.assertEqual([event.ref_id for event in btc_events], ["btc"])
         self.assertEqual(btc_events[0].payload["rank"], 1)
 
+    def test_latest_state_upsert_replaces_payload_without_growing_rows(self):
+        self.store.upsert_latest_state(
+            "position_sentinel:global",
+            state_type="position_sentinel",
+            updated_at="2026-06-19T10:00:00Z",
+            fingerprint="first",
+            payload={"status": "observing", "count": 1},
+            event_id=10,
+        )
+        self.store.upsert_latest_state(
+            "position_sentinel:global",
+            state_type="position_sentinel",
+            updated_at="2026-06-19T10:00:05Z",
+            fingerprint="second",
+            payload={"status": "observing", "count": 2},
+            event_id=11,
+        )
+
+        state = self.store.latest_state("position_sentinel:global")
+
+        self.assertEqual(_count(self.connection, "latest_states"), 1)
+        self.assertEqual(state["fingerprint"], "second")
+        self.assertEqual(state["payload"]["count"], 2)
+        self.assertEqual(state["event_id"], 11)
+
     def test_invalid_category_is_rejected(self):
         with self.assertRaises(ValueError):
             self.store.insert_artifact(

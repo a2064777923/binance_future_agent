@@ -208,3 +208,28 @@ Micro-grid candidates and order intents carry a latency chain:
 - `signal_to_entry_submit_finished_ms`: total signal-to-submit delay.
 
 These fields are persisted in decision snapshots, candidate evaluations, order intent metadata, and exchange responses where available.
+
+## 2026-07-11 Lifecycle And Performance Update
+
+Protection working types are now leg-specific: trend stop/target and micro-grid
+stop use `MARK_PRICE`; micro-grid target uses `CONTRACT_PRICE`. A micro-grid
+limit with a 20-second TTL is handled inline through final fill polling and
+immediate protection rather than being handed to the long deferred watchdog.
+When replacement is needed, stop-loss is replaced before take-profit so the
+position never intentionally enters a fully unprotected interval. If the new
+plan is identical to the confirmed exchange protection, no API or DB write is
+performed.
+
+Lifetime favorable/adverse excursion is stored in `position_excursions` and is
+not lost when a price peak rolls out of the recent 1m K-line window. Heartbeat
+writes occur every 300 seconds unless an extreme changes. Trend early-failure
+diagnostics combine low lifetime MFE, adverse excursion, short return,
+direction alignment, and expanding volume, but remain shadow-only until a
+larger attributable outcome sample supports enforcement.
+
+Sentinel audit persistence is also bounded. The current full report lives in a
+single `latest_states` row. Unchanged five-second checks create neither a new
+full event nor repeated K-line work; a compact delta is retained every 60
+seconds and a full heartbeat every 300 seconds. Any execution or semantic state
+change still produces a full event, so cooldown reconstruction and incident
+review retain the important transitions.

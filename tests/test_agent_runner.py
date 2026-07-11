@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -832,6 +833,54 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(payload["candidate_generation"]["fused_candidate_count"], 1)
         self.assertEqual(payload["candidate_generation"]["top_candidates"][0]["symbol"], "BTCUSDT")
         self.assertIn("price_change_percent", payload["candidate_generation"]["top_candidates"][0]["features"])
+
+    def test_run_once_compacts_unchanged_decision_snapshot_and_upserts_latest_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            db_path = root / "agent.sqlite"
+            config = load_config(
+                {
+                    "BFA_MODE": "dry_run",
+                    "BFA_OPENAI_ENABLED": "true",
+                    "OPENAI_API_KEY": "synthetic-openai-key-abcdef",
+                    "BFA_MARKET_SYMBOLS": "BTCUSDT",
+                    "BFA_PERSIST_MARKET_SNAPSHOTS": "false",
+                    "BFA_DECISION_SNAPSHOT_COMPACT_UNCHANGED": "true",
+                    "BFA_DB_PATH": str(db_path),
+                    "BFA_RUNTIME_DIR": str(root / "runtime"),
+                    "SQUARE_EXPORT_DIR": str(root / "runtime" / "square_exports"),
+                }
+            )
+            for _ in range(2):
+                run_agent_once(
+                    config=config,
+                    db_path=str(db_path),
+                    journal_path=str(root / "ai.jsonl"),
+                    market_client=FakeMarketClient(),
+                    collector=FakeCollector(),
+                    narrative_runner=FakeNarrativeRunner(),
+                    ai_client=FakeAiClient(),
+                )
+
+            connection = sqlite3.connect(db_path)
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT e.event_type, LENGTH(d.payload_json)
+                    FROM decision_snapshots AS d
+                    JOIN events AS e ON e.id = d.event_id
+                    ORDER BY d.id
+                    """
+                ).fetchall()
+                latest_count = connection.execute(
+                    "SELECT COUNT(*) FROM latest_states WHERE state_key = 'decision_snapshot:agent.live_cycle'"
+                ).fetchone()[0]
+            finally:
+                connection.close()
+
+        self.assertEqual([row[0] for row in rows], ["decision_snapshot", "decision_snapshot_delta"])
+        self.assertLess(rows[1][1], rows[0][1])
+        self.assertEqual(latest_count, 1)
 
     def test_run_once_sends_reference_price_to_ai_client(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1723,6 +1772,7 @@ class AgentRunnerTests(unittest.TestCase):
                     "BFA_LIVE_REQUIRE_NARRATIVE_EVIDENCE": "false",
                     "BFA_PENDING_LIMIT_QUALITY_CHECK_ENABLED": "true",
                     "BFA_PENDING_LIMIT_QUALITY_EXECUTE_ENABLED": "true",
+                    "BFA_LIVE_MICRO_GRID_ENABLED": "true",
                     "BFA_PENDING_LIMIT_QUALITY_MAX_DISTANCE_PERCENT": "0.1",
                     "BFA_MAX_PORTFOLIO_NOTIONAL_USDT": "500",
                     "BFA_MAX_SAME_DIRECTION_NOTIONAL_USDT": "400",
@@ -1733,15 +1783,19 @@ class AgentRunnerTests(unittest.TestCase):
                 }
             )
 
-            result = run_agent_once(
-                config=config,
-                db_path=str(db_path),
-                market_client=FakeMarketClient(),
-                collector=MultiKlineMomentumCollector(),
-                narrative_runner=FakeNarrativeRunner(),
-                ai_client=FakeAiClient(),
-                signed_client=signed_client,
-            )
+            with patch(
+                "bfa.agent.read_micro_grid_seconds_cache",
+                return_value=({}, None),
+            ) as cache_read:
+                result = run_agent_once(
+                    config=config,
+                    db_path=str(db_path),
+                    market_client=FakeMarketClient(),
+                    collector=MultiKlineMomentumCollector(),
+                    narrative_runner=FakeNarrativeRunner(),
+                    ai_client=FakeAiClient(),
+                    signed_client=signed_client,
+                )
 
         self.assertNotEqual(result.status, "entry_capacity_blocked")
         self.assertEqual(result.source_health["pending_order_quality"]["canceled_count"], 1)
@@ -1750,6 +1804,7 @@ class AgentRunnerTests(unittest.TestCase):
         self.assertEqual(sum(call[0] == "open_orders" for call in signed_client.calls), 1)
         self.assertEqual(sum(call[0] == "open_algo_orders" for call in signed_client.calls), 1)
         self.assertEqual(sum(call[0] == "account" for call in signed_client.calls), 1)
+        self.assertEqual(cache_read.call_count, 1)
 
     def test_live_pending_quality_runs_even_when_current_scan_has_no_candidate(self):
         class NoCandidateCollector(MultiKlineMomentumCollector):
