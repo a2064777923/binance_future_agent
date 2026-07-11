@@ -11,7 +11,7 @@ tradable wave.
 from __future__ import annotations
 
 import argparse
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 import math
@@ -144,6 +144,11 @@ class MicroGridProfile:
     pullback_entry_shift_fraction: float = 0.08
     pullback_min_size_multiplier: float = 0.35
     pullback_max_trend_bias: float = 0.70
+    scalp_confirmation_enabled: bool = False
+    scalp_confirmation_min_stoch_distance: float = 30.0
+    scalp_confirmation_dynamic_buffer: float = 4.0
+    scalp_confirmation_max_adverse_flow: float = 0.18
+    scalp_confirmation_max_wick_stop_rate: float = 1.0
     side_flow_filter_enabled: bool = True
     side_flow_extreme_taker_ratio: float = 0.64
     side_flow_min_pullback_quality: float = 0.58
@@ -268,13 +273,15 @@ class MicroGridProfile:
 
     @property
     def round_trip_cost_percent(self) -> float:
-        if self.entry_maker_cost:
-            entry_fee = max(self.maker_fee_bps, 0.0) + max(self.entry_taker_risk_bps, 0.0)
-        else:
-            # Legacy model: entry leg charged maker + taker, exit leg slippage.
-            # Preserved exactly so existing backtests stay reproducible.
-            entry_fee = max(self.maker_fee_bps, 0.0) + max(self.taker_fee_bps, 0.0)
-        return (entry_fee + max(self.exit_slippage_bps, 0.0)) / 100.0
+        entry_fee = max(self.maker_fee_bps, 0.0)
+        exit_fee = max(self.taker_fee_bps, 0.0)
+        entry_taker_risk = max(self.entry_taker_risk_bps, 0.0) if self.entry_maker_cost else 0.0
+        return (
+            entry_fee
+            + exit_fee
+            + entry_taker_risk
+            + max(self.exit_slippage_bps, 0.0)
+        ) / 100.0
 
     @property
     def required_history_seconds(self) -> int:
@@ -563,6 +570,8 @@ def main() -> int:
     parser.add_argument("--symbols", required=True, help="comma-separated USD-M symbols")
     parser.add_argument("--start-date", required=True, help="inclusive UTC date, YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="inclusive UTC date, YYYY-MM-DD")
+    parser.add_argument("--signal-start", help="optional inclusive UTC signal timestamp inside the loaded date range")
+    parser.add_argument("--signal-end", help="optional inclusive UTC signal timestamp inside the loaded date range")
     parser.add_argument("--cache-dir", default="runtime/aggTrades-cache")
     parser.add_argument("--output", required=True)
     parser.add_argument("--initial-capital", type=float, default=30.0)
@@ -687,6 +696,11 @@ def main() -> int:
     parser.add_argument("--pullback-entry-shift-fraction", type=float, default=MicroGridProfile.pullback_entry_shift_fraction)
     parser.add_argument("--pullback-min-size-multiplier", type=float, default=MicroGridProfile.pullback_min_size_multiplier)
     parser.add_argument("--pullback-max-trend-bias", type=float, default=MicroGridProfile.pullback_max_trend_bias)
+    parser.add_argument("--scalp-confirmation-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.scalp_confirmation_enabled)
+    parser.add_argument("--scalp-confirmation-min-stoch-distance", type=float, default=MicroGridProfile.scalp_confirmation_min_stoch_distance)
+    parser.add_argument("--scalp-confirmation-dynamic-buffer", type=float, default=MicroGridProfile.scalp_confirmation_dynamic_buffer)
+    parser.add_argument("--scalp-confirmation-max-adverse-flow", type=float, default=MicroGridProfile.scalp_confirmation_max_adverse_flow)
+    parser.add_argument("--scalp-confirmation-max-wick-stop-rate", type=float, default=MicroGridProfile.scalp_confirmation_max_wick_stop_rate)
     parser.add_argument("--side-flow-filter-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.side_flow_filter_enabled)
     parser.add_argument("--side-flow-extreme-taker-ratio", type=float, default=MicroGridProfile.side_flow_extreme_taker_ratio)
     parser.add_argument("--side-flow-min-pullback-quality", type=float, default=MicroGridProfile.side_flow_min_pullback_quality)
@@ -734,6 +748,15 @@ def main() -> int:
     parser.add_argument("--spike-depth-tail-buffer-fraction", type=float, default=MicroGridProfile.spike_depth_tail_buffer_fraction)
     parser.add_argument("--spike-depth-max-entry-edge-fraction", type=float, default=MicroGridProfile.spike_depth_max_entry_edge_fraction)
     parser.add_argument("--spike-depth-max-stop-fraction", type=float, default=MicroGridProfile.spike_depth_max_stop_fraction)
+    parser.add_argument("--spike-depth-entry-enabled", action=argparse.BooleanOptionalAction, default=MicroGridProfile.spike_depth_entry_enabled)
+    parser.add_argument("--spike-depth-lookback-seconds", type=int, default=MicroGridProfile.spike_depth_lookback_seconds)
+    parser.add_argument("--spike-depth-min-percent", type=float, default=MicroGridProfile.spike_depth_min_percent)
+    parser.add_argument("--spike-depth-max-percent", type=float, default=MicroGridProfile.spike_depth_max_percent)
+    parser.add_argument("--spike-depth-entry-fraction", type=float, default=MicroGridProfile.spike_depth_entry_fraction)
+    parser.add_argument("--spike-depth-stop-fraction", type=float, default=MicroGridProfile.spike_depth_stop_fraction)
+    parser.add_argument("--spike-depth-target-fraction", type=float, default=MicroGridProfile.spike_depth_target_fraction)
+    parser.add_argument("--entry-maker-cost", action=argparse.BooleanOptionalAction, default=MicroGridProfile.entry_maker_cost)
+    parser.add_argument("--entry-taker-risk-bps", type=float, default=MicroGridProfile.entry_taker_risk_bps)
     parser.add_argument("--max-symbol-losses-per-day", type=int, default=MicroGridProfile.max_symbol_losses_per_day)
     parser.add_argument("--max-candidate-trades-per-symbol", type=int, default=0)
     parser.add_argument("--quiet", action="store_true", help="write JSON output without printing the full payload")
@@ -746,6 +769,18 @@ def main() -> int:
     end = date.fromisoformat(args.end_date)
     if end < start:
         raise SystemExit("--end-date must be on or after --start-date")
+    signal_start_ms = parse_iso_ms(args.signal_start) if args.signal_start else None
+    signal_end_ms = parse_iso_ms(args.signal_end) if args.signal_end else None
+    if signal_start_ms is not None and signal_end_ms is not None and signal_end_ms < signal_start_ms:
+        raise SystemExit("--signal-end must be on or after --signal-start")
+    loaded_start_ms = int(datetime.combine(start, datetime.min.time(), tzinfo=UTC).timestamp() * 1000)
+    loaded_end_ms = int(
+        (datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=UTC).timestamp() * 1000) - 1
+    )
+    if signal_start_ms is not None and not loaded_start_ms <= signal_start_ms <= loaded_end_ms:
+        raise SystemExit("--signal-start must be inside --start-date/--end-date")
+    if signal_end_ms is not None and not loaded_start_ms <= signal_end_ms <= loaded_end_ms:
+        raise SystemExit("--signal-end must be inside --start-date/--end-date")
 
     profile = MicroGridProfile(
         structure_lookback_seconds=args.lookback_seconds if args.lookback_seconds is not None else args.structure_lookback_seconds,
@@ -846,6 +881,11 @@ def main() -> int:
         pullback_entry_shift_fraction=args.pullback_entry_shift_fraction,
         pullback_min_size_multiplier=args.pullback_min_size_multiplier,
         pullback_max_trend_bias=args.pullback_max_trend_bias,
+        scalp_confirmation_enabled=args.scalp_confirmation_enabled,
+        scalp_confirmation_min_stoch_distance=args.scalp_confirmation_min_stoch_distance,
+        scalp_confirmation_dynamic_buffer=args.scalp_confirmation_dynamic_buffer,
+        scalp_confirmation_max_adverse_flow=args.scalp_confirmation_max_adverse_flow,
+        scalp_confirmation_max_wick_stop_rate=args.scalp_confirmation_max_wick_stop_rate,
         side_flow_filter_enabled=args.side_flow_filter_enabled,
         side_flow_extreme_taker_ratio=args.side_flow_extreme_taker_ratio,
         side_flow_min_pullback_quality=args.side_flow_min_pullback_quality,
@@ -893,6 +933,15 @@ def main() -> int:
         spike_depth_tail_buffer_fraction=args.spike_depth_tail_buffer_fraction,
         spike_depth_max_entry_edge_fraction=args.spike_depth_max_entry_edge_fraction,
         spike_depth_max_stop_fraction=args.spike_depth_max_stop_fraction,
+        spike_depth_entry_enabled=args.spike_depth_entry_enabled,
+        spike_depth_lookback_seconds=args.spike_depth_lookback_seconds,
+        spike_depth_min_percent=args.spike_depth_min_percent,
+        spike_depth_max_percent=args.spike_depth_max_percent,
+        spike_depth_entry_fraction=args.spike_depth_entry_fraction,
+        spike_depth_stop_fraction=args.spike_depth_stop_fraction,
+        spike_depth_target_fraction=args.spike_depth_target_fraction,
+        entry_maker_cost=args.entry_maker_cost,
+        entry_taker_risk_bps=args.entry_taker_risk_bps,
         max_symbol_losses_per_day=args.max_symbol_losses_per_day,
     )
     coverage: dict[str, Any] = {}
@@ -912,6 +961,8 @@ def main() -> int:
                 str(cache_dir),
                 profile,
                 args.max_candidate_trades_per_symbol,
+                signal_start_ms,
+                signal_end_ms,
             )
             for symbol in symbols
         ]
@@ -927,6 +978,8 @@ def main() -> int:
                     str(cache_dir),
                     profile,
                     args.max_candidate_trades_per_symbol,
+                    signal_start_ms,
+                    signal_end_ms,
                 )
                 for symbol in symbols
             ]
@@ -977,6 +1030,8 @@ def main() -> int:
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
             "inclusive_days": (end - start).days + 1,
+            "signal_start": ms_to_iso(signal_start_ms) if signal_start_ms is not None else None,
+            "signal_end": ms_to_iso(signal_end_ms) if signal_end_ms is not None else None,
         },
         "profile": asdict(profile),
         "coverage": coverage,
@@ -1008,6 +1063,8 @@ def run_symbol_candidate_job(
     cache_dir: str,
     profile: MicroGridProfile,
     max_candidate_trades: int,
+    signal_start_ms: int | None = None,
+    signal_end_ms: int | None = None,
 ) -> dict[str, Any]:
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
@@ -1020,6 +1077,8 @@ def run_symbol_candidate_job(
         tick_source=tick_source,
         profile=profile,
         max_candidate_trades=max_candidate_trades,
+        signal_start_ms=signal_start_ms,
+        signal_end_ms=signal_end_ms,
     )
     coverage["tick_stream"] = tick_source.coverage()
     return {
@@ -1039,15 +1098,21 @@ def generate_symbol_candidate_trades(
     tick_source: TickReplaySource | None = None,
     profile: MicroGridProfile,
     max_candidate_trades: int = 0,
+    signal_start_ms: int | None = None,
+    signal_end_ms: int | None = None,
 ) -> tuple[list[MicroGridTrade], dict[str, Any], dict[str, Any]]:
     trades: list[MicroGridTrade] = []
     diagnostics = empty_scan_diagnostics()
     order_stats = empty_order_stats()
-    required_history = profile.required_history_seconds
-    next_allowed_index = required_history
+    scan_start_index, scan_end_index = signal_scan_bounds(
+        seconds,
+        profile,
+        signal_start_ms=signal_start_ms,
+        signal_end_ms=signal_end_ms,
+    )
+    next_allowed_index = scan_start_index
     side_flow_block_until_index = {"long": -1, "short": -1}
-    end_index = len(seconds) - max(profile.max_hold_seconds, profile.order_wait_seconds) - 1
-    for index in range(required_history, max(required_history, end_index), max(1, profile.signal_stride_seconds)):
+    for index in range(scan_start_index, scan_end_index, max(1, profile.signal_stride_seconds)):
         diagnostics["evaluated_windows"] += 1
         if index < next_allowed_index:
             diagnostics["cooldown_windows"] += 1
@@ -1110,6 +1175,31 @@ def generate_symbol_candidate_trades(
     diagnostics["passed_rate"] = round(diagnostics["passed_windows"] / diagnostics["evaluated_windows"], 8) if diagnostics["evaluated_windows"] else 0.0
     diagnostics["rejection_counts"] = dict(sorted(diagnostics["rejection_counts"].items(), key=lambda item: item[1], reverse=True))
     return trades, diagnostics, order_stats
+
+
+def signal_scan_bounds(
+    seconds: list[BacktestBar],
+    profile: MicroGridProfile,
+    *,
+    signal_start_ms: int | None,
+    signal_end_ms: int | None,
+) -> tuple[int, int]:
+    required_history = profile.required_history_seconds
+    natural_end = max(
+        required_history,
+        len(seconds) - max(profile.max_hold_seconds, profile.order_wait_seconds) - 1,
+    )
+    if not seconds:
+        return required_history, required_history
+    times = [bar.open_time for bar in seconds]
+    start_index = required_history
+    end_index = natural_end
+    if signal_start_ms is not None:
+        start_index = max(start_index, bisect_left(times, signal_start_ms))
+    if signal_end_ms is not None:
+        end_index = min(end_index, bisect_right(times, signal_end_ms))
+    end_index = max(start_index, end_index)
+    return start_index, end_index
 
 
 def apply_side_flow_cooldowns(
@@ -1611,13 +1701,39 @@ def build_micro_grid_state(
     reasons = state_rejection_reasons(state, profile)
     if reasons:
         return None, reasons
+    reversal = edge_reversal_readiness_detail(entry_window, lower, upper, profile)
+    long_reversal_ready = bool(reversal["long_ready"])
+    short_reversal_ready = bool(reversal["short_ready"])
+    state = replace(
+        state,
+        long_reversal_ready=long_reversal_ready,
+        short_reversal_ready=short_reversal_ready,
+        long_reversal_reason=str(reversal["long_reason"]),
+        short_reversal_reason=str(reversal["short_reason"]),
+        long_entry_reversal_fraction=float(reversal["long_reversal_fraction"]),
+        short_entry_reversal_fraction=float(reversal["short_reversal_fraction"]),
+        long_entry_continuation_fraction=float(reversal["long_continuation_fraction"]),
+        short_entry_continuation_fraction=float(reversal["short_continuation_fraction"]),
+        entry_taker_buy_ratio=float(reversal["taker_buy_ratio"]),
+        triple_ema_fast=float(pullback["triple_ema_fast"]),
+        triple_ema_mid=float(pullback["triple_ema_mid"]),
+        triple_ema_slow=float(pullback["triple_ema_slow"]),
+        triple_ema_bias=float(pullback["triple_ema_bias"]),
+        stochastic_k=float(pullback["stochastic_k"]),
+        stochastic_d=float(pullback["stochastic_d"]),
+        stochastic_slope=float(pullback["stochastic_slope"]),
+        long_pullback_quality=float(pullback["long_pullback_quality"]),
+        short_pullback_quality=float(pullback["short_pullback_quality"]),
+        pullback_model_reason=str(pullback["pullback_model_reason"]),
+        recent_spike_depth_percent=recent_spike_depth_percent(structure_window, profile),
+    )
+    confirmation_reasons = scalp_confirmation_state_rejection_reasons(state, profile)
+    if confirmation_reasons:
+        return None, confirmation_reasons
     if profile.dynamic_wick_enabled:
         training_start = max(0, signal_index - max(profile.required_history_seconds, int(profile.wick_training_seconds)))
         training_window = seconds[training_start:signal_index]
         wick_model = fit_dynamic_wick_model(training_window, lower, upper, profile)
-    reversal = edge_reversal_readiness_detail(entry_window, lower, upper, profile)
-    long_reversal_ready = bool(reversal["long_ready"])
-    short_reversal_ready = bool(reversal["short_ready"])
     state = replace(
         state,
         long_entry_edge_fraction=float(wick_model["long"]["entry_edge_fraction"]),
@@ -1654,26 +1770,6 @@ def build_micro_grid_state(
         short_wick_score=float(wick_model["short"]["score"]),
         long_hold_seconds=int(wick_model["long"]["hold_seconds"]),
         short_hold_seconds=int(wick_model["short"]["hold_seconds"]),
-        long_reversal_ready=long_reversal_ready,
-        short_reversal_ready=short_reversal_ready,
-        long_reversal_reason=str(reversal["long_reason"]),
-        short_reversal_reason=str(reversal["short_reason"]),
-        long_entry_reversal_fraction=float(reversal["long_reversal_fraction"]),
-        short_entry_reversal_fraction=float(reversal["short_reversal_fraction"]),
-        long_entry_continuation_fraction=float(reversal["long_continuation_fraction"]),
-        short_entry_continuation_fraction=float(reversal["short_continuation_fraction"]),
-        entry_taker_buy_ratio=float(reversal["taker_buy_ratio"]),
-        triple_ema_fast=float(pullback["triple_ema_fast"]),
-        triple_ema_mid=float(pullback["triple_ema_mid"]),
-        triple_ema_slow=float(pullback["triple_ema_slow"]),
-        triple_ema_bias=float(pullback["triple_ema_bias"]),
-        stochastic_k=float(pullback["stochastic_k"]),
-        stochastic_d=float(pullback["stochastic_d"]),
-        stochastic_slope=float(pullback["stochastic_slope"]),
-        long_pullback_quality=float(pullback["long_pullback_quality"]),
-        short_pullback_quality=float(pullback["short_pullback_quality"]),
-        pullback_model_reason=str(pullback["pullback_model_reason"]),
-        recent_spike_depth_percent=recent_spike_depth_percent(structure_window, profile),
     )
     return state, []
 
@@ -1943,6 +2039,10 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
     span = state.upper_price - state.lower_price
     if span <= 0:
         return []
+    confirmation_by_side = {
+        side: scalp_confirmation_diagnostics(side, state, profile)
+        for side in ("long", "short")
+    }
     half = span / 2.0
     buy_entry = state.projected_center_price - half * profile.level_fraction
     sell_entry = state.projected_center_price + half * profile.level_fraction
@@ -2116,6 +2216,9 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
         ("long", buy_edge_fraction, buy_target_fraction, buy_stop_fraction, buy_hold_seconds, long_plan, entry_reason_codes["long"]),
         ("short", sell_edge_fraction, sell_target_fraction, sell_stop_fraction, sell_hold_seconds, short_plan, entry_reason_codes["short"]),
     ):
+        confirmation = confirmation_by_side[side]
+        if profile.scalp_confirmation_enabled and not confirmation["passed"]:
+            continue
         for layer in range(layers):
             edge_fraction = clamp(
                 base_edge_fraction - layer * layer_spacing,
@@ -2162,6 +2265,7 @@ def build_grid_orders(symbol: str, state: MicroGridState, profile: MicroGridProf
                     edge_fraction=edge_fraction,
                     dynamic_plan=plan,
                     entry_reason_codes=[*side_entry_reasons, *exit_reason_codes],
+                    scalp_confirmation=confirmation,
                 )
             )
     return orders
@@ -2185,6 +2289,7 @@ def build_single_grid_order(
     edge_fraction: float,
     dynamic_plan: DynamicLevelPlan | None = None,
     entry_reason_codes: list[str] | None = None,
+    scalp_confirmation: dict[str, Any] | None = None,
 ) -> list[GridOrder]:
     reward = (target - entry) if side == "long" else (entry - target)
     risk = (entry - stop) if side == "long" else (stop - entry)
@@ -2209,6 +2314,9 @@ def build_single_grid_order(
         avg_net = state.long_wick_avg_net_percent if side == "long" else state.short_wick_avg_net_percent
         if model == "ev" and avg_net < profile.wick_ev_min_avg_net_percent:
             return []
+    confirmation = scalp_confirmation or scalp_confirmation_diagnostics(side, state, profile)
+    if profile.scalp_confirmation_enabled and not confirmation["passed"]:
+        return []
     if profile.pullback_model_enabled and pullback_quality_for_side(side, state) < profile.pullback_min_quality:
         return []
     if profile.round_trip_cost_percent > 0 and reward_percent / profile.round_trip_cost_percent < profile.min_reward_cost_ratio:
@@ -2293,6 +2401,15 @@ def build_single_grid_order(
                 f"short_pullback_quality:{round(state.short_pullback_quality, 6)}",
                 f"pullback_size_multiplier:{round(pullback_size_multiplier(side, state, profile), 6)}",
                 f"pullback_model_reason:{state.pullback_model_reason}",
+                f"scalp_confirmation_enabled:{profile.scalp_confirmation_enabled}",
+                f"scalp_confirmation_passed:{confirmation['passed']}",
+                f"scalp_confirmation_stoch_distance:{round(float(confirmation['stoch_distance']), 6)}",
+                f"scalp_confirmation_required_stoch_distance:{round(float(confirmation['required_stoch_distance']), 6)}",
+                f"scalp_confirmation_adverse_flow:{round(float(confirmation['adverse_flow']), 6)}",
+                f"scalp_confirmation_max_adverse_flow:{round(float(confirmation['max_adverse_flow']), 6)}",
+                f"scalp_confirmation_wick_fill_count:{int(confirmation['wick_fill_count'])}",
+                f"scalp_confirmation_wick_stop_rate:{round(float(confirmation['wick_stop_rate']), 6)}",
+                f"scalp_confirmation_max_wick_stop_rate:{round(float(confirmation['max_wick_stop_rate']), 6)}",
                 f"stop_span_fraction:{round(stop_fraction, 6)}",
                 f"target_span_fraction:{round(target_fraction, 6)}",
                 f"target_adjustment:{target_adjustment}",
@@ -2409,6 +2526,9 @@ def single_grid_order_rejection_reasons(
         reasons.append(f"{side}_side_flow_against_order")
     if profile.pullback_model_enabled and pullback_quality_for_side(side, state) < profile.pullback_min_quality:
         reasons.append(f"{side}_pullback_quality_too_low")
+    confirmation = scalp_confirmation_diagnostics(side, state, profile)
+    if profile.scalp_confirmation_enabled and not confirmation["passed"]:
+        reasons.extend(f"{side}_scalp_confirmation:{reason}" for reason in confirmation["reasons"])
     if profile.round_trip_cost_percent > 0 and reward_percent / profile.round_trip_cost_percent < profile.min_reward_cost_ratio:
         reasons.append(f"{side}_reward_cost_ratio_too_low")
     if net_notional_reward_percent < profile.min_net_notional_reward_percent:
@@ -2452,6 +2572,98 @@ def reservation_adjusted_edge_fraction(side: str, base_edge_fraction: float, sta
 
 def pullback_quality_for_side(side: str, state: MicroGridState) -> float:
     return state.long_pullback_quality if side == "long" else state.short_pullback_quality
+
+
+def scalp_confirmation_diagnostics(
+    side: str,
+    state: MicroGridState,
+    profile: MicroGridProfile,
+) -> dict[str, Any]:
+    if side not in {"long", "short"}:
+        return {
+            "passed": False,
+            "reasons": ["invalid_side"],
+            "stoch_distance": 0.0,
+            "required_stoch_distance": 50.0,
+            "adverse_flow": 0.5,
+            "max_adverse_flow": 0.0,
+        }
+    adverse_bias = max(0.0, -state.triple_ema_bias if side == "long" else state.triple_ema_bias)
+    trend_pressure = clamp(
+        adverse_bias / max(abs(profile.pullback_max_trend_bias), 0.01),
+        0.0,
+        1.0,
+    )
+    vol_span = max(profile.vol_regime_high_threshold - profile.vol_regime_low_threshold, 0.01)
+    volatility_pressure = clamp(
+        (state.instantaneous_vol_percent - profile.vol_regime_low_threshold) / vol_span,
+        0.0,
+        1.0,
+    )
+    context_pressure = clamp(trend_pressure * 0.60 + volatility_pressure * 0.40, 0.0, 1.0)
+    required_distance = clamp(
+        profile.scalp_confirmation_min_stoch_distance
+        + max(0.0, profile.scalp_confirmation_dynamic_buffer) * context_pressure,
+        0.0,
+        49.0,
+    )
+    if side == "long":
+        stoch_distance = 50.0 - max(state.stochastic_k, state.stochastic_d)
+        adverse_flow = max(0.0, 0.5 - state.entry_taker_buy_ratio)
+        wick_fill_count = state.long_wick_fill_count
+        wick_stop_rate = state.long_wick_stop_rate
+    else:
+        stoch_distance = min(state.stochastic_k, state.stochastic_d) - 50.0
+        adverse_flow = max(0.0, state.entry_taker_buy_ratio - 0.5)
+        wick_fill_count = state.short_wick_fill_count
+        wick_stop_rate = state.short_wick_stop_rate
+    max_adverse_flow = clamp(
+        profile.scalp_confirmation_max_adverse_flow * (1.0 - context_pressure * 0.25),
+        0.0,
+        0.5,
+    )
+    reasons: list[str] = []
+    if stoch_distance < required_distance:
+        reasons.append("stoch_not_extreme")
+    if adverse_flow > max_adverse_flow:
+        reasons.append("adverse_flow_extreme")
+    max_wick_stop_rate = clamp(profile.scalp_confirmation_max_wick_stop_rate, 0.0, 1.0)
+    if wick_fill_count >= max(1, int(profile.wick_ev_min_fills)) and wick_stop_rate > max_wick_stop_rate:
+        reasons.append("historical_wick_stop_rate_high")
+    return {
+        "passed": not reasons,
+        "reasons": reasons,
+        "stoch_distance": round(stoch_distance, 8),
+        "required_stoch_distance": round(required_distance, 8),
+        "adverse_flow": round(adverse_flow, 8),
+        "max_adverse_flow": round(max_adverse_flow, 8),
+        "wick_fill_count": int(wick_fill_count),
+        "wick_stop_rate": round(wick_stop_rate, 8),
+        "max_wick_stop_rate": round(max_wick_stop_rate, 8),
+        "trend_pressure": round(trend_pressure, 8),
+        "volatility_pressure": round(volatility_pressure, 8),
+        "context_pressure": round(context_pressure, 8),
+    }
+
+
+def scalp_confirmation_state_rejection_reasons(
+    state: MicroGridState,
+    profile: MicroGridProfile,
+) -> list[str]:
+    """Skip expensive wick fitting when confirmation rejects both sides."""
+    if not profile.scalp_confirmation_enabled:
+        return []
+    confirmations = {
+        side: scalp_confirmation_diagnostics(side, state, profile)
+        for side in ("long", "short")
+    }
+    if any(result["passed"] for result in confirmations.values()):
+        return []
+    return [
+        f"{side}_scalp_confirmation:{reason}"
+        for side, result in confirmations.items()
+        for reason in result["reasons"]
+    ]
 
 
 def pullback_adjusted_edge_fraction(side: str, base_edge_fraction: float, state: MicroGridState, profile: MicroGridProfile) -> float:
@@ -2782,9 +2994,8 @@ def estimated_target_net_reward_usdt(reward_percent: float, profile: MicroGridPr
     if notional <= 0:
         return 0.0
     gross = notional * max(reward_percent, 0.0) / 100.0
-    fees = notional * (max(profile.maker_fee_bps, 0.0) + max(profile.taker_fee_bps, 0.0)) / 10_000.0
-    slippage = notional * max(profile.exit_slippage_bps, 0.0) / 10_000.0
-    return gross - fees - slippage
+    modeled_cost = notional * profile.round_trip_cost_percent / 100.0
+    return gross - modeled_cost
 
 
 def net_reward_percent_after_cost(reward_percent: float, profile: MicroGridProfile) -> float:
@@ -2969,11 +3180,7 @@ def simulate_grid_basket_on_ticks(
         filled_this_tick = False
         if tick.time_ms <= wait_end_ms:
             for order in list(open_orders):
-                if order.side == "long" and tick.price <= order.entry_price:
-                    fills.append(BasketFill(order=order, fill_time_ms=tick.time_ms))
-                    open_orders.remove(order)
-                    filled_this_tick = True
-                elif order.side == "short" and tick.price >= order.entry_price:
+                if passive_limit_fills_on_tick(order, tick):
                     fills.append(BasketFill(order=order, fill_time_ms=tick.time_ms))
                     open_orders.remove(order)
                     filled_this_tick = True
@@ -3052,17 +3259,17 @@ def simulate_grid_basket_on_ticks(
         return None, "expired", None
     if last_tick is None:
         return None, "expired", None
-    reason = "max_hold_exit" if last_tick.time_ms >= end_ms else "data_end_exit"
+    exit_time_ms, exit_price, reason = tick_replay_horizon_exit(seconds, end_ms=end_ms, last_tick=last_tick)
     return close_trade_at_ms(
         basket_order,
         entry_time_ms=first_fill_ms,
-        exit_time_ms=last_tick.time_ms,
+        exit_time_ms=exit_time_ms,
         profile=profile,
         quantity=quantity,
         entry_fee=entry_fee,
         best_price=best_price,
         worst_price=worst_price,
-        raw_exit=last_tick.price,
+        raw_exit=exit_price,
         exit_reason=reason,
     ), "filled", fill_index
 
@@ -3149,17 +3356,17 @@ def simulate_filled_basket_on_ticks(
 
     if last_tick is None:
         return None, "expired", None
-    reason = "max_hold_exit" if last_tick.time_ms >= end_ms else "data_end_exit"
+    exit_time_ms, exit_price, reason = tick_replay_horizon_exit(seconds, end_ms=end_ms, last_tick=last_tick)
     return close_trade_at_ms(
         basket_order,
         entry_time_ms=first_fill_ms,
-        exit_time_ms=last_tick.time_ms,
+        exit_time_ms=exit_time_ms,
         profile=profile,
         quantity=quantity,
         entry_fee=entry_fee,
         best_price=best_price,
         worst_price=worst_price,
-        raw_exit=last_tick.price,
+        raw_exit=exit_price,
         exit_reason=reason,
     ), "filled", fill_index
 
@@ -3483,20 +3690,34 @@ def simulate_grid_order_on_ticks(
 
         dynamic_stop = update_trailing_stop(order, profile, best_price, dynamic_stop)
 
-    reason = "max_hold_exit" if last_tick.time_ms >= end_ms else "data_end_exit"
+    exit_time_ms, exit_price, reason = tick_replay_horizon_exit(seconds, end_ms=end_ms, last_tick=last_tick)
     trade = close_trade_at_ms(
         order,
         entry_time_ms=fill_tick.time_ms,
-        exit_time_ms=last_tick.time_ms,
+        exit_time_ms=exit_time_ms,
         profile=profile,
         quantity=quantity,
         entry_fee=entry_fee,
         best_price=best_price,
         worst_price=worst_price,
-        raw_exit=last_tick.price,
+        raw_exit=exit_price,
         exit_reason=reason,
     )
     return trade, "filled", fill_index
+
+
+def tick_replay_horizon_exit(
+    seconds: list[BacktestBar],
+    *,
+    end_ms: int,
+    last_tick: AggTradeTick,
+) -> tuple[int, float, str]:
+    if seconds and end_ms <= seconds[-1].close_time:
+        index = second_index_for_ms(seconds, end_ms)
+        bar = seconds[index]
+        if bar.open_time <= end_ms <= bar.close_time and bar.open > 0:
+            return end_ms, bar.open, "max_hold_exit"
+    return last_tick.time_ms, last_tick.price, "data_end_exit"
 
 
 def close_trade(
@@ -3859,11 +4080,17 @@ def find_fill_tick_position(
         tick = tick_stream.ticks[position]
         if tick.time_ms > end_ms:
             break
-        if order.side == "long" and tick.price <= order.entry_price:
-            return position
-        if order.side == "short" and tick.price >= order.entry_price:
+        if passive_limit_fills_on_tick(order, tick):
             return position
     return None
+
+
+def passive_limit_fills_on_tick(order: GridOrder, tick: AggTradeTick) -> bool:
+    if order.side == "long":
+        return bool(tick.buyer_maker) and tick.price <= order.entry_price
+    if order.side == "short":
+        return not bool(tick.buyer_maker) and tick.price >= order.entry_price
+    return False
 
 
 def iter_ticks(tick_stream: TickStream, start_position: int, *, end_ms: int):
@@ -5007,11 +5234,14 @@ def clamp(value: float, minimum: float, maximum: float) -> float:
 
 
 def parse_iso_ms(value: str) -> int:
-    return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return int(parsed.timestamp() * 1000)
 
 
 def ms_to_iso(value: int) -> str:
-    return datetime.fromtimestamp(value / 1000, UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(value / 1000, UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def ms_to_date(value: int) -> date:

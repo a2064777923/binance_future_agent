@@ -286,6 +286,15 @@ Four stored-live trend windows show meaningful signal reduction from the climax
 guard, but only one closed attributable guard-hit outcome was available. Do not
 describe either model as proven profitable.
 
+The 2026-07-11 scalping audit corrected passive-fill direction, maker/taker cost
+gates, sparse-tick horizon exits, millisecond ordering, and intraday research
+windows. Dynamic Stoch/flow confirmation reduced the same MAGMA research run's
+candidate time from 59.82s to 24.43s by rejecting before wick fitting. A
+development profile reached 8 wins from 9 trades, but failed predeclared unseen
+validation: 2 trades across 18 symbol-days, 1 win, PF 0.988, net -0.0006U, plus
+zero trades in the separate intraday and higher-beta sets. The confirmation,
+post-fill exit, and research trailing variants remain disabled in live.
+
 Operational boundary: live and sentinel remain disabled and the kill switch
 remains in place. Existing positions are manual and must not be adopted by the
 agent. Code deployment or DB migration is not permission to resume trading.

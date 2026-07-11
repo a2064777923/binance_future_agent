@@ -700,6 +700,27 @@ Two follow-up ideas were tested and should not be enabled by default:
 - rolling symbol quality guard with a 3-sample PF/stop-rate block. It reduced
   activity but made both slices net negative.
 
+### 2026-07-11 micro-grid framework and generalization audit
+
+The current replay now requires the correct aggTrade aggressor direction for a
+passive fill, preserves millisecond event order, uses maker-entry plus taker-exit
+costs consistently, handles sparse ticks at the configured hold horizon, and
+supports bounded intraday signal windows. Confirmation failures now skip the
+expensive wick/EV fit; the same MAGMA full-day run fell from 59.82 seconds to
+24.43 seconds without changing its candidate or portfolio summary.
+
+An article-inspired Stoch/EMA/taker-flow confirmation reached 72.73% on 11
+development trades, but live-like sizing was still net negative. A stricter
+development profile reached 8/9 wins, PF 3.91, and +0.3327U, then failed its
+predeclared generalization test: the 18-symbol-day extension produced only 2
+trades, 1 win, PF 0.988, and -0.0006U; the separate arbitrary intraday and
+higher-beta windows produced no trades. It remains research/shadow only.
+
+Do not enable post-fill confirmation or either research trailing variant: the
+tested 8-second rule cut some losses but also killed delayed winners, while both
+profit locks worsened aggregate PnL. Full evidence and the next plan are in
+`docs/research/micro-grid-scalping-audit-2026-07-11.md`.
+
 ## Recent Live Evidence At Snapshot
 
 The latest recent intents proved that the micro-grid leg was scanning and

@@ -1,7 +1,9 @@
 import importlib.util
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 from bfa.backtest.models import BacktestBar
 
@@ -114,17 +116,245 @@ def tick_stream(symbol, pairs):
     ticks = [
         research.AggTradeTick(
             symbol=symbol,
-            time_ms=BASE_MS + offset_ms,
-            price=price,
+            time_ms=BASE_MS + item[0],
+            price=item[1],
             quantity=1.0,
-            buyer_maker=False,
+            buyer_maker=item[2] if len(item) > 2 else True,
         )
-        for offset_ms, price in pairs
+        for item in pairs
     ]
     return research.TickStream(ticks=ticks, time_ms=[tick.time_ms for tick in ticks])
 
 
 class MicroGridResearchScriptTests(unittest.TestCase):
+    def test_tick_iso_round_trip_preserves_millisecond_ordering(self):
+        value = BASE_MS + 5_123
+
+        self.assertEqual(research.parse_iso_ms(research.ms_to_iso(value)), value)
+
+    def test_intraday_signal_bounds_keep_history_but_limit_candidate_scan(self):
+        seconds = oscillating_seconds(count=200)
+        profile = self.profile(
+            structure_lookback_seconds=80,
+            band_lookback_seconds=80,
+            entry_lookback_seconds=30,
+            order_wait_seconds=10,
+            max_hold_seconds=20,
+        )
+
+        start, end = research.signal_scan_bounds(
+            seconds,
+            profile,
+            signal_start_ms=BASE_MS + 120_000,
+            signal_end_ms=BASE_MS + 150_000,
+        )
+
+        self.assertEqual(start, 120)
+        self.assertEqual(end, 151)
+        self.assertGreaterEqual(start, profile.required_history_seconds)
+
+    def test_scalp_confirmation_requires_stoch_extreme_and_non_adverse_flow(self):
+        profile = self.profile(
+            scalp_confirmation_enabled=True,
+            scalp_confirmation_min_stoch_distance=30.0,
+            scalp_confirmation_dynamic_buffer=0.0,
+            scalp_confirmation_max_adverse_flow=0.18,
+        )
+        long_ok = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(
+                self.state(),
+                stochastic_k=18.0,
+                stochastic_d=19.0,
+                entry_taker_buy_ratio=0.40,
+            ),
+            profile,
+        )
+        long_bad_d = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(
+                self.state(),
+                stochastic_k=18.0,
+                stochastic_d=24.0,
+                entry_taker_buy_ratio=0.40,
+            ),
+            profile,
+        )
+        long_bad_flow = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(
+                self.state(),
+                stochastic_k=18.0,
+                stochastic_d=19.0,
+                entry_taker_buy_ratio=0.20,
+            ),
+            profile,
+        )
+        short_ok = research.scalp_confirmation_diagnostics(
+            "short",
+            replace(
+                self.state(),
+                stochastic_k=82.0,
+                stochastic_d=81.0,
+                entry_taker_buy_ratio=0.60,
+            ),
+            profile,
+        )
+
+        self.assertTrue(long_ok["passed"])
+        self.assertFalse(long_bad_d["passed"])
+        self.assertIn("stoch_not_extreme", long_bad_d["reasons"])
+        self.assertFalse(long_bad_flow["passed"])
+        self.assertIn("adverse_flow_extreme", long_bad_flow["reasons"])
+        self.assertTrue(short_ok["passed"])
+
+    def test_scalp_confirmation_dynamically_requires_more_extreme_signal_in_adverse_trend(self):
+        profile = self.profile(
+            scalp_confirmation_enabled=True,
+            scalp_confirmation_min_stoch_distance=30.0,
+            scalp_confirmation_dynamic_buffer=6.0,
+        )
+        neutral = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(self.state(), triple_ema_bias=0.0, instantaneous_vol_percent=0.05),
+            profile,
+        )
+        adverse = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(self.state(), triple_ema_bias=-0.7, instantaneous_vol_percent=0.25),
+            profile,
+        )
+
+        self.assertGreater(adverse["required_stoch_distance"], neutral["required_stoch_distance"])
+        self.assertLess(adverse["max_adverse_flow"], neutral["max_adverse_flow"])
+
+    def test_scalp_confirmation_rejects_mature_wick_model_with_high_stop_rate(self):
+        profile = self.profile(
+            scalp_confirmation_enabled=True,
+            scalp_confirmation_min_stoch_distance=0.0,
+            scalp_confirmation_dynamic_buffer=0.0,
+            scalp_confirmation_max_adverse_flow=0.5,
+            scalp_confirmation_max_wick_stop_rate=0.30,
+            wick_ev_min_fills=12,
+        )
+        rejected = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(
+                self.state(),
+                long_wick_fill_count=20,
+                long_wick_stop_rate=0.35,
+            ),
+            profile,
+        )
+        warming_up = research.scalp_confirmation_diagnostics(
+            "long",
+            replace(
+                self.state(),
+                long_wick_fill_count=8,
+                long_wick_stop_rate=0.50,
+            ),
+            profile,
+        )
+
+        self.assertFalse(rejected["passed"])
+        self.assertIn("historical_wick_stop_rate_high", rejected["reasons"])
+        self.assertTrue(warming_up["passed"])
+
+    def test_maker_accurate_cost_includes_entry_exit_slippage_and_taker_risk(self):
+        profile = self.profile(
+            maker_fee_bps=2.0,
+            taker_fee_bps=4.0,
+            exit_slippage_bps=1.0,
+            entry_maker_cost=True,
+            entry_taker_risk_bps=0.5,
+        )
+
+        self.assertAlmostEqual(profile.round_trip_cost_percent, 0.075)
+
+    def test_estimated_target_reward_uses_same_maker_accurate_cost_model(self):
+        profile = self.profile(
+            maker_fee_bps=2.0,
+            taker_fee_bps=4.0,
+            exit_slippage_bps=1.0,
+            entry_maker_cost=True,
+            entry_taker_risk_bps=0.5,
+            target_net_filter_notional_usdt=120.0,
+        )
+
+        self.assertAlmostEqual(research.estimated_target_net_reward_usdt(0.10, profile), 0.03)
+
+    def test_confirmation_prefilter_skips_wick_fit_when_both_sides_fail(self):
+        seconds = oscillating_seconds(count=140)
+        profile = self.profile(
+            scalp_confirmation_enabled=True,
+            scalp_confirmation_min_stoch_distance=49.0,
+            scalp_confirmation_dynamic_buffer=0.0,
+        )
+
+        with mock.patch.object(research, "fit_dynamic_wick_model", wraps=research.fit_dynamic_wick_model) as fit:
+            state, reasons = research.build_micro_grid_state(seconds, 100, profile)
+
+        self.assertIsNone(state)
+        self.assertTrue(any("scalp_confirmation" in reason for reason in reasons))
+        fit.assert_not_called()
+
+    def test_order_builder_evaluates_confirmation_once_per_side(self):
+        seconds = oscillating_seconds(count=140)
+        profile = self.profile(grid_layer_count=3)
+        state, reasons = research.build_micro_grid_state(seconds, 100, profile)
+        self.assertEqual(reasons, [])
+        self.assertIsNotNone(state)
+
+        with mock.patch.object(
+            research,
+            "scalp_confirmation_diagnostics",
+            wraps=research.scalp_confirmation_diagnostics,
+        ) as confirmation:
+            orders = research.build_grid_orders("TESTUSDT", state, profile)
+
+        self.assertTrue(orders)
+        self.assertEqual(confirmation.call_count, 2)
+
+    def test_passive_limit_requires_matching_aggressor_direction(self):
+        state = self.state()
+        long_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=0,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=99.0,
+            target_price=101.0,
+            state=state,
+            reason_codes=[],
+        )
+        short_order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="short",
+            signal_index=0,
+            signal_time=state.signal_time,
+            entry_price=100.0,
+            stop_price=101.0,
+            target_price=99.0,
+            state=state,
+            reason_codes=[],
+        )
+        ticks = tick_stream(
+            "TESTUSDT",
+            [
+                (100, 99.9, False),
+                (200, 100.1, True),
+                (300, 99.8, True),
+                (400, 100.2, False),
+            ],
+        )
+
+        long_fill = research.find_fill_tick_position(ticks, long_order, start_ms=BASE_MS, end_ms=BASE_MS + 1_000)
+        short_fill = research.find_fill_tick_position(ticks, short_order, start_ms=BASE_MS, end_ms=BASE_MS + 1_000)
+
+        self.assertEqual(long_fill, 2)
+        self.assertEqual(short_fill, 3)
+
     def test_wick_path_cannot_profit_before_entry_is_touched(self):
         path = [
             bar("TESTUSDT", 0, open_price=105, high=106, low=104, close=105),
@@ -1685,6 +1915,69 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertGreaterEqual(trade.hold_seconds, 70)
         self.assertGreater(trade.net_pnl_usdt, 2.0)
 
+    def test_sparse_tick_stream_uses_second_bar_at_hold_horizon_instead_of_false_data_end(self):
+        seconds = [
+            bar("TESTUSDT", index, open_price=100.0, high=100.2, low=99.8, close=100.0)
+            for index in range(10)
+        ]
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=0,
+            signal_time=seconds[0].open_time_iso,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=102.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=5,
+        )
+        ticks = tick_stream("TESTUSDT", [(100, 100.0, True), (1_000, 100.1, False)])
+
+        trade, status, _ = research.simulate_grid_order(
+            seconds,
+            order,
+            self.profile(max_hold_seconds=5),
+            notional_usdt=100,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertEqual(trade.exit_reason, "max_hold_exit")
+        self.assertGreaterEqual(research.parse_iso_ms(trade.exit_time), BASE_MS + 5_100)
+
+    def test_sparse_filled_basket_uses_second_bar_at_hold_horizon(self):
+        seconds = [
+            bar("TESTUSDT", index, open_price=100.0, high=100.2, low=99.8, close=100.0)
+            for index in range(10)
+        ]
+        order = research.GridOrder(
+            symbol="TESTUSDT",
+            side="long",
+            signal_index=0,
+            signal_time=seconds[0].open_time_iso,
+            entry_price=100.0,
+            stop_price=98.0,
+            target_price=102.0,
+            state=self.state(),
+            reason_codes=[],
+            max_hold_seconds=5,
+        )
+        fills = [research.BasketFill(order=order, fill_time_ms=BASE_MS + 100)]
+        ticks = tick_stream("TESTUSDT", [(100, 100.0, True), (1_000, 100.1, False)])
+
+        trade, status, _ = research.simulate_filled_basket_on_ticks(
+            seconds,
+            fills,
+            self.profile(max_hold_seconds=5),
+            base_notional_usdt=100.0,
+            tick_stream=ticks,
+        )
+
+        self.assertEqual(status, "filled")
+        self.assertEqual(trade.exit_reason, "max_hold_exit")
+        self.assertGreaterEqual(research.parse_iso_ms(trade.exit_time), BASE_MS + 5_100)
+
     def test_dca_basket_can_survive_first_layer_wick_and_exit_on_target(self):
         seconds = [
             bar("TESTUSDT", index, open_price=100.0, high=106.0, low=99.0, close=101.0)
@@ -1720,11 +2013,11 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         ticks = tick_stream(
             "TESTUSDT",
             [
-                (100, 101.0),
-                (200, 103.0),
-                (300, 104.5),
-                (1_500, 101.0),
-                (2_000, 99.7),
+                (100, 101.0, False),
+                (200, 103.0, False),
+                (300, 104.5, False),
+                (1_500, 101.0, True),
+                (2_000, 99.7, True),
             ],
         )
 
