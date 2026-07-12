@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from bfa.strategy.near_bbo_scalp import NearBboConfig, NearBboProposal
 
@@ -37,11 +37,27 @@ class NearBboShadowConfig:
         if not 0.0 <= self.profit_lock_giveback_fraction <= 1.0:
             raise ValueError("profit_lock_giveback_fraction must be between zero and one")
 
+    @property
+    def calibration_features(self) -> dict[str, float]:
+        return {
+            "shadow_max_hold_seconds": self.max_hold_ms / 1_000.0,
+            "shadow_evidence_exit_enabled": 1.0 if self.evidence_exit_enabled else 0.0,
+            "shadow_confirmation_seconds": self.confirmation_ms / 1_000.0,
+            "shadow_confirmation_min_net_progress_bps": self.confirmation_min_net_progress_bps,
+            "shadow_adverse_selection_exit_bps": self.adverse_selection_exit_bps,
+            "shadow_profit_lock_activate_net_bps": self.profit_lock_activate_net_bps,
+            "shadow_profit_lock_min_net_bps": self.profit_lock_min_net_bps,
+            "shadow_profit_lock_giveback_fraction": self.profit_lock_giveback_fraction,
+        }
+
 
 @dataclass(frozen=True)
 class NearBboShadowOutcome:
+    proposal_id: str
     symbol: str
     side: str
+    lane: str
+    regime: str
     signal_time_ms: int
     fill_time_ms: int
     exit_time_ms: int
@@ -58,6 +74,34 @@ class NearBboShadowOutcome:
     exit_reason: str
     mfe_bps: float
     mae_bps: float
+
+    def to_dict(self) -> dict[str, object]:
+        return dict(self.__dict__)
+
+
+@dataclass(frozen=True)
+class NearBboShadowLabel:
+    proposal_id: str
+    symbol: str
+    side: str
+    lane: str
+    regime: str
+    signal_time_ms: int
+    resolved_time_ms: int
+    expires_at_ms: int
+    notional_usdt: float
+    filled: bool
+    fill_time_ms: int | None
+    exit_time_ms: int | None
+    exit_reason: str
+    profitable: bool | None
+    net_pnl_usdt: float | None
+    mfe_bps: float | None
+    mae_bps: float | None
+    predicted_fill_probability: float
+    predicted_win_probability: float
+    predicted_conditional_net_ev_bps: float
+    features: dict[str, Any]
 
     def to_dict(self) -> dict[str, object]:
         return dict(self.__dict__)
@@ -82,6 +126,8 @@ class NearBboShadowLedger:
         self._intents: dict[str, _ShadowIntent] = {}
         self._latest_trade_price: dict[str, float] = {}
         self._outcomes: deque[NearBboShadowOutcome] = deque(maxlen=config.max_recorded_outcomes)
+        self._labels: deque[NearBboShadowLabel] = deque(maxlen=config.max_recorded_outcomes)
+        self._new_labels: list[NearBboShadowLabel] = []
         self._first_event_ms: int | None = None
         self._last_event_ms: int | None = None
         self._admitted_count = 0
@@ -106,6 +152,15 @@ class NearBboShadowLedger:
     @property
     def outcomes(self) -> tuple[NearBboShadowOutcome, ...]:
         return tuple(self._outcomes)
+
+    @property
+    def labels(self) -> tuple[NearBboShadowLabel, ...]:
+        return tuple(self._labels)
+
+    def drain_new_labels(self) -> tuple[NearBboShadowLabel, ...]:
+        labels = tuple(self._new_labels)
+        self._new_labels.clear()
+        return labels
 
     def admit(self, proposals: Iterable[NearBboProposal]) -> tuple[NearBboProposal, ...]:
         admitted: list[NearBboProposal] = []
@@ -202,6 +257,34 @@ class NearBboShadowLedger:
         closed: list[NearBboShadowOutcome] = []
         for symbol, intent in list(self._intents.items()):
             if intent.status == "pending" and now_ms >= intent.proposal.expires_at_ms:
+                self._append_label(
+                    NearBboShadowLabel(
+                        proposal_id=intent.proposal.proposal_id,
+                        symbol=symbol,
+                        side=intent.proposal.side,
+                        lane=intent.proposal.lane,
+                        regime=intent.proposal.regime,
+                        signal_time_ms=intent.proposal.generated_at_ms,
+                        resolved_time_ms=now_ms,
+                        expires_at_ms=intent.proposal.expires_at_ms,
+                        notional_usdt=self.config.notional_usdt,
+                        filled=False,
+                        fill_time_ms=None,
+                        exit_time_ms=None,
+                        exit_reason="quote_expired",
+                        profitable=None,
+                        net_pnl_usdt=None,
+                        mfe_bps=None,
+                        mae_bps=None,
+                        predicted_fill_probability=intent.proposal.fill_probability,
+                        predicted_win_probability=intent.proposal.win_probability,
+                        predicted_conditional_net_ev_bps=intent.proposal.conditional_net_ev_bps,
+                        features={
+                            **intent.proposal.features,
+                            **self.config.calibration_features,
+                        },
+                    )
+                )
                 del self._intents[symbol]
                 self._expired_count += 1
                 continue
@@ -235,6 +318,7 @@ class NearBboShadowLedger:
             "expired_count": self._expired_count,
             "filled_count": self._filled_count,
             "closed_count": self._closed_count,
+            "label_count": len(self._labels),
             "wins": self._wins,
             "losses": self._losses,
             "fill_rate": self._filled_count / self._admitted_count if self._admitted_count else 0.0,
@@ -277,8 +361,11 @@ class NearBboShadowLedger:
         fees = entry_fee + exit_fee
         net = gross - fees
         outcome = NearBboShadowOutcome(
+            proposal_id=proposal.proposal_id,
             symbol=symbol,
             side=proposal.side,
+            lane=proposal.lane,
+            regime=proposal.regime,
             signal_time_ms=proposal.generated_at_ms,
             fill_time_ms=fill_time_ms,
             exit_time_ms=exit_time_ms,
@@ -297,6 +384,34 @@ class NearBboShadowLedger:
             mae_bps=round(mae_bps, 8),
         )
         self._outcomes.append(outcome)
+        self._append_label(
+            NearBboShadowLabel(
+                proposal_id=proposal.proposal_id,
+                symbol=symbol,
+                side=proposal.side,
+                lane=proposal.lane,
+                regime=proposal.regime,
+                signal_time_ms=proposal.generated_at_ms,
+                resolved_time_ms=exit_time_ms,
+                expires_at_ms=proposal.expires_at_ms,
+                notional_usdt=self.config.notional_usdt,
+                filled=True,
+                fill_time_ms=fill_time_ms,
+                exit_time_ms=exit_time_ms,
+                exit_reason=reason,
+                profitable=net > 0,
+                net_pnl_usdt=round(net, 8),
+                mfe_bps=round(mfe_bps, 8),
+                mae_bps=round(mae_bps, 8),
+                predicted_fill_probability=proposal.fill_probability,
+                predicted_win_probability=proposal.win_probability,
+                predicted_conditional_net_ev_bps=proposal.conditional_net_ev_bps,
+                features={
+                    **proposal.features,
+                    **self.config.calibration_features,
+                },
+            )
+        )
         self._closed_count += 1
         self._net_pnl_usdt += net
         if net > 0:
@@ -306,6 +421,10 @@ class NearBboShadowLedger:
             self._losses += 1
             self._gross_loss_usdt += -net
         return outcome
+
+    def _append_label(self, label: NearBboShadowLabel) -> None:
+        self._labels.append(label)
+        self._new_labels.append(label)
 
     def _touch_time(self, value: int) -> None:
         if self._first_event_ms is None:
@@ -321,3 +440,11 @@ def _favorable_move_bps(side: str, entry: float, price: float) -> float:
     if entry <= 0:
         return 0.0
     return ((price - entry) if side == "long" else (entry - price)) / entry * 10_000.0
+
+
+__all__ = [
+    "NearBboShadowConfig",
+    "NearBboShadowLabel",
+    "NearBboShadowLedger",
+    "NearBboShadowOutcome",
+]

@@ -26,6 +26,7 @@ from bfa.market.binance_ws import (  # noqa: E402
     trade_stream,
 )
 from bfa.strategy.near_bbo_scalp import NearBboConfig, NearBboUniverse  # noqa: E402
+from bfa.strategy.near_bbo_regime import NearBboRegimeConfig  # noqa: E402
 
 
 def main() -> int:
@@ -52,6 +53,19 @@ def main() -> int:
     parser.add_argument("--taker-exit-probability", type=float, default=0.35)
     parser.add_argument("--exit-slippage-bps", type=float, default=0.5)
     parser.add_argument("--queue-ahead-fraction", type=float, default=1.0)
+    parser.add_argument("--setup-mode", choices=["legacy", "article_v2"], default="article_v2")
+    parser.add_argument(
+        "--calibration-model",
+        help="trained calibration report JSON; rejected unless status=trained and setup-mode=article_v2",
+    )
+    parser.add_argument("--regime-history-minutes", type=int, default=16)
+    parser.add_argument("--regime-min-bars", type=int, default=15)
+    parser.add_argument("--regime-fast-ema-span", type=int, default=5)
+    parser.add_argument("--regime-slow-ema-span", type=int, default=15)
+    parser.add_argument("--scout-confirmation-ms", type=int, default=2_000)
+    parser.add_argument("--scout-ttl-ms", type=int, default=8_000)
+    parser.add_argument("--max-signal-volatility-bps", type=float, default=6.0)
+    parser.add_argument("--max-scout-adverse-bps", type=float, default=6.0)
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
     payload = asyncio.run(run_shadow(args))
@@ -70,6 +84,14 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
         raise SystemExit("websockets is required for the public near-BBO shadow") from exc
 
     symbols = parse_symbols(args.symbols, max_symbols=max(1, int(args.max_symbols)))
+    setup_mode = str(args.setup_mode)
+    try:
+        calibrator = load_optional_calibrator(
+            getattr(args, "calibration_model", None),
+            setup_mode=setup_mode,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"calibration artifact rejected: {exc}") from exc
     strategy_config = NearBboConfig(
         quote_ttl_ms=max(1, int(args.quote_ttl_ms)),
         max_pending_orders=max(1, int(args.pending_capacity)),
@@ -83,6 +105,17 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
         taker_exit_fee_bps=max(0.0, float(args.taker_exit_fee_bps)),
         taker_exit_probability=float(args.taker_exit_probability),
         exit_slippage_bps=max(0.0, float(args.exit_slippage_bps)),
+        setup_mode=setup_mode,
+        regime_config=NearBboRegimeConfig(
+            history_minutes=max(3, int(args.regime_history_minutes)),
+            min_bars=max(3, int(args.regime_min_bars)),
+            fast_ema_span=max(2, int(args.regime_fast_ema_span)),
+            slow_ema_span=max(2, int(args.regime_slow_ema_span)),
+        ),
+        scout_confirmation_ms=max(1, int(args.scout_confirmation_ms)),
+        scout_ttl_ms=max(1, int(args.scout_ttl_ms)),
+        max_signal_volatility_bps=max(0.01, float(args.max_signal_volatility_bps)),
+        max_scout_adverse_bps=max(0.01, float(args.max_scout_adverse_bps)),
     )
     shadow_config = NearBboShadowConfig(
         account_capital_usdt=float(args.account_capital_usdt),
@@ -90,7 +123,22 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
         max_active_intents=max(1, int(args.pending_capacity)),
         max_hold_ms=max(1, int(args.max_hold_ms)),
     )
-    universe = NearBboUniverse(strategy_config)
+    if calibrator is not None:
+        try:
+            calibrator.validate_input_domain(
+                {
+                    **shadow_config.calibration_features,
+                    "quote_ttl_seconds": strategy_config.quote_ttl_ms / 1_000.0,
+                    "expected_round_trip_cost_bps": strategy_config.expected_round_trip_cost_bps,
+                }
+            )
+        except ValueError as exc:
+            raise SystemExit(f"calibration artifact rejected: {exc}") from exc
+    universe = NearBboUniverse(
+        strategy_config,
+        calibrator=calibrator,
+        context_features=shadow_config.calibration_features,
+    )
     ledger = NearBboShadowLedger(shadow_config, strategy_config=strategy_config)
     evaluation_interval = max(100, int(args.evaluation_interval_ms)) / 1_000.0
     duration_seconds = max(0.0, float(args.duration_seconds))
@@ -106,6 +154,12 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
     evaluation_durations_ms: list[float] = []
     latest_event_ms: int | None = None
     latest_rank_diagnostics: dict[str, Any] = {}
+    cumulative_rejection_counts: dict[str, int] = {}
+    admitted_lane_counts: dict[str, int] = {}
+    admitted_regime_counts: dict[str, int] = {}
+    evaluated_symbol_observations = 0
+    eligible_proposal_observations = 0
+    selected_proposal_count = 0
     connection_count = 0
     reconnect_count = 0
     connection_errors: list[dict[str, Any]] = []
@@ -119,6 +173,8 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
         nonlocal message_count, book_count, trade_count, ignored_count
         nonlocal evaluation_count, missed_evaluation_count, latest_event_ms
         nonlocal latest_rank_diagnostics, next_evaluation
+        nonlocal evaluated_symbol_observations, eligible_proposal_observations
+        nonlocal selected_proposal_count
         while deadline is None or time.monotonic() < deadline:
             now = time.monotonic()
             wait_until = next_evaluation
@@ -146,6 +202,7 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
                 if outcomes and event_handle is not None:
                     for outcome in outcomes:
                         _write_event(event_handle, {"type": "outcome", "outcome": outcome.to_dict()})
+                _write_new_labels(event_handle, ledger)
 
             now = time.monotonic()
             if now < next_evaluation:
@@ -161,6 +218,16 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
                 capacity=ledger.available_capacity,
             )
             admitted = ledger.admit(proposals)
+            rank_rejections = latest_rank_diagnostics.get("rejection_counts")
+            if isinstance(rank_rejections, Mapping):
+                merge_counts(cumulative_rejection_counts, rank_rejections)
+            evaluated_symbol_observations += int(latest_rank_diagnostics.get("evaluated_symbol_count") or 0)
+            eligible_proposal_observations += int(latest_rank_diagnostics.get("eligible_count") or 0)
+            selected_proposal_count += int(latest_rank_diagnostics.get("selected_count") or 0)
+            for proposal in admitted:
+                admitted_lane_counts[proposal.lane] = admitted_lane_counts.get(proposal.lane, 0) + 1
+                admitted_regime_counts[proposal.regime] = admitted_regime_counts.get(proposal.regime, 0) + 1
+            _write_new_labels(event_handle, ledger)
             elapsed_ms = (time.perf_counter() - evaluation_started) * 1_000.0
             evaluation_durations_ms.append(elapsed_ms)
             evaluation_count += 1
@@ -240,8 +307,20 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
         "symbols": list(symbols),
         "strategy_config": asdict(strategy_config),
         "shadow_config": asdict(shadow_config),
+        "calibration": {
+            "enabled": calibrator is not None,
+            "score_source": "walk_forward_calibrated" if calibrator is not None else "uncalibrated_shadow",
+        },
         "summary": ledger.summary(now_ms=final_now_ms),
         "latest_rank_diagnostics": latest_rank_diagnostics,
+        "evaluation_diagnostics": {
+            "evaluated_symbol_observations": evaluated_symbol_observations,
+            "eligible_proposal_observations": eligible_proposal_observations,
+            "selected_proposal_count": selected_proposal_count,
+            "rejection_counts": dict(sorted(cumulative_rejection_counts.items())),
+            "admitted_by_lane": dict(sorted(admitted_lane_counts.items())),
+            "admitted_by_regime": dict(sorted(admitted_regime_counts.items())),
+        },
         "performance": {
             "started_wall_ms": started_wall_ms,
             "ended_wall_ms": ended_wall_ms,
@@ -259,14 +338,33 @@ async def run_shadow(args: argparse.Namespace) -> dict[str, Any]:
             "evaluation_ms_max": max(evaluation_durations_ms) if evaluation_durations_ms else None,
         },
         "outcomes": [item.to_dict() for item in ledger.outcomes],
+        "labels": [item.to_dict() for item in ledger.labels],
         "limitations": [
-            "win/fill probabilities are uncalibrated heuristics until enough forward labels exist",
+            (
+                "calibrated probabilities remain shadow-only until unseen-window promotion gates pass"
+                if calibrator is not None
+                else "confirmed article_v2 scouts are admitted for uncalibrated label exploration, not as profitability claims"
+            ),
             "top-of-book queue quantity is a conservative proxy, not authenticated exchange queue position",
             "bookTicker plus trades cannot distinguish every cancellation from consumed queue",
             "target and stop exits do not model authenticated exchange queue priority",
             "shadow results do not authorize testnet or live execution",
         ],
     }
+
+
+def load_optional_calibrator(
+    path: str | None,
+    *,
+    setup_mode: str,
+) -> Any | None:
+    if not path:
+        return None
+    if setup_mode != "article_v2":
+        raise ValueError("calibration artifacts require setup-mode=article_v2")
+    from bfa.backtest.near_bbo_calibration import load_trained_near_bbo_calibrator
+
+    return load_trained_near_bbo_calibrator(path)
 
 
 def parse_symbols(raw: str, *, max_symbols: int = 80) -> tuple[str, ...]:
@@ -276,6 +374,14 @@ def parse_symbols(raw: str, *, max_symbols: int = 80) -> tuple[str, ...]:
     if len(symbols) > max(1, int(max_symbols)):
         raise ValueError(f"symbol watch universe exceeds max {max_symbols}")
     return symbols
+
+
+def merge_counts(target: dict[str, int], additions: Mapping[str, Any]) -> None:
+    for key, raw_value in additions.items():
+        value = int(raw_value)
+        if value:
+            normalized = str(key)
+            target[normalized] = target.get(normalized, 0) + value
 
 
 def build_streams(symbols: list[str] | tuple[str, ...]) -> tuple[str, ...]:
@@ -358,6 +464,14 @@ def _json_mapping(message: Mapping[str, Any] | str | bytes) -> Mapping[str, Any]
 def _write_event(handle, payload: Mapping[str, Any]) -> None:
     handle.write(json.dumps(payload, separators=(",", ":"), sort_keys=True, allow_nan=False) + "\n")
     handle.flush()
+
+
+def _write_new_labels(handle, ledger: NearBboShadowLedger) -> None:
+    labels = ledger.drain_new_labels()
+    if handle is None:
+        return
+    for label in labels:
+        _write_event(handle, {"type": "label", "label": label.to_dict()})
 
 
 def _float_or_zero(value: Any) -> float:

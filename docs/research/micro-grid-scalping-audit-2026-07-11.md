@@ -412,6 +412,101 @@ Remaining promotion blockers are important:
 - current exchangeInfo creates a small survivorship limitation for old dates;
 - live and sentinel remain disabled, and no research flag is enabled in live.
 
+### Article-informed regime/scout candidate (2026-07-12 follow-up)
+
+The scalping article was incorporated as a set of market-structure principles,
+not as fixed RSI/Stoch thresholds or a promise of a 70% win rate. The new
+`article_v2` public-shadow candidate uses a bounded 1m context with 5/15-minute
+EMAs, path efficiency, range width/location, edge alternation, volume, and
+breakout acceleration. Its range location is Stoch-like, while width and
+volatility provide a dynamic alternative to fixed Bollinger distances.
+
+The route is explicit:
+
+- `RANGE` permits only edge-aligned `range_reversion` scouts;
+- `TREND` permits only direction-aligned `trend_pullback` scouts that have not
+  broken too far through the slow EMA;
+- `BREAKOUT` and `CHOP` admit no passive scalp; breakout is retained as a
+  distinct diagnostic state rather than mislabeled as a pullback;
+- a scout must survive a later evaluation with aligned microprice, improving
+  taker-flow change, fast flow, favorable price reversal, signal persistence,
+  bounded five-second volatility, and bounded adverse continuation.
+
+Before a trained calibrator exists, confirmed `article_v2` scouts are admitted
+only as public-shadow exploration. Their old heuristic fill/win/EV values are
+retained as features but do not block label collection. `legacy` mode keeps its
+original probability gates; a loaded calibrator restores fail-closed learned
+fill, win, and conditional-net gates. This is the narrow relaxation supported
+by the 0/16 evidence, not a relaxation of liquidity, freshness, spread,
+momentum, regime, volatility, or confirmation controls.
+
+This addresses the article's multi-timeframe trend/range and reverse-signal
+ideas without hard-coding `RSI < 30` or `Stoch < 20` across every coin. Those
+lagging indicator thresholds remain unsuitable as universal hard gates; the
+earlier strict/conjunctive experiments already showed that adding more fixed
+filters can reduce frequency without producing positive expectancy.
+
+The four prior public-shadow JSONL sessions were also normalized into one
+label contract. They contain 77 resolved intents and 16 queue-proxy fills, all
+16 unprofitable. Predicted win probability was nearly identical for unfilled
+and filled intents (68.79% versus 69.29%), so the old score had no useful
+discrimination. Filled intents had higher five-second volatility (4.40 versus
+2.73 bps), then averaged only +2.68 bps MFE against -7.94 bps MAE. Average MFE
+did not cover the roughly 5.2 bps modeled round-trip cost. This is conditional
+fill toxicity, not merely an exit-timing problem.
+
+Every resolved `article_v2` intent now writes a native training label with its
+lane, regime, fill-within-TTL outcome, costed profitability, net PnL, MFE/MAE,
+queue pressure, TTL, spread, target/stop, cost, and shadow exit-policy context.
+The calibrator fits three separate surfaces: `P(fill within TTL)`,
+`P(profitable | fill)`, and `E(net bps | fill)`. It uses a chronological,
+outcome-purged train/validation split and refuses to emit a model unless at
+least 500 compatible labels, 100 fills, 20 profitable fills, and 20 losing
+fills exist, with proportional class coverage retained in training. A loaded
+artifact must be `status=trained`, match the exact feature schema and execution
+configuration domain, and still remains public-shadow-only.
+
+Legacy and feature-incomplete rows are visible in `observed_*` audit counts but
+cannot train the new lane. The existing evidence therefore reports 77 observed
+labels, 16 observed fills, 0 observed winners, 0 compatible `article_v2`
+labels, `status=insufficient_data`, and `model=null`. Lowering the minimums to
+force a model would turn known bad evidence into false confidence.
+
+Clean 400U / three-intent forward comparison:
+
+| Candidate | Watch | Admitted | Fills / wins | PF / net | p95 / max eval | Missed |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Inherited heuristic probability gates | 24 | 0 | 0 / 0 | n/a / 0U | 0.237 / 0.446ms | 0 / 600 |
+| Confirmed-scout exploration, current hot universe | 40 | 7 | 2 / 0 | 0 / -0.11935U | 0.900 / 1.335ms | 0 / 600 |
+
+The first clean 30-minute run processed 2,633,053 messages but produced zero
+eligible proposals. Of 14,400 symbol evaluations, 46.75% failed top-of-book
+notional and 18.92% had stale trades because the reused 24-symbol list was no
+longer a suitable current universe. More importantly, 10.60% were stopped by
+the uncalibrated fill heuristic, 2.43% by its win heuristic, and 0.31% by its
+derived EV before regime/scout could collect outcomes. Keeping those known-bad
+priors as mandatory gates was therefore a label-collection design error.
+
+After removing only those priors and selecting 40 current public hot/liquid
+symbols, the second clean 30-minute run processed 6,156,309 messages with one
+connection, zero reconnects, and zero missed evaluations. It admitted three
+`range_reversion` and four `trend_pullback` intents. Five expired and two
+filled; both fills reached the 30-second max-hold exit and lost. The range fill
+lost -0.02698U and the trend fill lost -0.09237U. Across fills, mean MFE was
++3.97 bps, mean MAE was -4.71 bps, and mean net was -4.97 bps. Full-run
+throughput was 4 fills/hour; excluding the mandatory 15-minute warm-up, the
+observed opportunity pace was about 28 intents/hour and 8 fills/hour.
+
+This fixes the one-fill/zero-label architecture problem but still rejects the
+candidate as a profitability result. Two losses are far too few for strategy
+selection, yet they repeat the prior warning that favorable movement often
+does not cover costs. No threshold was tuned against this seen window.
+
+Regardless of this short result, promotion still requires multiple
+predeclared unseen windows and symbols, at least 30 fills, win rate >= 70%, PF
+>= 1.20, positive net PnL, bounded drawdown, and non-concentrated profits. The
+70% target is a promotion gate, not a parameter to optimize on one seen window.
+
 ### Cost-aware profit protection
 
 Many losses first reached 45%-80% of target. Target-progress trailing was

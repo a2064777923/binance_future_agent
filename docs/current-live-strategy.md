@@ -802,6 +802,30 @@ net losses: PF 0, net -1.1637U, and zero profitable fills/hour. The evidence exi
 reduced some loss duration; it did not create entry edge. This shadow has no
 signed client or order path and remains research-only.
 
+A newer `article_v2` candidate now separates `RANGE`, `TREND_PULLBACK`, and
+`BREAKOUT` state, then requires scout/confirm persistence before a queue-proxy
+intent. It also records compatible labels for separate fill, profitable-fill,
+and conditional-net calibration. The historical evidence can reconstruct 77
+labels and 16 fills, but all fills lost; none of those legacy/incomplete rows
+can train the new schema. The calibration report therefore remains
+`insufficient_data` with no model.
+
+The first clean 30-minute candidate retained the invalid old probability gates
+and produced 0 intents from 24 symbols despite 2.63 million public messages.
+The corrected public-shadow exploration keeps structural risk gates but lets a
+confirmed scout generate a label before calibration. On 40 currently selected
+hot/liquid symbols it admitted 7 intents: 3 range reversions and 4 trend
+pullbacks. Two filled, both lost at max hold, PF was 0, and net PnL was
+-0.11935U. It processed 6.16 million messages with 0 missed evaluations,
+0 reconnects, 0.900ms p95 and 1.335ms max evaluation latency. This demonstrates
+about 28 intents/hour and 8 fills/hour after warm-up, not positive expectancy.
+
+This candidate changes no live configuration, order path, pending limit cap,
+position sentinel, or kill-switch state. `BREAKOUT` is diagnostic and blocked,
+not a new live breakout strategy. Any future trained artifact is accepted only
+by the public shadow runner and remains subject to fresh multi-window
+profitability gates.
+
 The cost-aware profit-lock variant raised validation win rate to 82.93% but cut
 net PnL to +44.0709U and made one date negative. It remains disabled. Live,
 sentinel, and the kill-switch safety freeze remain unchanged; no result in this

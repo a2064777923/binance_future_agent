@@ -429,6 +429,52 @@ the kill switch remains present; manual positions are out of scope. Do not
 implement a three-order live batch until user-data fill events and immediate
 same-process protection are available.
 
+### 16. Article-informed regime/scout shadow and fail-closed calibration
+
+The prior near-BBO heuristic predicted roughly 69% win probability for both
+filled and unfilled intents, yet all 16 reconstructed fills across four public
+sessions lost. Filled intents also carried higher short-window volatility and
+averaged +2.68 bps MFE versus -7.94 bps MAE, so modeled round-trip cost exceeded
+the average favorable excursion. The failure is entry/fill selection bias, not
+evidence that a tighter trailing stop alone can make the lane profitable.
+
+The research-only successor adds a bounded incremental 1m context, explicit
+`RANGE`, `TREND`, `BREAKOUT`, `CHOP`, and `WARMUP` states, edge-only range
+reversion, direction-only trend pullbacks, and a two-evaluation scout/confirm
+state. Breakout and chop do not trade. Fast/slow flow, microprice, reversal,
+persistence, volatility, and adverse continuation confirm the setup. Fast and
+slow one-second windows are aggregated in one bounded pass; minute ingestion is
+O(1) on ordered data.
+
+Shadow labels now preserve fill-within-TTL, profitable-given-fill, conditional
+net bps, queue/TTL geometry, regime/lane, MFE/MAE, cost, and exit-policy context.
+Offline calibration uses two regularized logistic surfaces plus ridge net-bps,
+a chronological outcome-purged validation split, strict class minimums, exact
+feature/configuration-domain checks, and pure-Python inference. The loader can
+audit old JSONL, but all 77 old labels are incompatible with the complete new
+schema; their 16 fills and 0 wins yield `insufficient_data` and no model.
+
+The first clean 24-symbol / 30-minute run proved the initial implementation was
+still over-gated: 2,633,053 messages and 600 evaluations produced zero intents.
+The old fill/win/EV priors were therefore removed only from uncalibrated
+`article_v2` exploration; all structural gates remain, and `legacy` is
+unchanged. A second clean run selected 40 current public hot/liquid symbols,
+processed 6,156,309 messages, and completed 600/600 evaluations with zero
+misses or reconnects. It admitted 7 intents (3 range, 4 trend pullback), filled
+2, won 0, PF 0, and netted -0.11935U. Evaluation p95 was 0.900ms and max was
+1.335ms. After the 15-minute warm-up this is approximately 28 intents/hour and
+8 fills/hour: sufficient to disprove the one-intent bottleneck, not sufficient
+to claim edge.
+
+The combined loader now sees 84 observed labels, 18 observed fills, and 0
+winners. Only the 7 new labels / 2 fills have the complete compatible schema;
+calibration correctly exits `insufficient_data` with `model=null`. No thresholds
+were tuned on the seen run.
+
+No live, sentinel, exchange order, manual position, or kill-switch state was
+changed. The candidate remains public-data shadow research and cannot authorize
+live deployment.
+
 ## Live Server Notes
 
 Known deployment shape:

@@ -172,6 +172,75 @@ so a connected-but-silent stream ages out instead of freezing the stale-data
 clock. Unknown `BFA_LIVE_MICRO_GRID_*` environment names fail config validation;
 obsolete experimental knobs can no longer appear active while being ignored.
 
+### `article_v2` shadow and calibration workflow
+
+`article_v2` remains part of the public no-order runner, not the live agent. It
+needs at least 15 one-minute bars before classification, then routes only
+`RANGE -> range_reversion` and `TREND -> trend_pullback`; `BREAKOUT`, `CHOP`,
+stale data, excessive short-window volatility, and failed scout confirmation
+remain fail-closed. The runner accumulates rejection counts and lane/regime
+admissions directly during evaluation, so later analysis does not rescan raw
+ticks.
+
+Without a trained model, confirmed scouts are exploration labels: the old
+heuristic fill/win/EV fields are recorded but do not block them. Liquidity,
+freshness, spread, momentum, regime, volatility, and scout confirmation still
+block normally. `legacy` mode is unchanged. Once a calibration report is
+loaded, its learned fill/win/net gates replace exploration and fail closed.
+
+Use at least a 30-minute run when the process starts without preloaded minute
+history:
+
+```bash
+python scripts/run_near_bbo_shadow.py \
+  --symbols BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT \
+  --output runtime/near-bbo-article-v2.json \
+  --events-output runtime/near-bbo-article-v2.jsonl \
+  --duration-seconds 1800 \
+  --account-capital-usdt 400 \
+  --notional-usdt 120 \
+  --pending-capacity 3 \
+  --setup-mode article_v2
+```
+
+The 400U/120U/three-intent shape caps simultaneous shadow notional at 360U,
+leaving 40U unallocated. It is a research accounting model, not exchange
+margin reservation or permission to place orders.
+
+Resolved intents are emitted once as native labels. Train only from compatible
+`article_v2` labels:
+
+```bash
+python scripts/calibrate_near_bbo_shadow.py \
+  --input runtime/near-bbo-article-v2-day-1.jsonl \
+  --input runtime/near-bbo-article-v2-day-2.jsonl \
+  --output runtime/near-bbo-calibration-report.json
+```
+
+Exit code `2`, `status=insufficient_data`, and `model=null` are expected until
+the default 500-label / 100-fill / 20-win / 20-loss requirements and the
+purged training split are satisfied. Do not lower these gates to make the CLI
+return zero. A trained artifact can be evaluated with
+`--calibration-model runtime/near-bbo-calibration-report.json`; an untrained,
+malformed, feature-mismatched, or execution-domain-mismatched artifact is
+rejected before the WebSocket connects. Model inference is a small pure-Python
+dot product; NumPy is loaded only for offline fitting.
+
+The 2026-07-12 clean comparison found that inheriting old heuristic probability
+gates yielded 0 intents from 24 symbols. Confirmed-scout exploration over 40
+currently selected public hot/liquid symbols yielded 7 resolved labels, 2
+fills, 0 wins, PF 0, and -0.11935U. Both fills were max-hold losses. The run
+processed 6,156,309 messages, completed 600/600 evaluations with no reconnect,
+and measured 0.900ms p95 / 1.335ms max evaluation latency. This restores label
+throughput but does not establish edge. The combined calibration audit has 84
+observed labels / 18 observed fills / 0 wins, of which only 7 labels / 2 fills
+match the complete `article_v2` schema; it correctly remains
+`insufficient_data` with no model.
+
+Neither command has a signed Binance client. Do not copy this model into the
+live micro-grid path until queue-aware replay, multi-window forward gates, and
+same-process fill/protection design all pass.
+
 ## Pending Entry Lifecycle And Quality
 
 Deferred limits are registered in the indexed `pending_limit_entries` table.

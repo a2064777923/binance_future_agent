@@ -95,6 +95,10 @@ class NearBboShadowLedgerTests(unittest.TestCase):
         self.assertEqual(summary["expired_count"], 1)
         self.assertEqual(summary["active_intent_count"], 0)
         self.assertEqual(ledger.available_capacity, 1)
+        self.assertEqual(len(ledger.labels), 1)
+        self.assertFalse(ledger.labels[0].filled)
+        self.assertEqual(ledger.labels[0].proposal_id, item.proposal_id)
+        self.assertEqual(ledger.labels[0].features["direction_score"], item.features["direction_score"])
 
     def test_capacity_is_separate_from_number_of_ranked_proposals(self):
         item, strategy_config = proposal()
@@ -153,6 +157,35 @@ class NearBboShadowLedgerTests(unittest.TestCase):
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0].exit_reason, "evidence_adverse_selection")
         self.assertLess(abs(outcomes[0].net_pnl_usdt), self.configured_stop_loss_usdt(item, strategy_config))
+
+    def test_closed_fill_emits_training_label_once(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(notional_usdt=120.0, max_active_intents=3),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+        ledger.on_trade(symbol="TESTUSDT", event_time_ms=10_200, price=100.0, quantity=11.0, taker_buy=False)
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=11_000,
+            price=item.target_price,
+            quantity=1.0,
+            taker_buy=True,
+        )
+
+        first = ledger.drain_new_labels()
+        second = ledger.drain_new_labels()
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(second, ())
+        self.assertTrue(first[0].filled)
+        self.assertTrue(first[0].profitable)
+        self.assertGreater(first[0].net_pnl_usdt, 0.0)
+        self.assertEqual(first[0].lane, item.lane)
+        self.assertEqual(first[0].regime, item.regime)
+        self.assertEqual(first[0].features["shadow_max_hold_seconds"], 30.0)
+        self.assertEqual(first[0].features["shadow_evidence_exit_enabled"], 1.0)
 
     @staticmethod
     def configured_stop_loss_usdt(item, strategy_config):
