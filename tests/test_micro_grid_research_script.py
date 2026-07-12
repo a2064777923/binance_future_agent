@@ -260,6 +260,101 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         self.assertIn("historical_wick_stop_rate_high", rejected["reasons"])
         self.assertTrue(warming_up["passed"])
 
+    def test_conjunctive_confirmation_blocks_combined_adverse_evidence_not_single_flags(self):
+        profile = self.profile(
+            scalp_confirmation_enabled=True,
+            scalp_confirmation_mode="conjunctive",
+            scalp_confirmation_min_stoch_distance=30.0,
+            scalp_confirmation_dynamic_buffer=0.0,
+            scalp_confirmation_max_adverse_flow=0.18,
+            pullback_min_quality=0.50,
+            wick_ev_min_fills=12,
+            scalp_confirmation_max_wick_stop_rate=0.30,
+        )
+        base = replace(
+            self.state(),
+            stochastic_k=18.0,
+            stochastic_d=19.0,
+            entry_taker_buy_ratio=0.40,
+            long_pullback_quality=0.70,
+            long_wick_fill_count=20,
+            long_wick_stop_rate=0.20,
+        )
+
+        stoch_only = research.scalp_confirmation_rejection_reasons(
+            "long",
+            replace(base, stochastic_k=40.0, stochastic_d=42.0),
+            profile,
+        )
+        flow_only = research.scalp_confirmation_rejection_reasons(
+            "long",
+            replace(base, entry_taker_buy_ratio=0.10),
+            profile,
+        )
+        stoch_and_flow = research.scalp_confirmation_rejection_reasons(
+            "long",
+            replace(base, stochastic_k=40.0, stochastic_d=42.0, entry_taker_buy_ratio=0.10),
+            profile,
+        )
+        stoch_and_pullback = research.scalp_confirmation_rejection_reasons(
+            "long",
+            replace(base, stochastic_k=40.0, stochastic_d=42.0, long_pullback_quality=0.20),
+            profile,
+        )
+        wick_stop_only = research.scalp_confirmation_rejection_reasons(
+            "long",
+            replace(base, long_wick_stop_rate=0.50),
+            profile,
+        )
+
+        self.assertEqual(stoch_only, [])
+        self.assertEqual(flow_only, [])
+        self.assertIn("stoch_and_adverse_flow", stoch_and_flow)
+        self.assertIn("stoch_and_weak_pullback", stoch_and_pullback)
+        self.assertEqual(wick_stop_only, [])
+
+    def test_conjunctive_confirmation_is_applied_consistently_by_order_prechecks(self):
+        profile = self.profile(
+            grid_layer_count=1,
+            scalp_confirmation_enabled=True,
+            scalp_confirmation_mode="conjunctive",
+            scalp_confirmation_min_stoch_distance=30.0,
+            scalp_confirmation_dynamic_buffer=0.0,
+            pullback_min_quality=0.50,
+            side_flow_filter_enabled=False,
+        )
+        weak_pullback_only = replace(
+            self.state(),
+            stochastic_k=18.0,
+            stochastic_d=19.0,
+            entry_taker_buy_ratio=0.40,
+            long_pullback_quality=0.20,
+            short_pullback_quality=0.70,
+        )
+        combined_failure = replace(
+            weak_pullback_only,
+            stochastic_k=40.0,
+            stochastic_d=42.0,
+        )
+
+        weak_only_orders = research.build_grid_orders("TESTUSDT", weak_pullback_only, profile)
+        combined_orders = research.build_grid_orders("TESTUSDT", combined_failure, profile)
+        combined_rejections = research.single_grid_order_rejection_reasons(
+            combined_failure,
+            profile,
+            side="long",
+            entry=99.0,
+            target=100.0,
+            stop=98.0,
+        )
+
+        self.assertIn("long", {order.side for order in weak_only_orders})
+        self.assertNotIn("long", {order.side for order in combined_orders})
+        self.assertIn(
+            "long_scalp_confirmation:stoch_and_weak_pullback",
+            combined_rejections,
+        )
+
     def test_maker_accurate_cost_includes_entry_exit_slippage_and_taker_risk(self):
         profile = self.profile(
             maker_fee_bps=2.0,
@@ -270,6 +365,18 @@ class MicroGridResearchScriptTests(unittest.TestCase):
         )
 
         self.assertAlmostEqual(profile.round_trip_cost_percent, 0.075)
+
+    def test_non_maker_entry_cost_uses_taker_fee_without_reprice_risk(self):
+        profile = self.profile(
+            maker_fee_bps=2.0,
+            taker_fee_bps=4.0,
+            exit_slippage_bps=1.0,
+            entry_maker_cost=False,
+            entry_taker_risk_bps=0.5,
+        )
+
+        self.assertEqual(profile.entry_fee_bps, 4.0)
+        self.assertAlmostEqual(profile.round_trip_cost_percent, 0.09)
 
     def test_estimated_target_reward_uses_same_maker_accurate_cost_model(self):
         profile = self.profile(
@@ -349,14 +456,15 @@ class MicroGridResearchScriptTests(unittest.TestCase):
             max_hold_seconds=2,
             side_flow_filter_enabled=False,
         )
+        attempts = []
 
         with (
             mock.patch.object(research, "build_micro_grid_state", return_value=(state, [])),
             mock.patch.object(research, "build_grid_orders", return_value=[long_order, short_order]),
             mock.patch.object(
                 research,
-                "live_order_selection_key",
-                side_effect=lambda order: (0 if order.side == "short" else 1, 0),
+                "live_order_selection_score",
+                side_effect=lambda order: 2.0 if order.side == "short" else 1.0,
             ),
             mock.patch.object(research, "simulate_grid_basket", return_value=(None, "expired", None)) as simulate,
         ):
@@ -367,12 +475,47 @@ class MicroGridResearchScriptTests(unittest.TestCase):
                 signal_start_ms=seconds[30].open_time,
                 signal_end_ms=seconds[30].open_time,
                 execution_order_mode="live_best",
+                order_attempts=attempts,
             )
 
         self.assertEqual(order_stats["orders_generated"], 2)
         self.assertEqual(order_stats["orders_created"], 1)
         submitted_orders = simulate.call_args.args[1]
         self.assertEqual([order.side for order in submitted_orders], ["short"])
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0].symbol, "TESTUSDT")
+        self.assertEqual(attempts[0].side, "short")
+        self.assertEqual(attempts[0].signal_time_ms, seconds[30].open_time)
+        self.assertEqual(attempts[0].pending_until_ms, seconds[30].open_time + 1_999)
+        self.assertIsNone(attempts[0].fill_time_ms)
+
+    def test_live_order_selector_scores_each_order_once(self):
+        state = self.state()
+        orders = [
+            research.GridOrder(
+                symbol="TESTUSDT",
+                side=side,
+                signal_index=state.signal_index,
+                signal_time=state.signal_time,
+                entry_price=99.0 if side == "long" else 101.0,
+                stop_price=98.0 if side == "long" else 102.0,
+                target_price=100.0,
+                state=state,
+                reason_codes=[],
+            )
+            for side in ("long", "short")
+        ]
+
+        with mock.patch.object(
+            research,
+            "live_order_selection_score",
+            side_effect=lambda order: 2.0 if order.side == "short" else 1.0,
+        ) as score:
+            selected, selected_score = research.select_live_order(orders)
+
+        self.assertEqual(selected.side, "short")
+        self.assertEqual(selected_score, 2.0)
+        self.assertEqual(score.call_count, len(orders))
 
     def test_live_best_waits_for_pending_expiry_and_does_not_cross_schedule_boundary(self):
         seconds = oscillating_seconds(count=80)
@@ -909,14 +1052,14 @@ class MicroGridResearchScriptTests(unittest.TestCase):
             maker_fee_bps=2.0,
             taker_fee_bps=4.0,
             exit_slippage_bps=1.0,
-            entry_maker_cost=False,
+            entry_maker_cost=True,
         )
 
         before_cost = research.update_trailing_stop(order, profile, best_price=100.06, current_stop=98.0)
         after_cost = research.update_trailing_stop(order, profile, best_price=100.08, current_stop=98.0)
 
         self.assertEqual(before_cost, 98.0)
-        self.assertAlmostEqual(after_cost, 100.07)
+        self.assertAlmostEqual(after_cost, 100.075)
 
     def test_adaptive_profit_lock_waits_longer_when_continuation_confidence_is_high(self):
         state = self.state()
@@ -1918,6 +2061,7 @@ class MicroGridResearchScriptTests(unittest.TestCase):
                 maker_fee_bps=2.0,
                 taker_fee_bps=4.0,
                 exit_slippage_bps=1.0,
+                entry_maker_cost=True,
                 fee_filter_leverage=20.0,
                 min_net_margin_reward_percent=0.0,
                 target_extension_enabled=True,

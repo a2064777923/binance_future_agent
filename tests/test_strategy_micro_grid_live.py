@@ -10,6 +10,7 @@ from bfa.strategy.micro_grid_live import (
     _candidate_from_order,
     _live_profile,
     _market_context_rejections,
+    _micro_grid_research_module,
     _micro_cost_quality_gate,
     _order_score,
     build_micro_grid_live_candidates,
@@ -21,6 +22,14 @@ from scripts import run_micro_grid_research as research
 
 
 class MicroGridLiveAdapterTests(unittest.TestCase):
+    def test_research_module_is_loaded_once_per_process(self):
+        _micro_grid_research_module.cache_clear()
+
+        first = _micro_grid_research_module()
+        second = _micro_grid_research_module()
+
+        self.assertIs(first, second)
+
     def test_live_candidates_fail_closed_when_exchange_event_time_is_missing(self):
         now_ms = int(time.time() * 1000)
         config = load_config({"BFA_LIVE_MICRO_GRID_ENABLED": "true"})
@@ -197,6 +206,15 @@ class MicroGridLiveAdapterTests(unittest.TestCase):
 
         self.assertEqual(live_config.order_wait_seconds, 20)
         self.assertEqual(live_config.max_signal_age_seconds, 12.0)
+
+    def test_live_profile_costs_post_only_entry_as_maker(self):
+        live_config = MicroGridLiveConfig.from_app(load_config(env={}))
+
+        profile = _live_profile(research, live_config)
+
+        self.assertTrue(profile.entry_maker_cost)
+        self.assertEqual(profile.entry_fee_bps, profile.maker_fee_bps)
+        self.assertEqual(profile.scalp_confirmation_mode, "all")
 
     def test_config_reads_micro_grid_max_signal_age(self):
         live_config = MicroGridLiveConfig.from_app(

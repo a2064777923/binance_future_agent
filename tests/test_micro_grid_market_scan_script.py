@@ -83,6 +83,13 @@ def second_bars(count=200):
 
 
 class MicroGridMarketScanTests(unittest.TestCase):
+    def test_default_watch_universe_is_broader_than_pending_capacity(self):
+        config = scan.MarketScanConfig()
+
+        self.assertGreaterEqual(config.prefilter_top_n, 48)
+        self.assertEqual(config.watch_top_n, 24)
+        self.assertGreater(config.watch_top_n, 3)
+
     def test_universe_uses_exchange_metadata_and_excludes_tradfi(self):
         payload = {
             "symbols": [

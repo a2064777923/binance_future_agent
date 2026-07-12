@@ -520,6 +520,7 @@ SIGNED_NUMERIC_FIELDS = {
 @dataclass(frozen=True)
 class AppConfig:
     values: dict[str, str]
+    unsupported_keys: tuple[str, ...] = ()
 
     def get(self, key: str, default: str = "") -> str:
         return self.values.get(key, default)
@@ -545,16 +546,29 @@ def load_config(
     """Load runtime config from defaults, an optional env file, and a mapping."""
 
     values = dict(DEFAULTS)
+    unsupported_keys: set[str] = set()
     if env_file is not None:
-        values.update(_known_config_values(_read_env_file(Path(env_file))))
-    values.update(_known_config_values(os.environ if env is None else env))
-    return AppConfig(values={key: str(value) for key, value in values.items()})
+        file_values = _read_env_file(Path(env_file))
+        values.update(_known_config_values(file_values))
+        unsupported_keys.update(_unsupported_live_micro_grid_keys(file_values))
+    environment_values = os.environ if env is None else env
+    values.update(_known_config_values(environment_values))
+    unsupported_keys.update(_unsupported_live_micro_grid_keys(environment_values))
+    return AppConfig(
+        values={key: str(value) for key, value in values.items()},
+        unsupported_keys=tuple(sorted(unsupported_keys)),
+    )
 
 
 def validate_config(config: AppConfig) -> ValidationResult:
     errors: list[str] = []
     warnings: list[str] = []
     mode = _parse_mode(config.get("BFA_MODE"), errors)
+
+    errors.extend(
+        f"unsupported live micro-grid config key: {key}"
+        for key in config.unsupported_keys
+    )
 
     for field in NUMERIC_FIELDS:
         if field in ZERO_ALLOWED_NUMERIC_FIELDS:
@@ -748,6 +762,15 @@ def _read_env_file(path: Path) -> dict[str, str]:
 
 def _known_config_values(values: Mapping[str, str]) -> dict[str, str]:
     return {key: str(values[key]) for key in DEFAULTS if key in values}
+
+
+def _unsupported_live_micro_grid_keys(values: Mapping[str, str]) -> set[str]:
+    prefix = "BFA_LIVE_MICRO_GRID_"
+    return {
+        str(key)
+        for key in values
+        if str(key).startswith(prefix) and str(key) not in DEFAULTS
+    }
 
 
 def _strip_quotes(value: str) -> str:

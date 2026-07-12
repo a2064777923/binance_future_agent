@@ -68,9 +68,9 @@ class MarketScanConfig:
     selection_interval_minutes: int = 60
     signal_window_minutes: int = 60
     prefilter_interval: str = "5m"
-    prefilter_top_n: int = 48
+    prefilter_top_n: int = 80
     final_interval: str = "1m"
-    final_top_n: int = 8
+    watch_top_n: int = 24
     min_coverage_fraction: float = 0.90
     min_lookback_quote_volume_usdt: float = 1_000_000.0
     round_trip_cost_percent: float = 0.075
@@ -102,7 +102,8 @@ def main() -> int:
     parser.add_argument("--selection-interval-minutes", type=int, default=MarketScanConfig.selection_interval_minutes)
     parser.add_argument("--signal-window-minutes", type=int, default=MarketScanConfig.signal_window_minutes)
     parser.add_argument("--prefilter-top-n", type=int, default=MarketScanConfig.prefilter_top_n)
-    parser.add_argument("--final-top-n", type=int, default=MarketScanConfig.final_top_n)
+    parser.add_argument("--watch-top-n", type=int, default=None)
+    parser.add_argument("--final-top-n", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--min-coverage-fraction", type=float, default=MarketScanConfig.min_coverage_fraction)
     parser.add_argument(
         "--min-lookback-quote-volume-usdt",
@@ -115,19 +116,26 @@ def main() -> int:
     args = parser.parse_args()
 
     dates = parse_dates(args.dates)
+    watch_top_n = (
+        args.watch_top_n
+        if args.watch_top_n is not None
+        else args.final_top_n
+        if args.final_top_n is not None
+        else MarketScanConfig.watch_top_n
+    )
     config = MarketScanConfig(
         lookback_minutes=max(60, int(args.lookback_minutes)),
         recent_minutes=max(5, int(args.recent_minutes)),
         selection_interval_minutes=max(5, int(args.selection_interval_minutes)),
         signal_window_minutes=max(5, int(args.signal_window_minutes)),
         prefilter_top_n=max(1, int(args.prefilter_top_n)),
-        final_top_n=max(1, int(args.final_top_n)),
+        watch_top_n=max(1, int(watch_top_n)),
         min_coverage_fraction=clamp(float(args.min_coverage_fraction), 0.0, 1.0),
         min_lookback_quote_volume_usdt=max(0.0, float(args.min_lookback_quote_volume_usdt)),
         round_trip_cost_percent=max(0.0001, float(args.round_trip_cost_percent)),
     )
-    if config.final_top_n > config.prefilter_top_n:
-        raise SystemExit("--final-top-n cannot exceed --prefilter-top-n")
+    if config.watch_top_n > config.prefilter_top_n:
+        raise SystemExit("--watch-top-n cannot exceed --prefilter-top-n")
 
     exchange_observed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
     explicit_symbols = parse_symbols(args.symbols)
@@ -162,13 +170,15 @@ def main() -> int:
         workers=workers,
         allowed_windows_by_symbol=shortlist_by_symbol,
     )
-    final_ranked = rank_feature_windows(final_raw, top_n=config.final_top_n)
+    final_ranked = rank_feature_windows(final_raw, top_n=config.watch_top_n)
     final_seconds = time.perf_counter() - final_started
 
     output_windows = build_output_windows(windows, prefilter_ranked, final_ranked)
     schedule = {
-        "schema": "bfa_micro_grid_eligibility_schedule_v1",
+        "schema": "bfa_micro_grid_eligibility_schedule_v2",
         "selection_basis": "prior_only_market_opportunity_rank",
+        "watch_top_n": config.watch_top_n,
+        "pending_capacity_semantics": "independent_downstream_limit",
         "windows": [
             {
                 "signal_start": row["signal_start"],
@@ -185,7 +195,7 @@ def main() -> int:
             "purpose": "historical market-wide opportunity discovery before exact micro-grid aggTrade replay",
             "universe": "current public exchangeInfo crypto USDT perpetuals, onboard-time bounded; no current 24h ticker ranking",
             "prefilter": "cross-sectional prior-only 5m feature rank; retain a broad shortlist",
-            "final_rank": "recompute the same feature family from completed 1m bars and retain the leading symbol-hours",
+            "final_rank": "recompute the same feature family from completed 1m bars and retain a broad watch universe; pending capacity is applied later",
             "features": list(COMPONENT_WEIGHTS),
             "outcome_use": "none",
             "lookahead_rule": "feature_end is strictly earlier than signal_start for every window",

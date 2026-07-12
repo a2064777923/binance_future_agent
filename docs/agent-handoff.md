@@ -171,8 +171,10 @@ trend positions do not fully crowd out scalping attempts. Protective SL/TP is
 required for live fills, and the pending-limit watchdog plus position sentinel
 exist to close gaps between submitted limit orders, fills, and protection.
 
-Micro-grid is now an independent fast lane and should not be analyzed as a
-trend candidate that happened to use small exits. It bypasses AI, records
+Micro-grid is an AI-independent candidate path and should not be analyzed as a
+trend candidate that happened to use small exits. “Fast lane” does not mean a
+deployed three-second scheduler: the paused main live cycle still owns this
+path. It bypasses AI, records
 `strategy_leg=micro_grid`, uses `regime_label=RANGE`, and persists latency
 fields so signal-to-submit delay can be audited. Trend candidates still use the
 AI review path when enabled. See `docs/current-live-strategy.md` before

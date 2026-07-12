@@ -124,13 +124,14 @@ Important verdicts:
 Do not use today's 24h ticker rank to decide which historical micro-grid symbols
 to replay. The dedicated scanner uses only bars completed before each signal
 hour, scans the public crypto USDT perpetual universe with cheap 5m data, and
-downloads 1m data only for the leading 48 symbols:
+downloads 1m data only for a broad leading set. The watch universe is kept
+separate from downstream pending-order capacity:
 
 ```bash
 python scripts/run_micro_grid_market_scan.py \
   --dates 2026-06-27,2026-06-29,2026-07-02 \
-  --prefilter-top-n 48 \
-  --final-top-n 3 \
+  --prefilter-top-n 80 \
+  --watch-top-n 24 \
   --workers 16 \
   --cache-dir runtime/market-scan-klines \
   --output runtime/micro-grid-market-scan.json \
@@ -153,6 +154,7 @@ python scripts/run_micro_grid_research.py \
   --order-wait-seconds 20 \
   --initial-capital 400 \
   --max-open-positions 3 \
+  --max-pending-orders 3 \
   --max-leverage 30 \
   --max-risk-per-trade-usdt 40 \
   --max-position-notional-usdt 2400 \
@@ -168,7 +170,11 @@ python scripts/run_micro_grid_research.py \
 With `live_best`, the replay will not resubmit the same symbol until its pending
 deadline or filled position lifecycle completes. Eligibility windows are also
 trimmed by the pending lifetime so an old hourly selection cannot leak into the
-next one.
+next one. At each signal timestamp all watched symbols compete by the shared
+live score; only then does the replay admit at most three global pending/active
+intents. Selecting only the top three symbols for an entire hour is not an
+equivalent pending-cap simulation because it prevents the other watched symbols
+from competing after a slot expires.
 
 Always report cadence separately:
 
@@ -192,5 +198,6 @@ candidate for forward paper/live observation only when:
 - max drawdown stays comfortably below the configured daily loss cap;
 - results survive reruns on different symbols, intervals, and dates.
 
-If results are weak, keep live caps unchanged and use the reports to tighten
-filters before collecting more forward evidence.
+If results are weak, keep live caps unchanged and diagnose entry geometry,
+regime, fill selection, and loss tails before changing filters. More restrictive
+and more permissive gates must both earn promotion on unseen forward evidence.

@@ -249,17 +249,19 @@ bar. For every UTC hour it:
 
 1. evaluates every current crypto USDT perpetual whose `onboardDate` existed at
    the feature window;
-2. ranks a cheap 360-minute 5m view and retains 48 symbols;
+2. ranks a cheap 360-minute 5m view and retains 80 symbols;
 3. recomputes liquidity, cost-adjusted range, turns, center crosses, wick
    magnitude/frequency, path efficiency, drift, recent activity, and taker-flow
    balance from 360 completed 1m bars;
-4. emits only the leading symbol-hours for exact tick replay.
+4. emits a broad 24-symbol/hour watch universe for exact tick replay; pending
+   capacity is applied later, after simultaneous attempts are ranked.
 
-On the frozen July 5/8/10 scan this covered 528 contracts and 72 hourly
+The original frozen July 5/8/10 scan covered 528 contracts and 72 hourly
 windows. After cache warm-up, 3,168 5m archives and 653 1m archives were read
-with no missing final-stage data in 20.72 seconds. Only 223 symbols reached the
-1m stage and only 53 distinct symbols reached the final top-eight schedule.
-This avoids downloading aggTrades or fitting rolling wick models for the full
+with no missing final-stage data in 20.72 seconds. That run used the older
+48/top-eight shape and remains useful only as a historical diagnostic. The
+current prefilter-80/watch-24 schema keeps eligibility broader than capacity and
+still avoids downloading aggTrades or fitting rolling wick models for the full
 market.
 
 ### What strict and relaxed actually mean
@@ -322,14 +324,17 @@ Live and research no longer maintain duplicate order-score implementations;
 `micro_grid_live` calls the shared research score. This is a no-behavior-change
 refactor for live ranking and prevents future scoring drift.
 
-### Top-three result and cadence boundary
+### Historical Top-three result and corrected capacity boundary
 
-Selecting the best three symbol-hours matches the configured three micro
-pending slots. A frozen current-cadence check on June 28/30 and July 1 used
-`live_best` but a 120-second stride. It produced only one filled trade across
-three days; two days had zero fills. This directly explains why the operator
-saw almost no effective 20-second micro orders: a two-minute sampler observes
-only one of every forty possible three-second decision points.
+Selecting the best three symbol-hours does **not** match three pending slots.
+It excludes every lower-ranked symbol for the entire hour, whereas a capacity
+model must let all watched symbols compete again when an order expires or a
+position exits. The earlier frozen current-cadence check on June 28/30 and July
+1 used `live_best` but a 120-second stride. It produced only one filled trade
+across three days; two days had zero fills. This directly explains why the
+operator saw almost no effective 20-second micro orders: a two-minute sampler
+observes only one of every forty possible three-second decision points, and the
+hourly Top-three schedule further suppressed replacement opportunities.
 
 A separate frozen three-second top-three confirmation initially failed (55
 trades, 69.09% wins, PF 0.795, -39.5425U). A later, independent validation on
@@ -349,7 +354,51 @@ were positive. Trades spanned 17 symbols, 10 symbols were net positive, and
 the largest symbol supplied 29.38% of gross winning-trade PnL. Submitted candidate
 orders fell from 951 before lifecycle enforcement to 594 after it, a 37.5%
 reduction. This clears the frozen statistical gates for a *research-only
-dedicated fast loop*, not for the current two-minute live service.
+dedicated fast loop* under the old eligibility assumption, not for the current
+two-minute live service. The corrected capacity model supersedes it as promotion
+evidence.
+
+The corrected replay watches 24 symbols and applies global pending=3 and
+active-intent=3 only after ranking all same-timestamp attempts. On three fixed,
+three-hour July 5/8/10 windows:
+
+| Profile | Trades | Win rate | PF | Net PnL | Fills/hour |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Relaxed | 42 | 59.52% | 0.562 | -14.5282U | 4.67 |
+| Strict `all` | 18 | 61.11% | 0.302 | -8.2750U | 2.00 |
+| Conjunctive research mode | 51 | 54.90% | 0.526 | -16.5198U | 5.67 |
+
+Conjunctive mode treats isolated Stoch, adverse-flow, and mature wick-stop
+failures as evidence rather than hard blocks, rejecting only Stoch+adverse-flow
+or Stoch+weak-pullback combinations. It increased activity but worsened the
+aggregate loss. July 8 alone produced 13 trades, 15.38% wins, PF 0.061, and
+-14.5084U. This candidate failed on development data, so no additional
+historical threshold tuning or reused-window “validation” was performed. The
+default and live profile remain `all`.
+
+### Public near-BBO forward shadow
+
+A lightweight alternative was implemented as a public-data-only shadow lane.
+It subscribes to `bookTicker` and public trades, keeps bounded one-second flow
+buckets, ranks a broad watch set, and admits at most three queue-proxy intents.
+It has no signed client or order method.
+
+The independent 600-second 24-symbol evidence-exit run processed 1,207,624
+messages and completed all 200 three-second evaluations with 0 misses. Ranking
+p95 was 0.243ms and max was 0.554ms; two code-1006 disconnects recovered via
+backoff. The ledger used 400U shadow capital, 120U notional per intent, and at
+most three active intents. It admitted 49 intents, filled 12, and therefore
+demonstrated 72.05 shadow fills/hour—but every fill lost after modeled costs:
+0% wins, PF 0,
+-1.1637U, and 0 profitable fills/hour. Four evidence-adverse-selection exits
+lost -0.5738U, six max-hold exits lost -0.3862U, one stop lost -0.2028U, and one
+profit-lock exit finished approximately flat after costs.
+
+This separates the questions cleanly: the performance architecture can observe
+high-frequency fills, but the current imbalance/flow/microprice heuristic is
+uncalibrated and selects toxic fills. The evidence exit can limit some losses;
+it cannot manufacture entry expectancy. A connected-but-silent stream now also
+ages against wall time so stale data fails closed.
 
 Remaining promotion blockers are important:
 
@@ -357,8 +406,9 @@ Remaining promotion blockers are important:
   post-only order;
 - the live raw seconds cache currently holds about 20 minutes, while the market
   rank uses a six-hour 1m history;
-- no dedicated three-second micro service has been built, resource-tested, or
-  shadow-run forward;
+- no authenticated three-second service with user-data fills and immediate
+  same-process protection has been built; only the public no-order shadow was
+  resource-tested;
 - current exchangeInfo creates a small survivorship limitation for old dates;
 - live and sentinel remain disabled, and no research flag is enabled in live.
 
@@ -475,15 +525,17 @@ this comparison used trade events only and still does not model queue position.
 ### Revised recommendation
 
 - Keep `live_best`, pending/position lifecycle enforcement, prior-only market
-  ranking, and top-three capacity in the truthful research path.
-- Do not globally relax Stoch and pullback gates. Treat adverse flow as a
-  candidate for soft/regime-aware evidence only after another frozen test.
+  ranking, watch-24 eligibility, and downstream pending=3 capacity in the
+  truthful research path.
+- Reject the tested conjunctive gate. Do not globally relax Stoch and pullback
+  or promote adverse flow from this sample.
 - Keep cost-aware target protection available but disabled.
-- Build a separate shadow-only micro loop before any live consideration. It
-  needs an incremental six-hour 1m ring buffer, top-three ranking, one-order
-  pending state, CPU/latency budgets, and no AI/trend work in the fast path.
-- Add L2/queue-aware fill estimation and forward shadow outcomes. Passing the
-  historical 41-trade gate is evidence to continue, not permission to trade.
+- Continue the separate public shadow only to collect a much larger labeled
+  fill/non-fill data set. The historical scanner still needs an incremental
+  six-hour 1m ring buffer; AI/trend work stays out of this path.
+- Add L2/queue-aware fill estimation and calibrate entry probabilities from
+  forward outcomes. The historical 41-trade Top-three result is superseded and
+  is not permission to trade.
 
 ## Recommended next plan
 
@@ -498,16 +550,16 @@ this comparison used trade events only and still does not model queue position.
 - add an L2/queue-aware replay before any claim about 20-second passive fill
   probability.
 
-### Current P1 - build opportunity discovery as a separate fast lane
+### Current P1 - calibrate the separate shadow lane
 
-- turn the two-stage historical scanner into a shadow-only incremental ranker:
-  broad cheap universe, six-hour 1m ring buffer, then top three;
-- keep trend/AI work out of the proposed three-second micro loop and enforce one
-  pending order per selected symbol;
-- measure cycle CPU time, memory, raw-cache freshness, missed cycles, schedule
-  churn, and forward fill/outcome attribution before considering testnet;
-- compare strict confirmation with a predeclared regime-aware soft-flow variant
-  rather than removing all confirmation.
+- turn the two-stage historical scanner into an incremental watch-24 ranker:
+  broad cheap universe, six-hour 1m ring buffer, then downstream pending=3;
+- keep trend/AI work out of the three-second public shadow and enforce one
+  intent per selected symbol;
+- retain the measured latency/missed-cycle budgets and collect enough forward
+  labels to calibrate fill probability and post-fill adverse selection;
+- do not consider testnet until queue-aware replay is positive and a user-data
+  fill/protection design closes the current watchdog protection gap.
 
 ### Current P2 - protect failures without clipping runners
 

@@ -122,6 +122,39 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result.mode, RuntimeMode.DRY_RUN)
         self.assertEqual(result.errors, [])
 
+    def test_unknown_live_micro_grid_knob_fails_instead_of_being_silently_ignored(self):
+        config = load_config(
+            base_env(
+                BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_ENABLED="true",
+                BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LEVELS="3",
+            )
+        )
+
+        result = validate_config(config)
+
+        self.assertFalse(result.valid)
+        self.assertEqual(
+            config.unsupported_keys,
+            (
+                "BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_ENABLED",
+                "BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LEVELS",
+            ),
+        )
+        self.assertIn(
+            "unsupported live micro-grid config key: BFA_LIVE_MICRO_GRID_EDGE_ANCHOR_ENABLED",
+            result.errors,
+        )
+        self.assertIn(
+            "unsupported live micro-grid config key: BFA_LIVE_MICRO_GRID_ENTRY_LADDER_LEVELS",
+            result.errors,
+        )
+
+    def test_raw_feed_process_knobs_are_not_misclassified_as_live_micro_grid_knobs(self):
+        config = load_config(base_env(BFA_RAW_FEED_AUTO_HOT_TOP_N="80"))
+
+        self.assertEqual(config.unsupported_keys, ())
+        self.assertTrue(validate_config(config).valid)
+
     def test_market_symbols_default_to_small_controlled_allowlist(self):
         config = load_config({})
 

@@ -356,6 +356,13 @@ Cost-aware profit locking raised validation wins to 82.93% but reduced net PnL
 to +44.0709U and made one date negative. It stays disabled because preserving
 runners matters more than manufacturing a higher win rate.
 
+The later capacity audit invalidated one architectural assumption in this
+section: selecting three symbols for an entire hour is not the same as watching
+a broad universe and applying a three-order pending cap. The former prevents
+ranked alternatives from competing after capacity is released. The scanner now
+defaults to prefilter 80 / watch 24, emits schedule schema v2, and exact replay
+ranks the full watch set before enforcing global pending=3 and active=3.
+
 ### 14. Self-collected tick parity and recorder performance
 
 The operator proposed using the continuously collected live raw feed for the
@@ -388,6 +395,39 @@ clipping also avoids irrelevant prior-day I/O. Original gzip depth remains
 available for future queue/L2 work, but this replay used trades only. Live,
 sentinel, and kill-switch safety state remain unchanged; no strategy flag was
 promoted.
+
+### 15. Corrected capacity replay and public near-BBO shadow
+
+The operator challenged the one-fill result. The audit found four cumulative
+causes: Top-3 was incorrectly used as an hourly eligibility cap, legacy median
+entry distance was roughly 65 bps, the live CLI returned after one execution,
+and a synchronous 20-second micro wait made later 12-second signals stale. The
+configured micro pending=3 value is therefore a risk limit, not evidence of
+three-way execution throughput.
+
+The corrected watch-24 / pending-3 / active-3 replay used 400U and three fixed
+three-hour windows on July 5, 8, and 10. Relaxed confirmation produced 42
+trades, 59.52% wins, PF 0.562, and -14.5282U. Strict confirmation produced 18
+trades, 61.11% wins, PF 0.302, and -8.2750U. A research-only conjunctive mode
+that blocks only Stoch+adverse-flow or Stoch+weak-pullback combinations raised
+activity to 51 trades but fell to 54.90% wins, PF 0.526, and -16.5198U. It is a
+rejected research candidate and does not change the default/live `all` mode.
+
+A public-data-only near-BBO lane was then forward-shadowed. It contains no
+signed exchange client or order code, reconnects with bounded backoff, and
+fails closed on stale books/trades. The final 600-second 24-symbol run processed
+1,207,624 messages, completed 200/200 evaluations with 0 misses (p95 0.243ms),
+admitted 49 intents, and recorded 12 queue-proxy fills. All 12 were net losses:
+PF 0, -1.1637U, and 0 profitable fills/hour. This resolves the throughput
+question—72.05 fills/hour were observable—while rejecting the current entry
+heuristic because fill selection was adversely biased. Evidence exits shortened
+some failures but did not create positive expectancy.
+
+The shadow freshness clock now advances with local wall time even if a connected
+WebSocket silently stops delivering messages. Live and sentinel remain stopped;
+the kill switch remains present; manual positions are out of scope. Do not
+implement a three-order live batch until user-data fill events and immediate
+same-process protection are available.
 
 ## Live Server Notes
 

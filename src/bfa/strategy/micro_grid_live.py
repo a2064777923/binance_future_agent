@@ -9,6 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -254,9 +255,7 @@ def build_micro_grid_live_candidates(
             for reason in reasons or ["no_valid_grid_orders"]:
                 rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
             continue
-        ranked = sorted(orders, key=lambda order: _order_rank_key(order, research))
-        selected = ranked[0]
-        score = _order_score(selected, research)
+        selected, score = research.select_live_order(orders)
         quality_scale, quality_reasons = research.micro_trade_quality_scale_from_reason_codes(selected.reason_codes)
         reason_values = research.reason_code_map(selected.reason_codes)
         cost_quality_gate = _micro_cost_quality_gate(
@@ -782,9 +781,11 @@ def _live_profile(research, live_config: MicroGridLiveConfig):
         side_flow_filter_enabled=True,
         side_flow_extreme_taker_ratio=0.64,
         side_flow_min_pullback_quality=0.4,
+        entry_maker_cost=True,
     )
 
 
+@lru_cache(maxsize=1)
 def _micro_grid_research_module():
     root = Path(__file__).resolve().parents[3]
     script = root / "scripts" / "run_micro_grid_research.py"
@@ -815,10 +816,6 @@ def _cache_age_seconds(updated_at_ms: int | None) -> float | None:
     if updated_at_ms is None:
         return None
     return max(0.0, time.time() - updated_at_ms / 1000.0)
-
-
-def _order_rank_key(order, research) -> tuple[float, int]:
-    return (-_order_score(order, research), 0 if order.side == "long" else 1)
 
 
 def _order_score(order, research) -> float:

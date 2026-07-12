@@ -457,7 +457,9 @@ retention contains enough filled setup labels across symbols and days.
 
 ## Micro-Grid Fast Lane
 
-Micro-grid is live and independent from AI:
+The historical reviewed env profile enabled micro-grid independently from AI;
+the current safety freeze at the top of this document overrides these values
+and live remains stopped:
 
 - `BFA_LIVE_MICRO_GRID_ENABLED=true`
 - `BFA_LIVE_MICRO_GRID_FAST_LANE_ENABLED=true`
@@ -473,7 +475,8 @@ Micro-grid is live and independent from AI:
 Micro-grid submits GTX/post-only limits and may expire or be canceled without a
 fill. A recent intent with `entry_order_expired_canceled` or
 `entry_order_unknown_canceled` can still prove that the leg scanned, routed,
-risk-checked, and reached exchange handling.
+risk-checked, and reached exchange handling. “Fast lane” here means an AI-
+bypassing candidate path, not an independently scheduled three-second service.
 
 Micro-grid side selection has been corrected to prefer mean-reversion geometry:
 
@@ -766,20 +769,38 @@ server configuration:
 - target-progress protection can enforce a full modeled-cost floor, but the
   feature remains disabled by default.
 
-The final frozen historical validation selected the leading three symbol-hours
-and used a three-second opportunity cadence, one live-ranked order, strict
-confirmation, real pending/position lifecycle, and the documented 400U sizing.
-It produced 41 trades, 30 wins (73.17%), PF 1.816, and +102.1110U across June
-27/29 and July 2; every date was positive and the largest source supplied
-29.38% of gross positive PnL. This is enough to continue research, not enough
-to resume live.
+The earlier frozen historical validation selected only the leading three
+symbols for each full hour and produced 41 trades, 30 wins (73.17%), PF 1.816,
+and +102.1110U across June 27/29 and July 2. That remains a historical result,
+but it did **not** model a three-slot pending cap correctly: symbols ranked 4+
+were excluded for the whole hour instead of competing whenever a slot became
+free. It must not be used as promotion evidence.
 
-The current two-minute live cadence was tested separately on three frozen days
-and produced only one filled trade. Therefore the historical edge cannot be
-realized by merely changing the current live top-N or pending caps. It would
-require a dedicated, lightweight, shadow-only micro loop with an incremental
-six-hour 1m rank buffer and measured CPU/latency budgets. No such service is
-deployed or enabled.
+The corrected framework watches 24 symbols, ranks all simultaneous attempts,
+and then applies global pending=3 and active-intent=3 lifecycle capacity. Three
+predeclared three-hour windows produced the following aggregate evidence:
+
+| Profile | Trades | Win rate | PF | Net PnL |
+| --- | ---: | ---: | ---: | ---: |
+| Relaxed | 42 | 59.52% | 0.562 | -14.5282U |
+| Strict `all` confirmation | 18 | 61.11% | 0.302 | -8.2750U |
+| Research-only conjunctive confirmation | 51 | 54.90% | 0.526 | -16.5198U |
+
+The one-fill result at a 120-second cadence was therefore not a market-opportunity
+count. It was caused by a combination of hourly Top-3 preselection, deep passive
+entries, one execution per main cycle, and a synchronous 20-second wait that can
+make the remaining 12-second signals stale. The configured three-pending limit
+is a risk ceiling, not proof that the current live path can keep three orders in
+flight.
+
+A separate public-data-only near-BBO shadow proved that a lightweight three-
+second evaluator can meet the performance/frequency budget, but not the profit
+gate. Its independent 600-second evidence-exit run watched 24 symbols, processed
+1,207,624 messages, missed 0 of 200 evaluations, and had 0.243ms p95 evaluation
+latency. It admitted 49 intents and filled 12 (72.05 fills/hour), but all 12 were
+net losses: PF 0, net -1.1637U, and zero profitable fills/hour. The evidence exit
+reduced some loss duration; it did not create entry edge. This shadow has no
+signed client or order path and remains research-only.
 
 The cost-aware profit-lock variant raised validation win rate to 82.93% but cut
 net PnL to +44.0709U and made one date negative. It remains disabled. Live,

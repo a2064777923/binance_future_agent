@@ -119,9 +119,11 @@ limit order, but price did not touch the limit within
 `BFA_LIVE_MICRO_GRID_ORDER_WAIT_SECONDS`.
 
 Current live micro-grid behavior is also documented in
-`docs/current-live-strategy.md`: it is a quant-only fast lane, bypasses AI,
-uses `RANGE` regime routing, and has corrected side selection that favors
-upper-edge shorts and lower-edge longs.
+`docs/current-live-strategy.md`: it is a quant-only candidate path inside the
+main live scan, bypasses AI, uses `RANGE` regime routing, and has corrected side
+selection that favors upper-edge shorts and lower-edge longs. “Fast lane” does
+not mean a deployed three-second service; the main live timer remains the
+slower cycle unless the server state explicitly proves otherwise.
 
 Pending entries now consume the same portfolio slot, direction-notional, and
 margin budgets as filled positions. The available-balance reserve can also keep
@@ -142,6 +144,33 @@ notional, available balance, open-position slots, and margin checks can still
 admit fewer orders. The 40 USDT micro-grid pending-margin cap also applies
 across its three pending slots. Setting an order cap to zero disables that cap
 and is not recommended for the live profile.
+
+The cap does not make the current synchronous path three-way concurrent. The
+main CLI executes at most one selected order per cycle, and a micro LIMIT can
+wait synchronously for its 20-second TTL. A safe live implementation of three
+simultaneous micro entries would need in-process fill events plus immediate
+per-fill protection; the ten-second watchdog alone leaves an unacceptable
+protection gap. No such batch path is enabled.
+
+## Public Near-BBO Shadow
+
+`scripts/run_near_bbo_shadow.py` is a separate public-market-data experiment.
+It subscribes only to `bookTicker` and public trades, has no signed exchange
+client, and cannot place orders. It keeps a broad watch set, evaluates every
+three seconds, and admits at most three shadow intents after ranking.
+
+The July 12 600-second run demonstrated frequency and performance, not edge:
+400U shadow capital, 120U notional per intent, at most 3 active intents, 49
+admitted, 12 queue-proxy fills, 0 wins, PF 0, and -1.1637U after modeled
+fees/slippage. It completed 200/200 evaluations with 0 misses and 0.243ms p95
+ranking latency despite two reconnects. Keep it shadow-only. Its score is an
+uncalibrated heuristic, top-of-book quantity is only a queue proxy, and target
+fills still lack real queue priority.
+
+Freshness uses the later of local wall time and the newest exchange event time,
+so a connected-but-silent stream ages out instead of freezing the stale-data
+clock. Unknown `BFA_LIVE_MICRO_GRID_*` environment names fail config validation;
+obsolete experimental knobs can no longer appear active while being ignored.
 
 ## Pending Entry Lifecycle And Quality
 
