@@ -63,6 +63,32 @@ class _MinuteBar:
             self.taker_buy_quote += quote
         self.trade_count += 1
 
+    def update_summary(
+        self,
+        *,
+        last_price: float,
+        high_price: float,
+        low_price: float,
+        quote_volume: float,
+        taker_buy_quote: float,
+        trade_count: int,
+    ) -> None:
+        """Merge an ordered aggregate without replaying every raw trade.
+
+        The live path still uses :meth:`update` for individual events.  Historical
+        replay can safely use this method because regime features only consume
+        minute OHLC, quote volume, taker-buy volume, and event count.
+        """
+
+        if trade_count <= 0:
+            return
+        self.high_price = max(self.high_price, high_price)
+        self.low_price = min(self.low_price, low_price)
+        self.close_price = last_price
+        self.quote_volume += max(0.0, quote_volume)
+        self.taker_buy_quote += max(0.0, min(taker_buy_quote, quote_volume))
+        self.trade_count += int(trade_count)
+
 
 @dataclass(frozen=True)
 class NearBboRegimeSnapshot:
@@ -109,6 +135,44 @@ class NearBboRegimeTracker:
         minute_ms = event_time_ms // 60_000 * 60_000
         bar = self._bar_for_minute(minute_ms, float(price))
         bar.update(price=float(price), quantity=float(quantity), taker_buy=bool(taker_buy))
+        return True
+
+    def ingest_trade_summary(
+        self,
+        *,
+        event_time_ms: int,
+        first_price: float,
+        last_price: float,
+        high_price: float,
+        low_price: float,
+        quote_volume: float,
+        taker_buy_quote: float,
+        trade_count: int,
+    ) -> bool:
+        """Ingest one ordered second/minute aggregate in O(1).
+
+        This is intentionally a separate API for deterministic historical
+        replay.  It preserves the fields consumed by the regime classifier while
+        avoiding one Python call per aggTrade.  The normal live collector should
+        continue using :meth:`ingest_trade`.
+        """
+
+        if event_time_ms < 0 or min(first_price, last_price, high_price, low_price) <= 0:
+            return False
+        if high_price < max(first_price, last_price) or low_price > min(first_price, last_price):
+            return False
+        if quote_volume <= 0 or taker_buy_quote < 0 or trade_count <= 0:
+            return False
+        minute_ms = event_time_ms // 60_000 * 60_000
+        bar = self._bar_for_minute(minute_ms, float(first_price))
+        bar.update_summary(
+            last_price=float(last_price),
+            high_price=float(high_price),
+            low_price=float(low_price),
+            quote_volume=float(quote_volume),
+            taker_buy_quote=float(taker_buy_quote),
+            trade_count=int(trade_count),
+        )
         return True
 
     def snapshot(self, *, now_ms: int) -> NearBboRegimeSnapshot:

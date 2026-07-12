@@ -186,6 +186,17 @@ liquidity or synthetic `min_executable_notional` values in the live path. If a
 symbol lacks market context, the candidate should carry explicit `missing_*`
 diagnostics or be rejected.
 
+For historical near-BBO research, use
+`scripts/run_near_bbo_replay.py`. The 2026-07-13 frozen five-window run used
+cached public aggTrades, 400U/120U sizing, and a shared three-seat capacity over
+75 unique symbols. Its baseline was 6 proxy fills / 1 win / PF 0.0316 / -0.6093U;
+all synthetic BBO sensitivities were negative. Capacity was never binding
+(maximum two active seats), and the public archives contain no historical BBO,
+L2, or queue position. Treat the report as degraded shadow evidence only; do
+not use it to restart live or to train a production calibration model. The full
+methodology and limitations are in
+`docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md`.
+
 Trend entries now have an additional fresh-confirmation gate in
 `quant_setup_live_action_flow`: when short-window micro momentum and taker flow
 both flip against the proposed trend side, setup rejects with

@@ -241,6 +241,30 @@ Neither command has a signed Binance client. Do not copy this model into the
 live micro-grid path until queue-aware replay, multi-window forward gates, and
 same-process fill/protection design all pass.
 
+### Historical multi-period / multi-symbol replay
+
+The missing historical validation layer is now available as
+`scripts/run_near_bbo_replay.py`. It replays fixed UTC windows from cached
+Binance public `aggTrades`, merges symbols chronologically, feeds the same
+`NearBboUniverse`/`NearBboShadowLedger`, and enforces one shared 400U research
+account with 120U intents and a global pending/open cap of three. Four
+predeclared synthetic-BBO sensitivities run in one tick pass (`baseline`, lower
+imbalance, deeper queue, and wider spread).
+
+The frozen 2026-06-30, 07-03, 07-05, 07-08, and 07-10 three-hour windows covered
+75 unique symbols and 7,000,053 aggTrades. The baseline admitted 172 intents,
+filled 6 queue proxies, won 1, PF 0.0316, and lost 0.6093U. The other three
+scenarios also remained negative (PF 0.0215–0.0901). Maximum simultaneous use
+was two seats and capacity-selection drops were zero in every scenario, so the
+three-seat cap was not the source of the low activity. Mean baseline MFE was
+3.41 bps versus MAE -6.26 bps against roughly 5.2 bps modeled round-trip cost.
+
+This is degraded research evidence: public aggTrades do not contain historical
+BBO/L2, cancellations, or queue position. Synthetic quote/fill results cannot
+be called authentic exchange fills and cannot authorize live or testnet
+execution. Full methodology and per-window tables are in
+`docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md`.
+
 ## Pending Entry Lifecycle And Quality
 
 Deferred limits are registered in the indexed `pending_limit_entries` table.

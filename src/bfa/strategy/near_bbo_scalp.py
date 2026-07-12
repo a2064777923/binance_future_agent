@@ -156,6 +156,27 @@ class _TradeBucket:
             self.taker_sell_quantity += quantity
         self.trade_count += 1
 
+    def update_summary(
+        self,
+        *,
+        last_price: float,
+        high_price: float,
+        low_price: float,
+        taker_buy_quantity: float,
+        taker_sell_quantity: float,
+        trade_count: int,
+    ) -> None:
+        if trade_count <= 0:
+            return
+        # The summary is ordered.  ``first_price`` is only used when this is a
+        # newly-created bucket; an existing bucket already has the earlier open.
+        self.last_price = last_price
+        self.high_price = max(self.high_price, high_price)
+        self.low_price = min(self.low_price, low_price)
+        self.taker_buy_quantity += max(0.0, taker_buy_quantity)
+        self.taker_sell_quantity += max(0.0, taker_sell_quantity)
+        self.trade_count += int(trade_count)
+
 
 @dataclass
 class _SymbolState:
@@ -272,6 +293,75 @@ class NearBboUniverse:
             price=float(price),
             quantity=float(quantity),
             taker_buy=bool(taker_buy),
+        )
+        self._prune(state, latest_event_ms=state.latest_trade_time_ms)
+        return True
+
+    def ingest_trade_summary(
+        self,
+        *,
+        symbol: str,
+        event_time_ms: int,
+        first_price: float,
+        last_price: float,
+        high_price: float,
+        low_price: float,
+        taker_buy_quantity: float,
+        taker_sell_quantity: float,
+        quote_volume: float,
+        taker_buy_quote: float,
+        trade_count: int,
+    ) -> bool:
+        """Ingest an ordered aggregate for fast historical replay.
+
+        Replay only needs one-second OHLC/flow/count updates for the strategy;
+        raw aggTrades remain available to the shadow ledger for queue-proxy
+        fills.  Keeping this path separate preserves the live tick API while
+        removing redundant Python work from multi-variant backtests.
+        """
+
+        normalized = symbol.upper()
+        if (
+            not normalized
+            or event_time_ms < 0
+            or min(first_price, last_price, high_price, low_price) <= 0
+            or high_price < max(first_price, last_price)
+            or low_price > min(first_price, last_price)
+            or taker_buy_quantity < 0
+            or taker_sell_quantity < 0
+            or taker_buy_quantity + taker_sell_quantity <= 0
+            or quote_volume <= 0
+            or taker_buy_quote < 0
+            or trade_count <= 0
+        ):
+            return False
+        state = self._state_for(normalized)
+        second_ms = event_time_ms // 1_000 * 1_000
+        bucket = self._bucket_for_second(state, second_ms, float(first_price))
+        if bucket.open_time_ms == second_ms and bucket.trade_count == 0:
+            bucket.first_price = float(first_price)
+            bucket.last_price = float(first_price)
+            bucket.high_price = float(first_price)
+            bucket.low_price = float(first_price)
+        bucket.update_summary(
+            last_price=float(last_price),
+            high_price=float(high_price),
+            low_price=float(low_price),
+            taker_buy_quantity=float(taker_buy_quantity),
+            taker_sell_quantity=float(taker_sell_quantity),
+            trade_count=int(trade_count),
+        )
+        state.latest_trade_time_ms = max(state.latest_trade_time_ms or event_time_ms, int(event_time_ms))
+        assert state.regime_tracker is not None
+        state.regime_tracker.ingest_trade_summary(
+            event_time_ms=int(event_time_ms),
+            first_price=float(first_price),
+            last_price=float(last_price),
+            high_price=float(high_price),
+            low_price=float(low_price),
+            quote_volume=float(quote_volume),
+            taker_buy_quote=float(taker_buy_quote),
+            trade_count=int(trade_count),
         )
         self._prune(state, latest_event_ms=state.latest_trade_time_ms)
         return True

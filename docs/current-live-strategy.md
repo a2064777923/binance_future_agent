@@ -826,6 +826,18 @@ not a new live breakout strategy. Any future trained artifact is accepted only
 by the public shadow runner and remains subject to fresh multi-window
 profitability gates.
 
+The follow-up historical replay now covers five fixed three-hour UTC windows
+with simultaneous symbol competition (75 unique cached symbols, 7,000,053
+public aggTrades), 400U research capital, 120U per intent, and a shared cap of
+three pending/open intents. The baseline synthetic-BBO sensitivity produced
+172 admissions, 6 proxy fills, 1 win, PF 0.0316, and -0.6093U; lower-imbalance,
+deep-queue, and wide-spread sensitivities were also negative. No candidate was
+dropped by capacity and maximum observed concurrency was two, so increasing
+the three-seat cap is not the current fix. Since aggTrades lack historical
+book state, this is explicitly degraded queue-proxy evidence and remains
+shadow-only. See
+`docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md`.
+
 The cost-aware profit-lock variant raised validation win rate to 82.93% but cut
 net PnL to +44.0709U and made one date negative. It remains disabled. Live,
 sentinel, and the kill-switch safety freeze remain unchanged; no result in this

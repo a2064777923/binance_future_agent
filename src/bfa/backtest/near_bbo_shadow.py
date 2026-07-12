@@ -145,9 +145,22 @@ class NearBboShadowLedger:
     def active_symbols(self) -> set[str]:
         return set(self._intents)
 
+    def has_active_symbol(self, symbol: str) -> bool:
+        """Return whether a symbol has a pending or open shadow intent.
+
+        Replay hot paths use this O(1) lookup before forwarding raw trades.  It
+        avoids allocating the full active-symbol set for every aggTrade.
+        """
+
+        return symbol.upper() in self._intents
+
     @property
     def available_capacity(self) -> int:
         return max(0, self.config.max_active_intents - len(self._intents))
+
+    @property
+    def active_intent_count(self) -> int:
+        return len(self._intents)
 
     @property
     def outcomes(self) -> tuple[NearBboShadowOutcome, ...]:

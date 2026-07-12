@@ -475,6 +475,36 @@ No live, sentinel, exchange order, manual position, or kill-switch state was
 changed. The candidate remains public-data shadow research and cannot authorize
 live deployment.
 
+### 17. Historical multi-period/multi-symbol near-BBO replay
+
+The operator correctly asked whether the article-informed near-BBO improvement
+had been validated across historical periods and simultaneous coins. A new
+research-only replay (`src/bfa/backtest/near_bbo_replay.py` and
+`scripts/run_near_bbo_replay.py`) now streams cached Binance USD-M aggTrades,
+performs a deterministic k-way chronological merge, feeds one-second feature
+summaries into the production-research `NearBboUniverse`, and sends raw rows to
+the queue-proxy ledger only while an intent is active. Four synthetic-BBO
+variants share one tick pass to avoid redundant decompression and feature work.
+
+The frozen UTC windows were 2026-06-30 00:00–03:00, 2026-07-03 06:00–09:00,
+2026-07-05 12:00–15:00, 2026-07-08 18:00–21:00, and 2026-07-10 15:00–18:00.
+They covered 75 unique cached symbols and 7,000,053 aggTrades under 400U
+capital, 120U per intent, a shared pending/open cap of three, 15-minute
+warm-up, three-second evaluation, five-second quote TTL, and 30-second hold.
+
+The baseline admitted 172 intents, filled six queue proxies, won one, PF 0.0316,
+and netted -0.6093U. Lower-imbalance, deep-queue, and wide-spread scenarios
+were also negative (PF 0.0215–0.0901). No scenario dropped a candidate due to
+capacity and maximum observed concurrency was two, so the three-seat cap is not
+the activity bottleneck in these windows. Baseline mean MFE was +3.41 bps and
+MAE -6.26 bps against roughly 5.2 bps modeled cost.
+
+This evidence is explicitly degraded: public aggTrades do not contain
+historical BBO/L2, cancellations, or authenticated queue position. Synthetic
+quotes and queue fills cannot authorize live/testnet execution or production
+calibration. Live, sentinel, manual-position handling, and the kill switch
+remain unchanged and stopped.
+
 ## Live Server Notes
 
 Known deployment shape:
