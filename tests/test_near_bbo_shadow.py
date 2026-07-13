@@ -41,6 +41,141 @@ def proposal(now_ms=10_000):
 
 
 class NearBboShadowLedgerTests(unittest.TestCase):
+    def test_touch_fill_mode_fills_on_first_matching_trade_without_consuming_displayed_queue(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(
+                notional_usdt=120.0,
+                max_active_intents=3,
+                queue_fill_mode="touch",
+            ),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_100,
+            price=item.entry_price,
+            quantity=0.01,
+            taker_buy=False,
+        )
+
+        self.assertEqual(ledger.summary(now_ms=10_100)["filled_count"], 1)
+        self.assertEqual(ledger.summary(now_ms=10_100)["open_position_count"], 1)
+
+    def test_expired_volume_queue_reports_touch_and_consumption_diagnostics(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(notional_usdt=120.0, max_active_intents=3),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_100,
+            price=item.entry_price,
+            quantity=2.0,
+            taker_buy=False,
+        )
+        ledger.advance(item.expires_at_ms)
+
+        summary = ledger.summary(now_ms=item.expires_at_ms)
+        label = ledger.labels[0]
+        self.assertEqual(summary["queue_blocked_expired_count"], 1)
+        self.assertEqual(summary["untouched_expired_count"], 0)
+        self.assertEqual(label.features["shadow_matching_trade_count"], 1)
+        self.assertEqual(label.features["shadow_matching_quantity"], 2.0)
+        self.assertGreater(label.features["shadow_queue_consumed_fraction"], 0.0)
+        self.assertLess(label.features["shadow_queue_consumed_fraction"], 1.0)
+
+    def test_invalid_queue_fill_mode_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "queue_fill_mode"):
+            NearBboShadowConfig(queue_fill_mode="unknown")
+
+    def test_trade_through_mode_requires_queue_at_limit_but_fills_beyond_it(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(
+                notional_usdt=120.0,
+                max_active_intents=3,
+                queue_fill_mode="price_through_or_volume_ahead",
+            ),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_100,
+            price=item.entry_price,
+            quantity=0.01,
+            taker_buy=False,
+        )
+        self.assertEqual(ledger.summary(now_ms=10_100)["filled_count"], 0)
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_200,
+            price=item.entry_price - 0.01,
+            quantity=0.01,
+            taker_buy=False,
+        )
+
+        summary = ledger.summary(now_ms=10_200)
+        self.assertEqual(summary["filled_count"], 1)
+        self.assertEqual(summary["trade_through_fill_count"], 1)
+
+    def test_queue_fraction_scales_fill_only_and_preserves_displayed_queue_audit(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(
+                notional_usdt=120.0,
+                max_active_intents=3,
+                queue_ahead_fraction=0.10,
+            ),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_100,
+            price=item.entry_price,
+            quantity=0.5,
+            taker_buy=False,
+        )
+        self.assertEqual(ledger.summary(now_ms=10_100)["filled_count"], 0)
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_200,
+            price=item.entry_price,
+            quantity=0.6,
+            taker_buy=False,
+        )
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=11_000,
+            price=item.target_price,
+            quantity=1.0,
+            taker_buy=True,
+        )
+
+        label = ledger.labels[0]
+        self.assertEqual(ledger.summary(now_ms=11_000)["filled_count"], 1)
+        self.assertEqual(
+            label.features["shadow_displayed_queue_ahead_quantity"],
+            item.queue_ahead_quantity,
+        )
+        self.assertAlmostEqual(
+            label.features["shadow_applied_queue_ahead_quantity"],
+            item.queue_ahead_quantity * 0.10,
+        )
+        self.assertEqual(label.features["shadow_queue_ahead_fraction"], 0.10)
+
+    def test_invalid_queue_fraction_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "queue_ahead_fraction"):
+            NearBboShadowConfig(queue_ahead_fraction=0.0)
+
     def test_queue_proxy_requires_matching_aggressor_volume_before_fill(self):
         item, strategy_config = proposal()
         ledger = NearBboShadowLedger(
@@ -80,6 +215,76 @@ class NearBboShadowLedgerTests(unittest.TestCase):
         self.assertEqual(summary["wins"], 1)
         self.assertGreater(summary["net_pnl_usdt"], 0.0)
         self.assertEqual(ledger.outcomes[0].exit_reason, "take_profit")
+
+    def test_stop_exit_uses_observed_worse_price_instead_of_ideal_stop_price(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(
+                notional_usdt=120.0,
+                max_active_intents=3,
+                queue_fill_mode="touch",
+            ),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_100,
+            price=item.entry_price,
+            quantity=0.01,
+            taker_buy=False,
+        )
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_200,
+            price=item.stop_price - 0.05,
+            quantity=1.0,
+            taker_buy=False,
+        )
+
+        outcome = ledger.outcomes[0]
+        self.assertEqual(outcome.exit_reason, "stop_loss")
+        ideal_stop_with_slippage = item.stop_price * (
+            1.0 - strategy_config.exit_slippage_bps / 10_000.0
+        )
+        self.assertLess(outcome.exit_price, ideal_stop_with_slippage - 0.04)
+
+    def test_max_hold_exit_uses_trade_that_reaches_hold_deadline(self):
+        item, strategy_config = proposal()
+        ledger = NearBboShadowLedger(
+            NearBboShadowConfig(
+                notional_usdt=120.0,
+                max_active_intents=3,
+                max_hold_ms=1_000,
+                queue_fill_mode="touch",
+                evidence_exit_enabled=False,
+            ),
+            strategy_config=strategy_config,
+        )
+        ledger.admit([item])
+        ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=10_100,
+            price=item.entry_price,
+            quantity=0.01,
+            taker_buy=False,
+        )
+        deadline_price = item.entry_price + 0.05
+        outcomes = ledger.on_trade(
+            symbol="TESTUSDT",
+            event_time_ms=11_100,
+            price=deadline_price,
+            quantity=1.0,
+            taker_buy=True,
+        )
+
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0].exit_reason, "max_hold_exit")
+        expected_exit = deadline_price * (
+            1.0 - strategy_config.exit_slippage_bps / 10_000.0
+        )
+        self.assertAlmostEqual(outcomes[0].exit_price, expected_exit)
+        self.assertGreater(outcomes[0].mfe_bps, 0.0)
 
     def test_unfilled_quote_expires_and_releases_capacity(self):
         item, strategy_config = proposal()

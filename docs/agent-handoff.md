@@ -187,14 +187,19 @@ symbol lacks market context, the candidate should carry explicit `missing_*`
 diagnostics or be rejected.
 
 For historical near-BBO research, use
-`scripts/run_near_bbo_replay.py`. The 2026-07-13 frozen five-window run used
-cached public aggTrades, 400U/120U sizing, and a shared three-seat capacity over
-75 unique symbols. Its baseline was 6 proxy fills / 1 win / PF 0.0316 / -0.6093U;
-all synthetic BBO sensitivities were negative. Capacity was never binding
-(maximum two active seats), and the public archives contain no historical BBO,
-L2, or queue position. Treat the report as degraded shadow evidence only; do
-not use it to restart live or to train a production calibration model. The full
-methodology and limitations are in
+`scripts/run_near_bbo_replay.py`. Never cite the old 6/172 proxy-fill figure as
+exchange fill rate: it used a five-second TTL and full synthetic queue without
+cancellations. The corrected 20-second fill envelope found 117 correct-side
+touches from 176 displayed-queue admissions. After causal tick-size inference
+and price-time-priority handling, strict trade-through-or-full-queue filled 90,
+won 22, PF 0.1568, and lost 7.1111U; the touch upper bound filled 116, won 32,
+PF 0.1939, and lost 7.2958U. Prior-only market-ranked windows were also
+negative (59 touch fills / 16 wins / PF 0.2340). A matched self-collected
+individual-tick run added one winning XPINUSDT signal versus public aggregates
+but remained negative at 2 wins / 8 losses and PF 0.3247.
+Both sources lack historical BBO/L2 and authenticated queue position. Treat the
+report as degraded shadow evidence only; do not restart live or train a
+production calibration model from it. The full methodology and limitations are in
 `docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md`.
 
 Trend entries now have an additional fresh-confirmation gate in

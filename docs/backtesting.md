@@ -187,6 +187,47 @@ The replay still lacks L2 queue position. Aggressor-side crossing is necessary
 for a passive fill but does not prove our order would have reached the front of
 the exchange queue.
 
+## Audit The Near-BBO Fill Envelope
+
+Use the offline near-BBO runner when diagnosing passive fill rate separately
+from signal expectancy. Its corrected defaults match the 20-second quote
+contract and report four fill assumptions instead of one synthetic queue truth:
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path .\src).Path
+python scripts\run_near_bbo_replay.py `
+  --cache-dir runtime\aggTrades-cache `
+  --output runtime\research\near-bbo-fill-envelope.json `
+  --quiet
+```
+
+The output separates admissions, correct-side price/aggressor touches,
+trade-through fills, queue-blocked expiries, fills, and outcomes. The replay
+causally infers a price grid from already-completed one-second trade prices,
+rounds passive bids down/asks up, fills strict price-through immediately, and
+requires same-price aggressor volume to consume 1%, 10%, or all displayed
+queue. Touch remains the optimistic upper bound. Fill assumptions affect only
+the shadow ledger; they no longer change the strategy queue score before
+admission. Later admissions may still diverge because a filled position
+occupies shared capacity while an expired quote does not.
+
+For a prior-only market-ranked replay, pass one or more schedule-v2 scan files:
+
+```powershell
+python scripts\run_near_bbo_replay.py `
+  --cache-dir runtime\aggTrades-cache `
+  --output runtime\research\near-bbo-market-ranked.json `
+  --eligibility-schedule runtime\micro-grid-market-scan.json `
+  --quiet
+```
+
+Use `--data-source-kind self_collected_individual_ticks` only with a cache of
+compatible extracted individual-trade archives. The source label does not add
+historical BBO/L2 or queue state. A touch result is an optimistic upper bound,
+not an authenticated exchange fill. See
+`docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md` for the
+corrected July 2026 results and superseded 6/172 interpretation.
+
 ## Promotion Rules
 
 Do not raise live limits just because one run is green. Treat a variant as a

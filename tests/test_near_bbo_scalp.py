@@ -112,6 +112,20 @@ class NearBboScalpTests(unittest.TestCase):
         self.assertEqual(diagnostics["selected_count"], 3)
         self.assertEqual(diagnostics["pending_capacity"], 3)
 
+    def test_ranking_evaluates_only_current_schedule_eligible_symbols(self):
+        universe = NearBboUniverse(self.config)
+        self.favorable_long_universe(symbol="AAAUSDT", universe=universe)
+        self.favorable_long_universe(symbol="BBBUSDT", universe=universe)
+
+        proposals, diagnostics = universe.rank_opportunities(
+            now_ms=10_000,
+            eligible_symbols={"BBBUSDT"},
+        )
+
+        self.assertEqual([proposal.symbol for proposal in proposals], ["BBBUSDT"])
+        self.assertEqual(diagnostics["evaluated_symbol_count"], 1)
+        self.assertEqual(diagnostics["rejection_counts"]["symbol_not_currently_eligible"], 1)
+
     def test_trade_hot_path_aggregates_same_second_in_one_bounded_bucket(self):
         universe = NearBboUniverse(self.config)
         for index in range(1_000):

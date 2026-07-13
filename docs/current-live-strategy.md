@@ -826,16 +826,21 @@ not a new live breakout strategy. Any future trained artifact is accepted only
 by the public shadow runner and remains subject to fresh multi-window
 profitability gates.
 
-The follow-up historical replay now covers five fixed three-hour UTC windows
-with simultaneous symbol competition (75 unique cached symbols, 7,000,053
-public aggTrades), 400U research capital, 120U per intent, and a shared cap of
-three pending/open intents. The baseline synthetic-BBO sensitivity produced
-172 admissions, 6 proxy fills, 1 win, PF 0.0316, and -0.6093U; lower-imbalance,
-deep-queue, and wide-spread sensitivities were also negative. No candidate was
-dropped by capacity and maximum observed concurrency was two, so increasing
-the three-seat cap is not the current fix. Since aggTrades lack historical
-book state, this is explicitly degraded queue-proxy evidence and remains
-shadow-only. See
+The original historical 6/172 proxy-fill figure is superseded: it combined a
+five-second TTL with a full synthetic queue and no cancellation model. The
+corrected five-window replay uses the intended 20-second TTL, aggressor-side
+quote anchoring, and a touch/1%/10%/displayed-queue fill envelope under 400U
+research capital, 120U intents, and a shared three-seat cap. It observed 117
+correct-side touches from 176 displayed-queue admissions. With causal tick-size
+inference and price-time priority, strict trade-through-or-full-queue produced
+90 fills / 22 wins / PF 0.1568 / -7.1111U; the touch upper bound produced 116
+fills / 32 wins / PF 0.1939 / -7.2958U. Prior-only market-ranked windows
+produced 59 touch fills / 16 wins / PF 0.2340 / -3.1460U. A matched
+self-collected individual-tick run found one additional winning XPINUSDT signal
+versus public aggregates, but still had only 2 wins / 8 losses, PF 0.3247, and
+-0.5933U. The fill undercount was real; negative expectancy remains
+independently real. Trade-only replay still lacks historical book and queue
+state, so this remains shadow-only. See
 `docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md`.
 
 The cost-aware profit-lock variant raised validation win rate to 82.93% but cut

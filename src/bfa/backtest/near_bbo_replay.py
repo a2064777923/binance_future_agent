@@ -1,12 +1,11 @@
-"""Historical multi-symbol replay for the public near-BBO scalp lane.
+"""Historical multi-symbol replay for the offline near-BBO scalp lane.
 
-The repository only has public ``aggTrades`` archives for the selected
-historical dates.  They contain trade order, price, quantity, and aggressor
-side, but not historical bookTicker/L2/queue state.  This module therefore
-uses a deliberately explicit synthetic-BBO sensitivity layer.  It is useful
-for testing throughput, cross-symbol capacity, feature timing, and directional
-robustness; its queue fills must not be presented as authenticated exchange
-fills.
+Compatible public ``aggTrades`` or self-collected individual-tick archives
+contain trade order, price, quantity, and aggressor side, but not historical
+bookTicker/L2/queue state.  This module therefore uses a deliberately explicit
+synthetic-BBO sensitivity layer.  It is useful for testing throughput,
+cross-symbol capacity, feature timing, and directional robustness; its queue
+fills must not be presented as authenticated exchange fills.
 
 The replay is intentionally one-pass:
 
@@ -23,12 +22,16 @@ trade ordering where it matters for the fill/exit proxy.
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from bisect import bisect_right
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
 import csv
 import hashlib
 import heapq
 import io
+import json
+import math
 from pathlib import Path
 import re
 import time
@@ -62,6 +65,59 @@ class ReplayWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplayEligibilityWindow:
+    start_ms: int
+    end_ms: int
+    symbols: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if self.start_ms < 0 or self.end_ms <= self.start_ms:
+            raise ValueError("eligibility window end must be after start")
+        normalized = frozenset(symbol.upper() for symbol in self.symbols if symbol.strip())
+        if not normalized:
+            raise ValueError("eligibility window must contain symbols")
+        object.__setattr__(self, "symbols", normalized)
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayEligibilitySchedule:
+    windows: tuple[ReplayEligibilityWindow, ...]
+    sources: tuple[str, ...] = ()
+    _start_times: tuple[int, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        ordered = tuple(sorted(self.windows, key=lambda item: (item.start_ms, item.end_ms)))
+        for previous, current in zip(ordered, ordered[1:]):
+            if current.start_ms < previous.end_ms:
+                raise ValueError("eligibility schedule windows must not overlap")
+        object.__setattr__(self, "windows", ordered)
+        object.__setattr__(self, "_start_times", tuple(item.start_ms for item in ordered))
+
+    def symbols_at(self, now_ms: int) -> frozenset[str]:
+        index = bisect_right(self._start_times, now_ms) - 1
+        if index < 0:
+            return frozenset()
+        window = self.windows[index]
+        return window.symbols if now_ms < window.end_ms else frozenset()
+
+    def symbols_for_range(self, start_ms: int, end_ms: int) -> frozenset[str]:
+        symbols: set[str] = set()
+        for window in self.windows:
+            if window.end_ms <= start_ms:
+                continue
+            if window.start_ms >= end_ms:
+                break
+            symbols.update(window.symbols)
+        return frozenset(symbols)
+
+    def window_count_for_range(self, start_ms: int, end_ms: int) -> int:
+        return sum(
+            window.end_ms > start_ms and window.start_ms < end_ms
+            for window in self.windows
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SyntheticBboVariant:
     """One predeclared synthetic BBO assumption set.
 
@@ -76,6 +132,9 @@ class SyntheticBboVariant:
     imbalance_scale: float = 0.75
     max_abs_imbalance: float = 0.85
     flow_window_ms: int = 1_000
+    quote_anchor_mode: str = "trade_midpoint"
+    queue_fill_mode: str = "volume_ahead"
+    queue_ahead_fraction: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -86,6 +145,19 @@ class SyntheticBboVariant:
             raise ValueError("synthetic imbalance controls are invalid")
         if self.flow_window_ms <= 0:
             raise ValueError("synthetic flow window must be positive")
+        if self.quote_anchor_mode not in {"trade_midpoint", "aggressor_side"}:
+            raise ValueError("quote_anchor_mode must be trade_midpoint or aggressor_side")
+        if self.queue_fill_mode not in {
+            "volume_ahead",
+            "price_through_or_volume_ahead",
+            "touch",
+        }:
+            raise ValueError(
+                "queue_fill_mode must be volume_ahead, "
+                "price_through_or_volume_ahead, or touch"
+            )
+        if not 0.0 < self.queue_ahead_fraction <= 1.0:
+            raise ValueError("queue_ahead_fraction must be in (0, 1]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,9 +167,9 @@ class NearBboReplayConfig:
     max_active_intents: int = 3
     warmup_ms: int = 15 * 60_000
     evaluation_interval_ms: int = 3_000
-    quote_ttl_ms: int = 5_000
+    quote_ttl_ms: int = 20_000
     max_hold_ms: int = 30_000
-    post_window_ms: int = 35_000
+    post_window_ms: int = 55_000
     setup_mode: str = "article_v2"
     min_top_notional_usdt: float = 1_000.0
     max_signal_volatility_bps: float = 6.0
@@ -108,6 +180,7 @@ class NearBboReplayConfig:
     regime_slow_ema_span: int = 15
     scout_confirmation_ms: int = 2_000
     scout_ttl_ms: int = 8_000
+    data_source_kind: str = "public_aggtrades"
 
     def __post_init__(self) -> None:
         if self.account_capital_usdt <= 0 or self.notional_usdt <= 0:
@@ -118,10 +191,16 @@ class NearBboReplayConfig:
             raise ValueError("capacity notional exceeds replay capital")
         if self.warmup_ms < 0 or self.evaluation_interval_ms <= 0:
             raise ValueError("replay timing controls are invalid")
-        if self.post_window_ms < self.max_hold_ms:
-            raise ValueError("post_window_ms must cover max_hold_ms")
+        if self.post_window_ms < self.quote_ttl_ms + self.max_hold_ms:
+            raise ValueError("post_window_ms must cover quote_ttl_ms plus max_hold_ms")
         if self.setup_mode not in {"legacy", "article_v2"}:
             raise ValueError("replay setup_mode must be legacy or article_v2")
+        if self.data_source_kind not in {
+            "public_aggtrades",
+            "self_collected_individual_ticks",
+            "other_aggtrade_compatible",
+        }:
+            raise ValueError("unsupported replay data_source_kind")
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +216,7 @@ class NearBboReplayTick:
 class _TradeAccumulator:
     second_ms: int
     last_event_time_ms: int
+    last_taker_buy: bool
     first_price: float
     last_price: float
     high_price: float
@@ -153,6 +233,7 @@ class _TradeAccumulator:
         return cls(
             second_ms=tick.event_time_ms // 1_000 * 1_000,
             last_event_time_ms=tick.event_time_ms,
+            last_taker_buy=tick.taker_buy,
             first_price=tick.price,
             last_price=tick.price,
             high_price=tick.price,
@@ -168,6 +249,7 @@ class _TradeAccumulator:
         # The merged source is chronological, so first/last are stable without
         # an extra sort or per-row timestamp list.
         self.last_event_time_ms = tick.event_time_ms
+        self.last_taker_buy = tick.taker_buy
         self.last_price = tick.price
         self.high_price = max(self.high_price, tick.price)
         self.low_price = min(self.low_price, tick.price)
@@ -180,6 +262,41 @@ class _TradeAccumulator:
         if tick.taker_buy:
             self.taker_buy_quote += quote
         self.trade_count += 1
+
+
+@dataclass(slots=True)
+class _CausalPriceGrid:
+    """Infer a conservative price grid from already-observed second closes."""
+
+    decimals: int = 0
+    last_units: int | None = None
+    gcd_units: int = 0
+    observed_change_count: int = 0
+
+    def ingest(self, price: float) -> None:
+        if price <= 0 or not math.isfinite(price):
+            return
+        value = Decimal(str(price))
+        decimals = max(0, -value.as_tuple().exponent)
+        units = int(value.scaleb(decimals)) if decimals else int(value)
+        if decimals > self.decimals:
+            factor = 10 ** (decimals - self.decimals)
+            if self.last_units is not None:
+                self.last_units *= factor
+            self.gcd_units *= factor
+            self.decimals = decimals
+        elif decimals < self.decimals:
+            units *= 10 ** (self.decimals - decimals)
+        if self.last_units is not None and units != self.last_units:
+            self.gcd_units = math.gcd(self.gcd_units, abs(units - self.last_units))
+            self.observed_change_count += 1
+        self.last_units = units
+
+    @property
+    def tick_size(self) -> float | None:
+        if self.observed_change_count < 2 or self.gcd_units <= 0:
+            return None
+        return float(Decimal(self.gcd_units).scaleb(-self.decimals))
 
 
 @dataclass
@@ -231,6 +348,7 @@ class _RollingFlow:
 class _SyntheticBookState:
     last_price: float
     last_trade_time_ms: int
+    last_taker_buy: bool
     flow: _RollingFlow
 
 
@@ -269,6 +387,43 @@ def ms_to_iso(value: int | None) -> str | None:
     if value is None:
         return None
     return datetime.fromtimestamp(value / 1_000, tz=UTC).isoformat().replace("+00:00", "Z")
+
+
+def load_eligibility_schedule(paths: Sequence[str | Path]) -> ReplayEligibilitySchedule:
+    """Load prior-only market opportunity schedule-v2 JSON files."""
+
+    windows: list[ReplayEligibilityWindow] = []
+    sources: list[str] = []
+    for raw_path in paths:
+        path = Path(raw_path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        schedule = payload.get("eligibility_schedule") if isinstance(payload, Mapping) else None
+        if not isinstance(schedule, Mapping):
+            raise ValueError(f"eligibility schedule missing in {path}")
+        if str(schedule.get("schema") or "") != "bfa_micro_grid_eligibility_schedule_v2":
+            raise ValueError(f"unsupported eligibility schedule schema in {path}")
+        raw_windows = schedule.get("windows")
+        if not isinstance(raw_windows, list):
+            raise ValueError(f"eligibility schedule windows missing in {path}")
+        for item in raw_windows:
+            if not isinstance(item, Mapping):
+                raise ValueError(f"malformed eligibility schedule window in {path}")
+            raw_symbols = item.get("symbols")
+            if not isinstance(raw_symbols, list):
+                raise ValueError(f"eligibility symbols missing in {path}")
+            start_ms = utc_ms(str(item.get("signal_start") or ""))
+            # Schedule-v2 stores an inclusive ``...59.999`` end. Convert it to
+            # the exclusive boundary used by replay evaluation.
+            end_ms = utc_ms(str(item.get("signal_end") or "")) + 1
+            windows.append(
+                ReplayEligibilityWindow(
+                    start_ms=start_ms,
+                    end_ms=end_ms,
+                    symbols=frozenset(str(symbol) for symbol in raw_symbols),
+                )
+            )
+        sources.append(str(path))
+    return ReplayEligibilitySchedule(tuple(windows), tuple(sources))
 
 
 def default_windows() -> tuple[ReplayWindow, ...]:
@@ -330,7 +485,7 @@ def select_symbols_for_window(
     *,
     limit: int = 24,
     warmup_ms: int = 15 * 60_000,
-    post_window_ms: int = 35_000,
+    post_window_ms: int = 55_000,
 ) -> tuple[str, ...]:
     """Select a deterministic, outcome-blind multi-coin watch set."""
 
@@ -449,6 +604,8 @@ def synthetic_bbo(
     *,
     flow_signed: float,
     spec: SyntheticBboVariant,
+    last_taker_buy: bool | None = None,
+    tick_size: float | None = None,
 ) -> tuple[float, float, float, float]:
     """Build a reproducible BBO from trade price and rolling flow only."""
 
@@ -457,10 +614,33 @@ def synthetic_bbo(
         -spec.max_abs_imbalance,
         min(spec.max_abs_imbalance, bounded_flow * spec.imbalance_scale),
     )
-    half_spread = price * spec.spread_bps / 20_000.0
-    bid = price - half_spread
-    ask = price + half_spread
-    total_quantity = spec.combined_top_notional_usdt / price
+    half_fraction = spec.spread_bps / 20_000.0
+    if spec.quote_anchor_mode == "aggressor_side":
+        if last_taker_buy is None:
+            raise ValueError("last_taker_buy is required for aggressor_side anchoring")
+        if last_taker_buy:
+            ask = price
+            mid_price = ask / (1.0 + half_fraction)
+            bid = mid_price * (1.0 - half_fraction)
+        else:
+            bid = price
+            mid_price = bid / (1.0 - half_fraction)
+            ask = mid_price * (1.0 + half_fraction)
+    else:
+        mid_price = price
+        half_spread = mid_price * half_fraction
+        bid = mid_price - half_spread
+        ask = mid_price + half_spread
+    if tick_size is not None and math.isfinite(tick_size) and tick_size > 0:
+        tick = float(tick_size)
+        bid = math.floor(bid / tick + 1e-9) * tick
+        ask = math.ceil(ask / tick - 1e-9) * tick
+        if ask <= bid:
+            ask = bid + tick
+        bid = round(bid, 12)
+        ask = round(ask, 12)
+        mid_price = (bid + ask) / 2.0
+    total_quantity = spec.combined_top_notional_usdt / mid_price
     bid_quantity = total_quantity * (1.0 + imbalance) / 2.0
     ask_quantity = total_quantity * (1.0 - imbalance) / 2.0
     return bid, bid_quantity, ask, ask_quantity
@@ -475,7 +655,52 @@ def default_variants() -> tuple[SyntheticBboVariant, ...]:
     )
 
 
-def _build_strategy_config(config: NearBboReplayConfig) -> NearBboConfig:
+def fill_audit_variants() -> tuple[SyntheticBboVariant, ...]:
+    """Return an explicit fill envelope instead of one fake queue truth.
+
+    All scenarios use aggressor-side anchoring because a taker buy normally
+    prints at ask and a taker sell at bid.  ``touch_upper_bound`` is optimistic;
+    the volume-ahead scenarios progressively apply more displayed depth without
+    pretending cancellations are known.
+    """
+
+    common = {
+        "spread_bps": 2.5,
+        "combined_top_notional_usdt": 15_000.0,
+        "imbalance_scale": 0.75,
+        "quote_anchor_mode": "aggressor_side",
+    }
+    return (
+        SyntheticBboVariant(
+            name="touch_upper_bound",
+            queue_fill_mode="touch",
+            queue_ahead_fraction=1.0,
+            **common,
+        ),
+        SyntheticBboVariant(
+            name="queue_1pct",
+            queue_fill_mode="price_through_or_volume_ahead",
+            queue_ahead_fraction=0.01,
+            **common,
+        ),
+        SyntheticBboVariant(
+            name="queue_10pct",
+            queue_fill_mode="price_through_or_volume_ahead",
+            queue_ahead_fraction=0.10,
+            **common,
+        ),
+        SyntheticBboVariant(
+            name="displayed_queue",
+            queue_fill_mode="price_through_or_volume_ahead",
+            queue_ahead_fraction=1.0,
+            **common,
+        ),
+    )
+
+
+def _build_strategy_config(
+    config: NearBboReplayConfig,
+) -> NearBboConfig:
     return NearBboConfig(
         quote_ttl_ms=config.quote_ttl_ms,
         max_pending_orders=config.max_active_intents,
@@ -485,6 +710,9 @@ def _build_strategy_config(config: NearBboReplayConfig) -> NearBboConfig:
         min_fill_probability=0.0,
         min_win_probability=0.0,
         min_conditional_net_ev_bps=-1_000.0,
+        # Fill-envelope variants must rank exactly the same proposals. Queue
+        # sensitivity is applied only by the shadow ledger after admission.
+        queue_ahead_fraction=1.0,
         setup_mode=config.setup_mode,
         regime_config=NearBboRegimeConfig(
             history_minutes=config.regime_history_minutes,
@@ -506,6 +734,8 @@ def _build_runtime(spec: SyntheticBboVariant, config: NearBboReplayConfig) -> _V
         notional_usdt=config.notional_usdt,
         max_active_intents=config.max_active_intents,
         max_hold_ms=config.max_hold_ms,
+        queue_fill_mode=spec.queue_fill_mode,
+        queue_ahead_fraction=spec.queue_ahead_fraction,
     )
     return _VariantRuntime(
         spec=spec,
@@ -617,6 +847,21 @@ def _runtime_report(
             "admitted_count": int(summary["admitted_count"]),
             "capacity_rejected_count": int(summary["capacity_rejected_count"]),
             "expired_count": int(summary["expired_count"]),
+            "untouched_expired_count": int(summary["untouched_expired_count"]),
+            "wrong_aggressor_only_expired_count": int(
+                summary["wrong_aggressor_only_expired_count"]
+            ),
+            "queue_blocked_expired_count": int(summary["queue_blocked_expired_count"]),
+            "trade_through_fill_count": int(summary["trade_through_fill_count"]),
+            "matching_touch_count": int(summary["filled_count"])
+            + int(summary["queue_blocked_expired_count"]),
+            "matching_touch_rate": (
+                int(summary["filled_count"])
+                + int(summary["queue_blocked_expired_count"])
+            )
+            / int(summary["admitted_count"])
+            if int(summary["admitted_count"])
+            else 0.0,
             "filled_count": int(summary["filled_count"]),
             "closed_count": int(summary["closed_count"]),
             "label_count": int(summary["label_count"]),
@@ -650,11 +895,12 @@ def _runtime_report(
             "evaluation_ms_max": max(runtime.evaluation_ms) if runtime.evaluation_ms else None,
         },
         "outcomes": [item.to_dict() for item in outcomes],
+        "labels": [item.to_dict() for item in runtime.ledger.labels],
         "limitations": [
-            "BBO, displayed depth, cancellations, and queue priority are synthetic; aggTrades do not contain historical bookTicker/L2.",
+            "BBO, displayed depth, cancellations, and queue priority are synthetic; trade-only sources do not contain historical bookTicker/L2.",
             "Synthetic imbalance is derived from rolling aggressor flow and is tested only as a sensitivity assumption.",
-            "Queue-proxy fills require opposing aggressor quantity and are not authenticated exchange fills.",
-            "This public-data replay is research-only and cannot authorize testnet or live execution.",
+            "Queue-proxy fills require a correct-side touch, trade-through, or opposing aggressor quantity and are not authenticated exchange fills.",
+            "This offline replay is research-only and cannot authorize testnet or live execution.",
         ],
     }
 
@@ -666,6 +912,7 @@ def replay_window(
     symbols: Sequence[str],
     variants: Sequence[SyntheticBboVariant] | None = None,
     config: NearBboReplayConfig | None = None,
+    eligibility_schedule: ReplayEligibilitySchedule | None = None,
 ) -> dict[str, Any]:
     """Replay one fixed window with all variants in one chronological pass."""
 
@@ -681,6 +928,7 @@ def replay_window(
         symbol: _RollingFlow(window_ms=max(spec.flow_window_ms for spec in selected_variants))
         for symbol in normalized_symbols
     }
+    price_grids = {symbol: _CausalPriceGrid() for symbol in normalized_symbols}
     books: dict[str, _SyntheticBookState] = {}
     accumulators: dict[str, _TradeAccumulator] = {}
     dirty_symbols: set[str] = set()
@@ -688,6 +936,7 @@ def replay_window(
     end_replay_ms = window.end_ms + replay_config.post_window_ms
     next_evaluation_ms = window.start_ms
     evaluation_count = 0
+    schedule_empty_evaluation_count = 0
     raw_tick_count = 0
     warmup_tick_count = 0
     signal_tick_count = 0
@@ -698,6 +947,7 @@ def replay_window(
         if accumulator is None:
             return
         flow = flows[symbol]
+        price_grids[symbol].ingest(accumulator.last_price)
         flow.add_summary(
             accumulator.second_ms,
             accumulator.taker_buy_quantity,
@@ -706,6 +956,7 @@ def replay_window(
         books[symbol] = _SyntheticBookState(
             last_price=accumulator.last_price,
             last_trade_time_ms=accumulator.last_event_time_ms,
+            last_taker_buy=accumulator.last_taker_buy,
             flow=flow,
         )
         for runtime in runtimes:
@@ -740,6 +991,8 @@ def replay_window(
                     state.last_price,
                     flow_signed=flow_value,
                     spec=runtime.spec,
+                    last_taker_buy=state.last_taker_buy,
+                    tick_size=price_grids[symbol].tick_size,
                 )
                 runtime.universe.ingest_book_ticker(
                     symbol=symbol,
@@ -752,15 +1005,23 @@ def replay_window(
         dirty_symbols.clear()
 
     def evaluate(now_ms: int) -> None:
-        nonlocal evaluation_count
+        nonlocal evaluation_count, schedule_empty_evaluation_count
         flush_all()
         update_books()
+        eligible_symbols = (
+            eligibility_schedule.symbols_at(now_ms)
+            if eligibility_schedule is not None
+            else None
+        )
+        if eligible_symbols is not None and not eligible_symbols:
+            schedule_empty_evaluation_count += 1
         for runtime in runtimes:
             started = time.perf_counter()
             runtime.ledger.advance(now_ms)
             proposals, diagnostics = runtime.universe.rank_opportunities(
                 now_ms=now_ms,
                 excluded_symbols=runtime.ledger.active_symbols,
+                eligible_symbols=eligible_symbols,
                 capacity=runtime.ledger.available_capacity,
             )
             admitted = runtime.ledger.admit(proposals)
@@ -868,10 +1129,19 @@ def replay_window(
         "replay_config": asdict(replay_config),
         "symbols": list(normalized_symbols),
         "data_quality": {
-            "source": "Binance USD-M public daily aggTrades ZIP archives",
+            "source_kind": replay_config.data_source_kind,
+            "source": (
+                "self-collected Binance USD-M individual trade ticks in aggTrades-compatible ZIPs"
+                if replay_config.data_source_kind == "self_collected_individual_ticks"
+                else "Binance USD-M public daily aggTrades ZIP archives"
+            ),
             "historical_book_state": "unavailable",
             "bbo_mode": "synthetic_trade_flow_sensitivity",
-            "fill_mode": "queue_proxy_opposing_aggressor_quantity",
+            "fill_mode": "variant_specific_touch_or_price_through_plus_queue_proxy",
+            "price_grid_mode": "causal_gcd_from_completed_one_second_trade_prices",
+            "final_inferred_tick_sizes": {
+                symbol: price_grids[symbol].tick_size for symbol in normalized_symbols
+            },
             "warning": "Results are degraded research evidence, not authentic historical order-book or queue fills.",
         },
         "raw_tick_count": raw_tick_count,
@@ -879,6 +1149,16 @@ def replay_window(
         "signal_tick_count": signal_tick_count,
         "post_window_tick_count": post_window_tick_count,
         "evaluation_count": evaluation_count,
+        "eligibility_schedule": {
+            "enabled": eligibility_schedule is not None,
+            "sources": list(eligibility_schedule.sources) if eligibility_schedule else [],
+            "overlapping_window_count": (
+                eligibility_schedule.window_count_for_range(window.start_ms, window.end_ms)
+                if eligibility_schedule
+                else 0
+            ),
+            "empty_evaluation_count": schedule_empty_evaluation_count,
+        },
         "variants": {report["synthetic_bbo"]["name"]: report for report in reports},
     }
 
@@ -920,6 +1200,22 @@ def aggregate_variant_reports(window_reports: Sequence[Mapping[str, Any]]) -> di
                 "admitted_count": sum(int((r.get("metrics") or {}).get("admitted_count") or 0) for r in reports),
                 "capacity_rejected_count": sum(int((r.get("metrics") or {}).get("capacity_rejected_count") or 0) for r in reports),
                 "expired_count": sum(int((r.get("metrics") or {}).get("expired_count") or 0) for r in reports),
+                "untouched_expired_count": sum(
+                    int((r.get("metrics") or {}).get("untouched_expired_count") or 0)
+                    for r in reports
+                ),
+                "wrong_aggressor_only_expired_count": sum(
+                    int((r.get("metrics") or {}).get("wrong_aggressor_only_expired_count") or 0)
+                    for r in reports
+                ),
+                "queue_blocked_expired_count": sum(
+                    int((r.get("metrics") or {}).get("queue_blocked_expired_count") or 0)
+                    for r in reports
+                ),
+                "trade_through_fill_count": sum(
+                    int((r.get("metrics") or {}).get("trade_through_fill_count") or 0)
+                    for r in reports
+                ),
                 "filled_count": sum(int((r.get("metrics") or {}).get("filled_count") or 0) for r in reports),
                 "closed_count": sum(int((r.get("metrics") or {}).get("closed_count") or 0) for r in reports),
                 "wins": sum(int((r.get("metrics") or {}).get("wins") or 0) for r in reports),
@@ -943,6 +1239,14 @@ def aggregate_variant_reports(window_reports: Sequence[Mapping[str, Any]]) -> di
             }
         )
         gross_fills = metrics["filled_count"]
+        metrics["matching_touch_count"] = (
+            metrics["filled_count"] + metrics["queue_blocked_expired_count"]
+        )
+        metrics["matching_touch_rate"] = (
+            metrics["matching_touch_count"] / metrics["admitted_count"]
+            if metrics["admitted_count"]
+            else 0.0
+        )
         metrics["win_rate"] = metrics["wins"] / metrics["closed_count"] if metrics["closed_count"] else 0.0
         signal_hours = sum(float((r.get("window") or {}).get("duration_hours") or 0.0) for r in reports)
         metrics["fills_per_signal_hour"] = gross_fills / signal_hours if signal_hours > 0 else 0.0
@@ -964,16 +1268,20 @@ def aggregate_variant_reports(window_reports: Sequence[Mapping[str, Any]]) -> di
 __all__ = [
     "NearBboReplayConfig",
     "NearBboReplayTick",
+    "ReplayEligibilitySchedule",
+    "ReplayEligibilityWindow",
     "ReplayWindow",
     "SyntheticBboVariant",
     "aggregate_variant_reports",
     "archive_path",
     "available_symbols",
     "default_variants",
+    "fill_audit_variants",
     "default_windows",
     "days_for_range",
     "iter_merged_ticks",
     "iter_symbol_ticks",
+    "load_eligibility_schedule",
     "ms_to_iso",
     "replay_window",
     "select_symbols_for_window",

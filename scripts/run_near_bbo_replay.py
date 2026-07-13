@@ -1,5 +1,6 @@
-"""Run the fixed multi-date, multi-symbol public near-BBO replay.
+"""Run the fixed multi-date, multi-symbol offline near-BBO replay.
 
+Inputs may be public aggTrades or compatible self-collected individual ticks.
 This entry point is research-only.  It never imports an exchange client and
 never places, cancels, or inspects live orders.
 """
@@ -28,6 +29,8 @@ from bfa.backtest.near_bbo_replay import (  # noqa: E402
     default_variants,
     default_windows,
     days_for_range,
+    fill_audit_variants,
+    load_eligibility_schedule,
     replay_window,
     select_symbols_for_window,
     utc_ms,
@@ -49,7 +52,7 @@ def _parse_symbols(raw: str) -> tuple[str, ...]:
 
 
 def _selected_variants(raw: str) -> tuple[Any, ...]:
-    variants = {item.name: item for item in default_variants()}
+    variants = {item.name: item for item in (*default_variants(), *fill_audit_variants())}
     names = tuple(dict.fromkeys(item.strip() for item in raw.split(",") if item.strip()))
     if not names:
         raise ValueError("at least one variant is required")
@@ -69,16 +72,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="NAME,START_ISO,END_ISO; repeat to override the five predeclared windows",
     )
     parser.add_argument("--symbols", help="same comma-separated symbols for every window (optional)")
+    parser.add_argument(
+        "--eligibility-schedule",
+        action="append",
+        help="market-scan JSON containing a prior-only schedule-v2; repeat for more dates",
+    )
+    parser.add_argument("--require-complete-schedule", action="store_true")
     parser.add_argument("--symbols-per-window", type=int, default=24)
-    parser.add_argument("--variants", default="baseline,low_imbalance,deep_queue,wide_spread")
+    parser.add_argument(
+        "--variants",
+        default="touch_upper_bound,queue_1pct,queue_10pct,displayed_queue",
+    )
+    parser.add_argument(
+        "--data-source-kind",
+        choices=[
+            "public_aggtrades",
+            "self_collected_individual_ticks",
+            "other_aggtrade_compatible",
+        ],
+        default="public_aggtrades",
+    )
     parser.add_argument("--account-capital-usdt", type=float, default=400.0)
     parser.add_argument("--notional-usdt", type=float, default=120.0)
     parser.add_argument("--pending-capacity", type=int, default=3)
     parser.add_argument("--warmup-minutes", type=int, default=15)
     parser.add_argument("--evaluation-interval-ms", type=int, default=3_000)
-    parser.add_argument("--quote-ttl-ms", type=int, default=5_000)
+    parser.add_argument("--quote-ttl-ms", type=int, default=20_000)
     parser.add_argument("--max-hold-ms", type=int, default=30_000)
-    parser.add_argument("--post-window-ms", type=int, default=35_000)
+    parser.add_argument("--post-window-ms", type=int, default=55_000)
     parser.add_argument("--setup-mode", choices=["legacy", "article_v2"], default="article_v2")
     parser.add_argument("--quiet", action="store_true")
     return parser
@@ -103,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
             max_hold_ms=int(args.max_hold_ms),
             post_window_ms=int(args.post_window_ms),
             setup_mode=str(args.setup_mode),
+            data_source_kind=str(args.data_source_kind),
+        )
+        eligibility_schedule = (
+            load_eligibility_schedule(args.eligibility_schedule)
+            if args.eligibility_schedule
+            else None
         )
     except (TypeError, ValueError) as exc:
         parser.error(str(exc))
@@ -111,18 +138,32 @@ def main(argv: list[str] | None = None) -> int:
     window_reports: list[dict[str, Any]] = []
     selections: list[dict[str, Any]] = []
     for index, window in enumerate(windows, start=1):
-        if fixed_symbols is not None:
-            symbols = fixed_symbols
-            required_days = days_for_range(
-                window.start_ms - replay_config.warmup_ms,
-                window.end_ms + replay_config.post_window_ms,
+        required_days = days_for_range(
+            window.start_ms - replay_config.warmup_ms,
+            window.end_ms + replay_config.post_window_ms,
+        )
+        candidates = set(available_symbols(cache_dir, required_days))
+        missing: list[str] = []
+        if eligibility_schedule is not None:
+            scheduled = set(
+                eligibility_schedule.symbols_for_range(window.start_ms, window.end_ms)
             )
-            candidates = available_symbols(cache_dir, required_days)
+            requested = scheduled.intersection(fixed_symbols) if fixed_symbols else scheduled
+            missing = sorted(requested.difference(candidates))
+            if missing and args.require_complete_schedule:
+                raise SystemExit(
+                    f"window {window.name} lacks {len(missing)} scheduled cached archives"
+                )
+            symbols = tuple(sorted(requested.intersection(candidates)))
+            selection_mode = "prior_only_market_opportunity_schedule"
+        elif fixed_symbols is not None:
+            symbols = fixed_symbols
             missing = sorted(set(symbols).difference(candidates))
             if missing:
                 raise SystemExit(
                     f"window {window.name} lacks cached archives for symbols: {', '.join(missing)}"
                 )
+            selection_mode = "explicit"
         else:
             symbols = select_symbols_for_window(
                 cache_dir,
@@ -131,13 +172,15 @@ def main(argv: list[str] | None = None) -> int:
                 warmup_ms=replay_config.warmup_ms,
                 post_window_ms=replay_config.post_window_ms,
             )
+            selection_mode = "stable_sha256_intersection"
         if not symbols:
             raise SystemExit(f"window {window.name} has no common cached symbols")
         selections.append(
             {
                 "name": window.name,
                 "symbols": list(symbols),
-                "selection": "explicit" if fixed_symbols is not None else "stable_sha256_intersection",
+                "selection": selection_mode,
+                "missing_scheduled_symbols": missing,
             }
         )
         if not args.quiet:
@@ -149,22 +192,27 @@ def main(argv: list[str] | None = None) -> int:
                 symbols=symbols,
                 variants=variants,
                 config=replay_config,
+                eligibility_schedule=eligibility_schedule,
             )
         )
 
     payload = {
         "schema": "bfa_near_bbo_historical_multiwindow_v1",
-        "execution_mode": "public_data_research_only_no_orders",
+        "execution_mode": "offline_trade_data_research_only_no_orders",
         "replay_config": asdict(replay_config),
         "variants": [asdict(item) for item in variants],
         "predeclared_windows": [
             {"name": item.name, "start": item.start_ms, "end": item.end_ms} for item in windows
         ],
         "symbol_selections": selections,
+        "eligibility_schedule": {
+            "enabled": eligibility_schedule is not None,
+            "sources": list(eligibility_schedule.sources) if eligibility_schedule else [],
+        },
         "windows": window_reports,
         "aggregate": aggregate_variant_reports(window_reports),
         "limitations": [
-            "Cached public aggTrades provide no historical BBO/L2/queue state.",
+            "Trade-only replay sources provide no historical BBO/L2/queue state.",
             "Synthetic BBO variants are sensitivity scenarios, not exchange reconstruction.",
             "Results are not a live promotion decision; live and sentinel remain separate and stopped.",
         ],

@@ -243,26 +243,36 @@ same-process fill/protection design all pass.
 
 ### Historical multi-period / multi-symbol replay
 
-The missing historical validation layer is now available as
-`scripts/run_near_bbo_replay.py`. It replays fixed UTC windows from cached
-Binance public `aggTrades`, merges symbols chronologically, feeds the same
+The historical validation layer is available as
+`scripts/run_near_bbo_replay.py`. It replays public `aggTrades` or compatible
+self-collected individual ticks, merges symbols chronologically, feeds the same
 `NearBboUniverse`/`NearBboShadowLedger`, and enforces one shared 400U research
-account with 120U intents and a global pending/open cap of three. Four
-predeclared synthetic-BBO sensitivities run in one tick pass (`baseline`, lower
-imbalance, deeper queue, and wider spread).
+account with 120U intents and a global pending/open cap of three.
 
-The frozen 2026-06-30, 07-03, 07-05, 07-08, and 07-10 three-hour windows covered
-75 unique symbols and 7,000,053 aggTrades. The baseline admitted 172 intents,
-filled 6 queue proxies, won 1, PF 0.0316, and lost 0.6093U. The other three
-scenarios also remained negative (PF 0.0215–0.0901). Maximum simultaneous use
-was two seats and capacity-selection drops were zero in every scenario, so the
-three-seat cap was not the source of the low activity. Mean baseline MFE was
-3.41 bps versus MAE -6.26 bps against roughly 5.2 bps modeled round-trip cost.
+Do not cite the original 6/172 result as exchange fill rate. That run used a
+five-second TTL and required the full synthetic displayed queue to trade
+without cancellations. The corrected default is the intended 20-second TTL,
+aggressor-side synthetic quote anchoring, and four explicit fill scenarios:
+touch upper bound, 1% queue, 10% queue, and full displayed queue. Every label
+records correct-side touches and queue-consumption diagnostics.
 
-This is degraded research evidence: public aggTrades do not contain historical
-BBO/L2, cancellations, or queue position. Synthetic quote/fill results cannot
-be called authentic exchange fills and cannot authorize live or testnet
-execution. Full methodology and per-window tables are in
+Across five frozen three-hour windows, the corrected replay observed 117
+correct-side touches from 176 displayed-queue admissions. After causal tick-size
+inference and price-time-priority handling, strict trade-through-or-full-queue
+gave 90 fills / 22 wins / PF 0.1568 / -7.1111U; the optimistic touch upper
+bound gave 116 fills / 32 wins / PF 0.1939 / -7.2958U. All five windows were
+negative. A prior-only market-ranked three-window run gave 59 touch fills / 16
+wins / PF 0.2340 / -3.1460U, again with every window negative.
+
+On the same six-symbol, three-hour window, public aggregates produced 9 touch
+fills / 1 win while self-collected individual ticks produced 10 / 2. The extra
+XPINUSDT proposal won, so exact event granularity matters, but the
+individual-tick result still had PF 0.3247 and -0.5933U.
+
+This is degraded research evidence: trade-only sources do not contain
+historical BBO/L2, cancellations, or queue position. Synthetic quote/fill
+results cannot be called authentic exchange fills and cannot authorize live or
+testnet execution. Full methodology and per-window tables are in
 `docs/research/near-bbo-article-v2-multiperiod-replay-2026-07-13.md`.
 
 ## Pending Entry Lifecycle And Quality

@@ -371,17 +371,32 @@ class NearBboUniverse:
         *,
         now_ms: int,
         excluded_symbols: set[str] | None = None,
+        eligible_symbols: set[str] | frozenset[str] | None = None,
         capacity: int | None = None,
     ) -> tuple[list[NearBboProposal], dict[str, Any]]:
         excluded = {symbol.upper() for symbol in (excluded_symbols or set())}
+        eligible = (
+            {symbol.upper() for symbol in eligible_symbols}
+            if eligible_symbols is not None
+            else None
+        )
         pending_capacity = max(0, min(self.config.max_pending_orders, capacity if capacity is not None else self.config.max_pending_orders))
         rejection_counts: dict[str, int] = {}
         ranked: list[tuple[float, str, NearBboProposal]] = []
+        evaluated_symbol_count = 0
         for symbol, state in self._states.items():
-            self._prune(state, latest_event_ms=now_ms)
+            if eligible is not None and symbol not in eligible:
+                _increment(rejection_counts, "symbol_not_currently_eligible")
+                continue
             if symbol in excluded:
                 _increment(rejection_counts, "symbol_already_active")
                 continue
+            # Trade ingestion already bounds every active history.  Only the
+            # symbols that can actually compete need the additional wall-time
+            # prune here; this avoids redundant deque scans for market-scan
+            # symbols outside the current eligibility hour and active intents.
+            self._prune(state, latest_event_ms=now_ms)
+            evaluated_symbol_count += 1
             proposal, rejection = self._proposal(state, now_ms=now_ms)
             if proposal is None:
                 _increment(rejection_counts, rejection or "no_opportunity")
@@ -392,7 +407,7 @@ class NearBboUniverse:
         selected.sort(key=lambda item: (-item.fill_weighted_ev_bps, item.symbol))
         return selected, {
             "watch_symbol_count": len(self._states),
-            "evaluated_symbol_count": len(self._states) - len(excluded.intersection(self._states)),
+            "evaluated_symbol_count": evaluated_symbol_count,
             "eligible_count": len(ranked),
             "selected_count": len(selected),
             "pending_capacity": pending_capacity,

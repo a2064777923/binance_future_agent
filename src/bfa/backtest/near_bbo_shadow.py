@@ -16,6 +16,8 @@ class NearBboShadowConfig:
     max_active_intents: int = 3
     max_hold_ms: int = 30_000
     max_recorded_outcomes: int = 5_000
+    queue_fill_mode: str = "volume_ahead"
+    queue_ahead_fraction: float = 1.0
     evidence_exit_enabled: bool = True
     confirmation_ms: int = 3_000
     confirmation_min_net_progress_bps: float = 0.0
@@ -36,11 +38,27 @@ class NearBboShadowConfig:
             raise ValueError("shadow capacity, hold time, and retention must be positive")
         if not 0.0 <= self.profit_lock_giveback_fraction <= 1.0:
             raise ValueError("profit_lock_giveback_fraction must be between zero and one")
+        if self.queue_fill_mode not in {
+            "volume_ahead",
+            "price_through_or_volume_ahead",
+            "touch",
+        }:
+            raise ValueError(
+                "queue_fill_mode must be volume_ahead, "
+                "price_through_or_volume_ahead, or touch"
+            )
+        if not 0.0 < self.queue_ahead_fraction <= 1.0:
+            raise ValueError("queue_ahead_fraction must be in (0, 1]")
 
     @property
     def calibration_features(self) -> dict[str, float]:
         return {
             "shadow_max_hold_seconds": self.max_hold_ms / 1_000.0,
+            "shadow_queue_fill_mode_touch": 1.0 if self.queue_fill_mode == "touch" else 0.0,
+            "shadow_queue_fill_mode_trade_through": (
+                1.0 if self.queue_fill_mode == "price_through_or_volume_ahead" else 0.0
+            ),
+            "shadow_queue_ahead_fraction": self.queue_ahead_fraction,
             "shadow_evidence_exit_enabled": 1.0 if self.evidence_exit_enabled else 0.0,
             "shadow_confirmation_seconds": self.confirmation_ms / 1_000.0,
             "shadow_confirmation_min_net_progress_bps": self.confirmation_min_net_progress_bps,
@@ -110,7 +128,13 @@ class NearBboShadowLabel:
 @dataclass
 class _ShadowIntent:
     proposal: NearBboProposal
+    applied_queue_ahead_quantity: float
     queue_remaining_quantity: float
+    price_touch_count: int = 0
+    matching_trade_count: int = 0
+    matching_quantity: float = 0.0
+    matching_notional_usdt: float = 0.0
+    trade_through_count: int = 0
     status: str = "pending"
     fill_time_ms: int | None = None
     best_price: float | None = None
@@ -133,6 +157,10 @@ class NearBboShadowLedger:
         self._admitted_count = 0
         self._capacity_rejected_count = 0
         self._expired_count = 0
+        self._untouched_expired_count = 0
+        self._wrong_aggressor_only_expired_count = 0
+        self._queue_blocked_expired_count = 0
+        self._trade_through_fill_count = 0
         self._filled_count = 0
         self._closed_count = 0
         self._wins = 0
@@ -185,9 +213,16 @@ class NearBboShadowLedger:
                 self._capacity_rejected_count += 1
                 continue
             self._touch_time(proposal.generated_at_ms)
+            applied_queue = (
+                0.0
+                if self.config.queue_fill_mode == "touch"
+                else max(proposal.queue_ahead_quantity, 0.0)
+                * self.config.queue_ahead_fraction
+            )
             self._intents[proposal.symbol] = _ShadowIntent(
                 proposal=proposal,
-                queue_remaining_quantity=max(proposal.queue_ahead_quantity, 0.0),
+                applied_queue_ahead_quantity=applied_queue,
+                queue_remaining_quantity=applied_queue,
             )
             self._admitted_count += 1
             admitted.append(proposal)
@@ -205,42 +240,68 @@ class NearBboShadowLedger:
         normalized = symbol.upper()
         if event_time_ms < 0 or price <= 0 or quantity <= 0:
             return ()
-        closed = list(self.advance(event_time_ms))
         self._touch_time(event_time_ms)
         self._latest_trade_price[normalized] = float(price)
+        prior_intent = self._intents.get(normalized)
+        excursion_updated = prior_intent is not None and prior_intent.status == "open"
+        if excursion_updated:
+            self._update_excursion(prior_intent, price)
+        # Let a max-hold exit use the trade that first reaches the deadline.
+        # Pending TTL still expires before this event can fill because advance
+        # resolves the intent before it is looked up below.
+        closed = list(self.advance(event_time_ms))
         intent = self._intents.get(normalized)
         if intent is None:
             return tuple(closed)
 
         proposal = intent.proposal
         if intent.status == "pending":
-            matching_sell = proposal.side == "long" and not taker_buy and price <= proposal.entry_price
-            matching_buy = proposal.side == "short" and taker_buy and price >= proposal.entry_price
+            price_touch = (
+                price <= proposal.entry_price
+                if proposal.side == "long"
+                else price >= proposal.entry_price
+            )
+            if price_touch:
+                intent.price_touch_count += 1
+            matching_sell = proposal.side == "long" and not taker_buy and price_touch
+            matching_buy = proposal.side == "short" and taker_buy and price_touch
             if matching_sell or matching_buy:
-                intent.queue_remaining_quantity -= quantity
-                if intent.queue_remaining_quantity <= 0:
+                intent.matching_trade_count += 1
+                intent.matching_quantity += quantity
+                intent.matching_notional_usdt += price * quantity
+                trade_through = (
+                    price < proposal.entry_price
+                    if proposal.side == "long"
+                    else price > proposal.entry_price
+                )
+                if trade_through:
+                    intent.trade_through_count += 1
+                fill_on_through = (
+                    self.config.queue_fill_mode == "price_through_or_volume_ahead"
+                    and trade_through
+                )
+                if not fill_on_through:
+                    intent.queue_remaining_quantity -= quantity
+                if fill_on_through or intent.queue_remaining_quantity <= 0:
                     intent.status = "open"
                     intent.fill_time_ms = event_time_ms
                     intent.best_price = proposal.entry_price
                     intent.worst_price = proposal.entry_price
                     self._filled_count += 1
+                    if fill_on_through:
+                        self._trade_through_fill_count += 1
             if intent.status == "pending":
                 return tuple(closed)
 
-        intent.best_price = (
-            max(intent.best_price or price, price)
-            if proposal.side == "long"
-            else min(intent.best_price or price, price)
-        )
-        intent.worst_price = (
-            min(intent.worst_price or price, price)
-            if proposal.side == "long"
-            else max(intent.worst_price or price, price)
-        )
+        if not excursion_updated:
+            self._update_excursion(intent, price)
         hit_target = price >= proposal.target_price if proposal.side == "long" else price <= proposal.target_price
         hit_stop = price <= proposal.stop_price if proposal.side == "long" else price >= proposal.stop_price
         if hit_stop:
-            closed.append(self._close(normalized, event_time_ms, proposal.stop_price, "stop_loss"))
+            # A stop is market-like protection. If the observed trade has
+            # already crossed the trigger, using the ideal trigger price would
+            # erase the gap that the replay actually observed.
+            closed.append(self._close(normalized, event_time_ms, price, "stop_loss"))
         elif hit_target:
             closed.append(self._close(normalized, event_time_ms, proposal.target_price, "take_profit"))
         elif self.config.evidence_exit_enabled and intent.fill_time_ms is not None:
@@ -270,6 +331,12 @@ class NearBboShadowLedger:
         closed: list[NearBboShadowOutcome] = []
         for symbol, intent in list(self._intents.items()):
             if intent.status == "pending" and now_ms >= intent.proposal.expires_at_ms:
+                if intent.matching_trade_count > 0:
+                    self._queue_blocked_expired_count += 1
+                elif intent.price_touch_count > 0:
+                    self._wrong_aggressor_only_expired_count += 1
+                else:
+                    self._untouched_expired_count += 1
                 self._append_label(
                     NearBboShadowLabel(
                         proposal_id=intent.proposal.proposal_id,
@@ -295,6 +362,7 @@ class NearBboShadowLedger:
                         features={
                             **intent.proposal.features,
                             **self.config.calibration_features,
+                            **self._intent_fill_features(intent),
                         },
                     )
                 )
@@ -329,6 +397,10 @@ class NearBboShadowLedger:
             "admitted_count": self._admitted_count,
             "capacity_rejected_count": self._capacity_rejected_count,
             "expired_count": self._expired_count,
+            "untouched_expired_count": self._untouched_expired_count,
+            "wrong_aggressor_only_expired_count": self._wrong_aggressor_only_expired_count,
+            "queue_blocked_expired_count": self._queue_blocked_expired_count,
+            "trade_through_fill_count": self._trade_through_fill_count,
             "filled_count": self._filled_count,
             "closed_count": self._closed_count,
             "label_count": len(self._labels),
@@ -422,6 +494,7 @@ class NearBboShadowLedger:
                 features={
                     **proposal.features,
                     **self.config.calibration_features,
+                    **self._intent_fill_features(intent),
                 },
             )
         )
@@ -434,6 +507,42 @@ class NearBboShadowLedger:
             self._losses += 1
             self._gross_loss_usdt += -net
         return outcome
+
+    def _intent_fill_features(self, intent: _ShadowIntent) -> dict[str, float | int | str]:
+        applied_queue = intent.applied_queue_ahead_quantity
+        if applied_queue > 0:
+            consumed_fraction = min(1.0, intent.matching_quantity / applied_queue)
+        else:
+            consumed_fraction = 1.0 if intent.matching_trade_count > 0 else 0.0
+        return {
+            "shadow_queue_fill_mode": self.config.queue_fill_mode,
+            "shadow_displayed_queue_ahead_quantity": max(
+                intent.proposal.queue_ahead_quantity,
+                0.0,
+            ),
+            "shadow_applied_queue_ahead_quantity": applied_queue,
+            "shadow_queue_remaining_quantity": max(intent.queue_remaining_quantity, 0.0),
+            "shadow_queue_consumed_fraction": consumed_fraction,
+            "shadow_price_touch_count": intent.price_touch_count,
+            "shadow_matching_trade_count": intent.matching_trade_count,
+            "shadow_matching_quantity": intent.matching_quantity,
+            "shadow_matching_notional_usdt": intent.matching_notional_usdt,
+            "shadow_trade_through_count": intent.trade_through_count,
+        }
+
+    @staticmethod
+    def _update_excursion(intent: _ShadowIntent, price: float) -> None:
+        proposal = intent.proposal
+        intent.best_price = (
+            max(intent.best_price or price, price)
+            if proposal.side == "long"
+            else min(intent.best_price or price, price)
+        )
+        intent.worst_price = (
+            min(intent.worst_price or price, price)
+            if proposal.side == "long"
+            else max(intent.worst_price or price, price)
+        )
 
     def _append_label(self, label: NearBboShadowLabel) -> None:
         self._labels.append(label)

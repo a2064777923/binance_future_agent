@@ -486,24 +486,40 @@ summaries into the production-research `NearBboUniverse`, and sends raw rows to
 the queue-proxy ledger only while an intent is active. Four synthetic-BBO
 variants share one tick pass to avoid redundant decompression and feature work.
 
-The frozen UTC windows were 2026-06-30 00:00–03:00, 2026-07-03 06:00–09:00,
-2026-07-05 12:00–15:00, 2026-07-08 18:00–21:00, and 2026-07-10 15:00–18:00.
-They covered 75 unique cached symbols and 7,000,053 aggTrades under 400U
-capital, 120U per intent, a shared pending/open cap of three, 15-minute
-warm-up, three-second evaluation, five-second quote TTL, and 30-second hold.
+The first report used a five-second TTL and treated the full synthetic displayed
+queue, without cancellations, as the only fill truth. Its 6/172 proxy-fill
+figure is superseded and must not be cited as exchange fill rate. The corrected
+contract uses the intended 20-second TTL, aggressor-side quote anchoring, a
+55-second resolution tail, and a fill envelope: first correct-side touch, 1%
+queue, 10% queue, and full displayed queue. Queue fraction is applied only in
+the shadow ledger so it cannot change strategy scoring before admission.
 
-The baseline admitted 172 intents, filled six queue proxies, won one, PF 0.0316,
-and netted -0.6093U. Lower-imbalance, deep-queue, and wide-spread scenarios
-were also negative (PF 0.0215–0.0901). No scenario dropped a candidate due to
-capacity and maximum observed concurrency was two, so the three-seat cap is not
-the activity bottleneck in these windows. Baseline mean MFE was +3.41 bps and
-MAE -6.26 bps against roughly 5.2 bps modeled cost.
+Across the five frozen three-hour windows, 176 admissions had 117 correct-side
+touches in the displayed-queue lane. After causally inferring tick size and
+honoring price-time priority, strict trade-through-or-full-queue produced 90
+fills / 22 wins / PF 0.1568 / -7.1111U; 10% queue produced 98 / 27 / PF
+0.1549 / -7.4154U; 1% queue produced 108 / 31 / PF 0.1849 / -7.2158U. The
+optimistic touch scenario produced 116 fills / 32 wins / PF 0.1939 / -7.2958U.
+All five windows remained negative. This separates a real fill-model undercount
+from an independently negative entry/exit expectancy.
 
-This evidence is explicitly degraded: public aggTrades do not contain
-historical BBO/L2, cancellations, or authenticated queue position. Synthetic
-quotes and queue fills cannot authorize live/testnet execution or production
-calibration. Live, sentinel, manual-position handling, and the kill switch
-remain unchanged and stopped.
+Prior-only hourly market ranking over July 5, 8, and 10 also stayed negative:
+the touch scenario produced 59 fills / 16 wins / PF 0.2340 / -3.1460U, with
+all three dates negative. Cache coverage was partial (24/32, 28/33, and 24/37
+scheduled-union symbols), and missing symbols are recorded rather than silently
+replaced.
+
+A matched six-symbol 2026-07-10 comparison used the continuously collected
+individual ticks. Public aggTrades produced 9 touch fills / 1 win / PF 0.1420;
+individual ticks produced 10 / 2 / PF 0.3247. The additional XPINUSDT signal
+won, proving event granularity matters, but the exact-tick run still lost
+0.5933U and did not establish positive expectancy.
+
+This evidence is explicitly degraded: neither public aggTrades nor the
+extracted individual ticks contain historical BBO/L2, cancellations, or
+authenticated queue position. Synthetic quotes and fill envelopes cannot
+authorize live/testnet execution or production calibration. Live, sentinel,
+manual-position handling, and the kill switch remain unchanged and stopped.
 
 ## Live Server Notes
 
